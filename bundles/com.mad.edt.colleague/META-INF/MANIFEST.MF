@@ -1,0 +1,12 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: %pluginName
+Bundle-Vendor: %providerName
+Bundle-Version: 1.0.0.qualifier
+Bundle-SymbolicName: com.mad.edt.colleague;singleton:=true
+Bundle-ActivationPolicy: lazy
+Bundle-Localization: plugin
+Bundle-RequiredExecutionEnvironment: JavaSE-17
+Automatic-Module-Name: com.mad.edt.colleague
+Require-Bundle: org.eclipse.core.runtime;bundle-version="[3.30.0,4.0.0)"
+Export-Package: com.mad.edt.colleague;x-internal:=false

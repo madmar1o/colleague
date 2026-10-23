@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?pde version="3.8"?>
+<target name="colleague-edt-2026.1" sequenceNumber="1">
+<locations>
+
+<!-- 1C:EDT 2026.1 (Ruby) official p2 repository.
+     The full EDT feature group embeds the matching Eclipse platform
+     (Eclipse 4.30 / org.eclipse.osgi 3.18.600), Xtext 2.33, gson, guava, guice,
+     EMF and GMF runtime, so a single repo covers all plugin dependencies. -->
+<location includeAllPlatforms="false" includeConfigurePhase="true" includeMode="slicer" includeSource="false" type="InstallableUnit">
+<repository id="dt_repository" location="https://edt.1c.ru/downloads/releases/ruby/2026.1/"/>
+<unit id="com._1c.g5.v8.dt.feature.feature.group" version="0.0.0"/>
+<unit id="com._1c.g5.v8.dt.thirdparty.feature.group" version="0.0.0"/>
+<unit id="com._1c.g5.v8.dt.platform.support_v8.3.27.feature.feature.group" version="0.0.0"/>
+<unit id="com._1c.g5.v8.dt.rcp" version="0.0.0"/>
+</location>
+
+</locations>
+</target>

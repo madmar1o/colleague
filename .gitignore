@@ -1,0 +1,25 @@
+# Tycho/Maven
+target/
+bin/
+.workout/
+
+# Eclipse / EDT workspace artifacts
+.metadata/
+.project
+.classpath
+.plugin.xml.editor
+.settings/
+*.launch
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# IDEs other than Eclipse
+.idea/
+.vscode/
+*.iml
+
+# Local secrets / env
+*.env
+local.properties

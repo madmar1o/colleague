@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+  xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.mad.edt</groupId>
+    <artifactId>bom</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <relativePath>./bom/pom.xml</relativePath>
+  </parent>
+
+  <groupId>com.mad.edt</groupId>
+  <artifactId>parent</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>Colleague for 1C:EDT</name>
+  <description>AI-copilot plugin for 1C:EDT, modeled on 1C:Workmate (skills/tools architecture)</description>
+
+  <modules>
+    <module>targets</module>
+    <module>bundles</module>
+    <module>features</module>
+    <module>repositories</module>
+  </modules>
+
+</project>
