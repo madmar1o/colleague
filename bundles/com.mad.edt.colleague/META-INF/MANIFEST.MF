@@ -9,4 +9,6 @@ Bundle-Localization: plugin
 Bundle-RequiredExecutionEnvironment: JavaSE-17
 Automatic-Module-Name: com.mad.edt.colleague
 Require-Bundle: org.eclipse.core.runtime;bundle-version="[3.30.0,4.0.0)"
-Export-Package: com.mad.edt.colleague;x-internal:=false
+Import-Package: com.google.gson;version="[2.8.0,3.0.0)"
+Export-Package: com.mad.edt.colleague;x-internal:=false,
+ com.mad.edt.colleague.llm;x-internal:=false
