@@ -14,3 +14,12 @@
 - Транспорт `java.net.http.HttpClient`, JSON — Gson из target platform.
 - Дымовой хук активации в ui-бандле, сетевой smoke по VM-свойству
   `colleague.llm.smoke`.
+
+### M3 — agent loop + skills (core)
+- `com.mad.edt.colleague.agent`: `AgentLoop` (ReAct: model -> tool call ->
+  результат -> повтор), `IToolExecutor`, `AgentAnswer`.
+- `com.mad.edt.colleague.skills`: `SkillLoader` (каталог `<name>/SKILL.md` с
+  YAML-шапкой + optional `tools.json`), `SkillDefinition`, `SkillRegistry`
+  (рендер секции системного промпта).
+- LLM-слой расширен нативным tool calling: `ToolSpec`, `ToolCall`,
+  tool-роль сообщений, `ChatResult.getToolCalls`.
