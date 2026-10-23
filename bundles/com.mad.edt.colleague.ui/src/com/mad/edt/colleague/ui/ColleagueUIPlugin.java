@@ -1,5 +1,8 @@
 package com.mad.edt.colleague.ui;
 
+import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Platform;
+import org.eclipse.core.runtime.Status;
 import org.eclipse.ui.plugin.AbstractUIPlugin;
 import org.osgi.framework.BundleContext;
 
@@ -17,6 +20,8 @@ public class ColleagueUIPlugin extends AbstractUIPlugin {
     public void start(final BundleContext context) throws Exception {
         super.start(context);
         instance = this;
+        Platform.getLog(context.getBundle()).log(new Status(IStatus.INFO, PLUGIN_ID, 0,
+            "Colleague bundle started", null));
     }
 
     @Override
