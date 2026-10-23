@@ -15,5 +15,18 @@
 <unit id="com._1c.g5.v8.dt.rcp" version="0.0.0"/>
 </location>
 
+<!-- Companion slices from the matching Eclipse simultaneous release (4.30 /
+     December 2023 — the platform embedded in EDT 2026.1). The dt slice pulls
+     org.eclipse.jdt.core (requires org.eclipse.jdt.core.compiler.batch, not
+     present in the dt repo) and an old commons.jxpath that requires
+     javax.servlet.jsp; the slices below provide the JDT batch fragment and a
+     dependency-free Orbit jxpath so the p2 solver can close the plan. -->
+<location includeAllPlatforms="false" includeConfigurePhase="true" includeMode="slicer" includeSource="false" type="InstallableUnit">
+<repository id="eclipse_repository" location="https://download.eclipse.org/releases/2023-12/"/>
+<unit id="org.apache.commons.jxpath" version="0.0.0"/>
+<unit id="org.eclipse.jdt.core.compiler.batch" version="0.0.0"/>
+</location>
+
+
 </locations>
 </target>
