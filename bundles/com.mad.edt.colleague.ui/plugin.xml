@@ -4,5 +4,77 @@
    <extension point="org.eclipse.ui.startup">
       <startup class="com.mad.edt.colleague.ui.ColleagueStartup"/>
    </extension>
-</plugin>
 
+   <extension point="org.eclipse.ui.views">
+      <category
+         id="com.mad.edt.colleague.ui.category"
+         name="Colleague"/>
+      <view
+         class="com.mad.edt.colleague.ui.view.ColleagueView"
+         category="com.mad.edt.colleague.ui.category"
+         id="com.mad.edt.colleague.ui.view.ColleagueView"
+         inject="true"
+         name="Colleague Assistant"
+         allowMultiple="false"/>
+   </extension>
+
+   <extension point="org.eclipse.ui.perspectiveExtensions">
+      <perspectiveExtension targetID="*">
+         <view
+            id="com.mad.edt.colleague.ui.view.ColleagueView"
+            relative="org.eclipse.ui.views.PropertySheet"
+            relationship="stack"
+            visible="true"/>
+      </perspectiveExtension>
+   </extension>
+
+   <extension point="org.eclipse.ui.commands">
+      <command
+         id="com.mad.edt.colleague.ui.commands.openView"
+         name="Open Colleague Assistant"
+         description="Opens the Colleague assistant view"/>
+      <command
+         id="com.mad.edt.colleague.ui.commands.askView"
+         name="Ask Colleague"
+         description="Send the current editor selection to the Colleague assistant"/>
+      <command
+         id="com.mad.edt.colleague.ui.commands.insertAnswer"
+         name="Insert Answer Into Editor"
+         description="Insert the assistant answer at the editor cursor"/>
+   </extension>
+
+   <extension point="org.eclipse.ui.handlers">
+      <handler
+         commandId="com.mad.edt.colleague.ui.commands.openView"
+         class="com.mad.edt.colleague.ui.handlers.OpenViewHandler"/>
+      <handler
+         commandId="com.mad.edt.colleague.ui.commands.askView"
+         class="com.mad.edt.colleague.ui.handlers.AskSelectionHandler"/>
+      <handler
+         commandId="com.mad.edt.colleague.ui.commands.insertAnswer"
+         class="com.mad.edt.colleague.ui.handlers.InsertAnswerHandler"/>
+   </extension>
+
+   <extension point="org.eclipse.ui.menus">
+      <menuContribution allPopups="false" locationURI="menu:org.eclipse.ui.window?before=preferences">
+         <command
+            commandId="com.mad.edt.colleague.ui.commands.openView"
+            label="Colleague Assistant"
+            style="push"/>
+      </menuContribution>
+      <menuContribution allPopups="false" locationURI="popup:org.eclipse.ui.navigator.ProjectExplorer#PopupMenu?after=additions">
+         <command
+            commandId="com.mad.edt.colleague.ui.commands.askView"
+            label="Спросить Colleague об этом"
+            style="push"/>
+      </menuContribution>
+   </extension>
+
+   <extension point="org.eclipse.ui.bindings">
+      <key
+         commandId="com.mad.edt.colleague.ui.commands.openView"
+         contextId="org.eclipse.ui.contexts.window"
+         schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+         sequence="M1+M2+J"/>
+   </extension>
+</plugin>

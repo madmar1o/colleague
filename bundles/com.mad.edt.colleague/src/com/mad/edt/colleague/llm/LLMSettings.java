@@ -64,6 +64,7 @@ public final class LLMSettings {
         configs.put(LOCAL_PROVIDER_ID, ProviderConfig
             .builder(LOCAL_PROVIDER_ID, LLMProviderType.OLLAMA)
             .baseUrl(LOCAL_RUNTIME_URL)
+            .defaultModel("qwen3:8b")
             .build());
         return configs;
     }

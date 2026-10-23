@@ -38,7 +38,47 @@ public class ColleagueStartup implements IStartup {
         if(Boolean.getBoolean("colleague.llm.smoke")) {
             runLLMSmoke(bundle);
         }
+        if(Boolean.getBoolean("colleague.open.view")) {
+            scheduleViewOpen();
+        }
     }
+
+    /**
+     * Opens the assistant view once the workbench page is available.
+     */
+    private static void scheduleViewOpen() {
+        org.eclipse.swt.widgets.Display.getDefault().syncExec(() -> {
+            org.eclipse.swt.widgets.Display.getDefault().timerExec(4_000, () -> {
+                try {
+                    final var window = org.eclipse.ui.PlatformUI.getWorkbench().getActiveWorkbenchWindow();
+                    if(window == null || window.getActivePage() == null) {
+                        System.err.println("[colleague] page not ready, retrying");
+                        org.eclipse.swt.widgets.Display.getDefault().timerExec(5_000, VIEW_RETRY);
+                        return;
+                    }
+                    window.getActivePage().showView(com.mad.edt.colleague.ui.view.ColleagueView.ID);
+                    System.err.println("[colleague] view opened");
+                } catch (final Exception ex) {
+                    System.err.println("[colleague] view open failed: " + ex);
+                }
+            });
+        });
+    }
+
+    private static final Runnable VIEW_RETRY = () -> {
+        try {
+            final var window = org.eclipse.ui.PlatformUI.getWorkbench().getActiveWorkbenchWindow();
+            final var page = window == null ? null : window.getActivePage();
+            if(page == null) {
+                System.err.println("[colleague] page still not ready, giving up");
+                return;
+            }
+            page.showView(com.mad.edt.colleague.ui.view.ColleagueView.ID);
+            System.err.println("[colleague] view opened (retry)");
+        } catch (final Exception ex) {
+            System.err.println("[colleague] view open retry failed: " + ex);
+        }
+    };
 
     private static void runLLMSmoke(final Bundle theBundle) {
         try {
