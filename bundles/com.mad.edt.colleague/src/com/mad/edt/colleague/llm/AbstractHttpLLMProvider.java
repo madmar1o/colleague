@@ -147,6 +147,21 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
         }
     }
 
+    /**
+     * Parses a JSON object string; falls back to an empty object when the
+     * text is not valid JSON.
+     *
+     * @param theJson JSON text, may be {@code null}
+     * @return parsed object or an empty one
+     */
+    protected static JsonObject parseArguments(final String theJson) {
+        try {
+            return JsonParser.parseString(theJson).getAsJsonObject();
+        } catch (final RuntimeException ex) {
+            return new JsonObject();
+        }
+    }
+
     private static String excerpt(final String theBody) {
         if(theBody == null) {
             return "";

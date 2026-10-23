@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 /**
@@ -37,12 +38,39 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
             options.addProperty("num_predict", theRequest.getMaxTokens().intValue());
             body.add("options", options);
         }
+        if(!theRequest.getTools().isEmpty()) {
+            final JsonArray tools = new JsonArray();
+            for(final JsonObject tool : ToolSpec.toToolArray(theRequest.getTools())) {
+                tools.add(tool);
+            }
+            body.add("tools", tools);
+        }
 
         final JsonArray messages = new JsonArray();
         for(final ChatMessage message : theRequest.getMessages()) {
             final JsonObject entry = new JsonObject();
             entry.addProperty("role", message.getRole());
-            entry.addProperty("content", message.getContent());
+            if(message.hasToolCalls()) {
+                final JsonArray calls = new JsonArray();
+                for(final ToolCall call : message.getToolCalls()) {
+                    final JsonObject function = new JsonObject();
+                    function.addProperty("name", call.getName());
+                    function.add("arguments", parseArguments(call.getArgumentsJson()));
+                    final JsonObject wrapper = new JsonObject();
+                    if(call.getId() != null) {
+                        wrapper.addProperty("id", call.getId());
+                    }
+                    wrapper.add("function", function);
+                    calls.add(wrapper);
+                }
+                entry.add("tool_calls", calls);
+                entry.addProperty("content", message.getContent());
+            } else {
+                entry.addProperty("content", message.getContent());
+                if(message.getToolCallId() != null) {
+                    entry.addProperty("tool_call_id", message.getToolCallId());
+                }
+            }
             messages.add(entry);
         }
         body.add("messages", messages);
@@ -51,16 +79,18 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
             postJson("/api/chat", body, getConfig().getReadTimeoutMs());
 
         String content = "";
+        List<ToolCall> calls = List.of();
         final JsonObject message = response.getAsJsonObject("message");
         if(message != null) {
             content = textOrNull(message, "content");
             if(content == null) {
                 content = "";
             }
+            calls = parseToolCalls(message.getAsJsonArray("tool_calls"));
         }
         return new ChatResult(content, textOrNull(response, "model"),
             textOrNull(response, "done_reason"),
-            intOrZero(response, "prompt_eval_count"), intOrZero(response, "eval_count"));
+            intOrZero(response, "prompt_eval_count"), intOrZero(response, "eval_count"), calls);
     }
 
     @Override
@@ -69,7 +99,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
         final List<String> names = new ArrayList<>();
         final JsonArray models = response.getAsJsonArray("models");
         if(models != null) {
-            for(final var entry : models) {
+            for(final JsonElement entry : models) {
                 final String name = textOrNull(entry.getAsJsonObject(), "name");
                 if(name != null) {
                     names.add(name);
@@ -87,5 +117,36 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
         } catch (final LLMException ex) {
             return false;
         }
+    }
+
+    private static List<ToolCall> parseToolCalls(final JsonArray theCalls) {
+        final List<ToolCall> calls = new ArrayList<>();
+        if(theCalls == null) {
+            return calls;
+        }
+        int index = 0;
+        for(final JsonElement element : theCalls) {
+            final JsonObject call = element.getAsJsonObject();
+            final JsonObject function = call.getAsJsonObject("function");
+            if(function == null) {
+                continue;
+            }
+            final JsonElement arguments = function.get("arguments");
+            final String argumentsJson;
+            if(arguments == null || arguments.isJsonNull()) {
+                argumentsJson = "{}";
+            } else if(arguments.isJsonPrimitive()) {
+                argumentsJson = arguments.getAsString();
+            } else {
+                argumentsJson = arguments.toString();
+            }
+            final String name = textOrNull(function, "name");
+            if(name == null) {
+                continue;
+            }
+            calls.add(new ToolCall(textOrNull(call, "id"), name, argumentsJson));
+            index++;
+        }
+        return calls;
     }
 }

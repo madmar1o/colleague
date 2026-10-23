@@ -12,6 +12,7 @@ public final class ChatRequest {
 
     private final String model;
     private final List<ChatMessage> messages;
+    private final List<ToolSpec> tools;
     private final Double temperature;
     private final Integer maxTokens;
     private final Boolean think;
@@ -25,6 +26,7 @@ public final class ChatRequest {
         }
         model = theBuilder.model;
         messages = Collections.unmodifiableList(new ArrayList<>(theBuilder.messages));
+        tools = Collections.unmodifiableList(new ArrayList<>(theBuilder.tools));
         temperature = theBuilder.temperature;
         maxTokens = theBuilder.maxTokens;
         think = theBuilder.think;
@@ -42,6 +44,13 @@ public final class ChatRequest {
      */
     public List<ChatMessage> getMessages() {
         return messages;
+    }
+
+    /**
+     * @return callable tools advertised to the model, empty when none
+     */
+    public List<ToolSpec> getTools() {
+        return tools;
     }
 
     /**
@@ -81,6 +90,7 @@ public final class ChatRequest {
 
         private final String model;
         private final List<ChatMessage> messages = new ArrayList<>();
+        private final List<ToolSpec> tools = new ArrayList<>();
         private Double temperature;
         private Integer maxTokens;
         private Boolean think;
@@ -97,6 +107,17 @@ public final class ChatRequest {
          */
         public Builder addMessage(final ChatMessage theMessage) {
             messages.add(theMessage);
+            return this;
+        }
+
+        /**
+         * Advertises callable tools to the model.
+         *
+         * @param theTools the tools
+         * @return this builder
+         */
+        public Builder tools(final List<ToolSpec> theTools) {
+            tools.addAll(theTools);
             return this;
         }
 

@@ -1,5 +1,9 @@
 package com.mad.edt.colleague.llm;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * Result of a chat completion call.
  */
@@ -10,6 +14,7 @@ public final class ChatResult {
     private final String finishReason;
     private final int promptTokens;
     private final int completionTokens;
+    private final List<ToolCall> toolCalls;
 
     /**
      * @param theContent generated text
@@ -20,11 +25,27 @@ public final class ChatResult {
      */
     public ChatResult(final String theContent, final String theModel, final String theFinishReason,
         final int thePromptTokens, final int theCompletionTokens) {
+        this(theContent, theModel, theFinishReason, thePromptTokens, theCompletionTokens, null);
+    }
+
+    /**
+     * @param theContent generated text
+     * @param theModel model that produced the text, may be {@code null}
+     * @param theFinishReason why generation stopped, may be {@code null}
+     * @param thePromptTokens tokens consumed by the prompt, {@code 0} if unknown
+     * @param theCompletionTokens tokens generated, {@code 0} if unknown
+     * @param theToolCalls tool calls requested by the model, may be {@code null}
+     */
+    public ChatResult(final String theContent, final String theModel, final String theFinishReason,
+        final int thePromptTokens, final int theCompletionTokens, final List<ToolCall> theToolCalls) {
         content = theContent == null ? "" : theContent;
         model = theModel;
         finishReason = theFinishReason;
         promptTokens = thePromptTokens;
         completionTokens = theCompletionTokens;
+        toolCalls = theToolCalls == null
+            ? Collections.emptyList()
+            : Collections.unmodifiableList(new ArrayList<>(theToolCalls));
     }
 
     /**
@@ -62,8 +83,23 @@ public final class ChatResult {
         return completionTokens;
     }
 
+    /**
+     * @return tool calls requested by the model, empty when the answer is final
+     */
+    public List<ToolCall> getToolCalls() {
+        return toolCalls;
+    }
+
+    /**
+     * @return {@code true} when the model asked to execute tools
+     */
+    public boolean wantsToolCall() {
+        return !toolCalls.isEmpty();
+    }
+
     @Override
     public String toString() {
-        return "ChatResult[" + model + ", " + completionTokens + " tokens, " + finishReason + "]";
+        return "ChatResult[" + model + ", " + completionTokens + " tokens, " + finishReason
+            + (wantsToolCall() ? ", " + toolCalls.size() + " toolCalls" : "") + "]";
     }
 }
