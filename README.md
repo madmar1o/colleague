@@ -1,8 +1,7 @@
 # Colleague for 1C:EDT
 
-AI-ассистент-плагин для 1C:EDT 2026.1 по архитектуре 1C:Workmate 1.0.8
-(`com.e1c.edt.ai`): agent loop + skills + инструменты, LLM — локальные модели
-(Ollama) и внешние провайдеры в стиле OpenCode.
+Собственная оригинальная реализация: agent loop + skills + инструменты,
+LLM — локальные модели (Ollama) и внешние провайдеры с OpenAI-совместимым API.
 
 ## Структура
 
@@ -20,7 +19,8 @@ repositories/com.mad.edt.colleague.repository/   p2 update site (M5)
 
 ## Версии
 
-`1.0.0.qualifier`, qualifier = `'v'yyyyMMddHHmm` (как Workmate `1.0.8.v202609241142`).
+`1.0.0.qualifier`, qualifier = `'v'yyyyMMddHHmm` — формат датированного qualifier,
+принятый в плагинах 1C:EDT.
 
 ## Сборка
 
@@ -28,7 +28,9 @@ repositories/com.mad.edt.colleague.repository/   p2 update site (M5)
 .\mvnw.cmd clean verify
 ```
 
-Требования: JDK 17 (EDT 2026.1 работает на Java 17). Maven ставить не нужно —
+Требования: JDK 17 (EDT 2026.1 работает на Java 17), `JAVA_HOME` должен указывать
+на JDK 17 (например `C:\Program Files\Zulu\zulu-17`) — Maven берёт JDK из
+`JAVA_HOME`, а не из `PATH`. Maven ставить не нужно —
 Maven Wrapper скачает Maven 3.9.9. Первая сборка скачивает p2-метаданные
 EDT Ruby 2026.1 (≈ несколько минут).
 

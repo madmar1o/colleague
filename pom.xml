@@ -17,7 +17,7 @@
   <packaging>pom</packaging>
 
   <name>Colleague for 1C:EDT</name>
-  <description>AI-copilot plugin for 1C:EDT, modeled on 1C:Workmate (skills/tools architecture)</description>
+  <description>AI-copilot plugin for 1C:EDT: agent loop, skills and tools architecture</description>
 
   <modules>
     <module>targets</module>
