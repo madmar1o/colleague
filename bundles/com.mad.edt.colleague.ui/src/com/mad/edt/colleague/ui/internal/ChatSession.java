@@ -31,18 +31,24 @@ public final class ChatSession {
     }
 
     /**
-     * Asks the model one question and appends both sides to the history.
+     * Asks the model one question with surrounding project context attached,
+     * and appends both sides to the history.
      *
      * @param theModel model name, {@code null} for the provider default
+     * @param theContext project/resource description, may be {@code null}
      * @param theQuestion question text
      * @return formatted reply (answer plus usage statistics)
      * @throws LLMException when the endpoint fails
      */
-    public String ask(final String theModel, final String theQuestion) throws LLMException {
+    public String ask(final String theModel, final String theContext, final String theQuestion)
+        throws LLMException {
         final ChatRequest.Builder request = ChatRequest
             .builder(theModel != null ? theModel : provider.getConfig().getDefaultModel());
         if(systemPrompt != null && !systemPrompt.isEmpty()) {
             request.addMessage(ChatMessage.system(systemPrompt));
+        }
+        if(theContext != null && !theContext.isEmpty()) {
+            request.addMessage(ChatMessage.system("Workspace context:\n" + theContext));
         }
         for(final ChatMessage message : history) {
             request.addMessage(message);

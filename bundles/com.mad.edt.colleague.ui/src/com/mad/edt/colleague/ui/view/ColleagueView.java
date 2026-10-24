@@ -42,6 +42,9 @@ public class ColleagueView extends ViewPart {
     /** Question staged by handlers before the view instance exists. */
     private static volatile String ourPendingQuestion;
 
+    /** Resource/project context staged together with the question. */
+    private static volatile String ourPendingContext;
+
     /** The single visible instance (the view is not multiplicable). */
     private static volatile ColleagueView ourInstance;
 
@@ -53,6 +56,7 @@ public class ColleagueView extends ViewPart {
 
     private ChatSession ourSession;
     private String ourLastAnswer = "";
+    private String ourAttachedContext = "";
     private boolean ourBusy;
     private boolean ourSelfTestDone;
     private boolean ourSelfTestPending;
@@ -64,6 +68,15 @@ public class ColleagueView extends ViewPart {
      */
     public static void stageQuestion(final String theQuestion) {
         ourPendingQuestion = theQuestion;
+    }
+
+    /**
+     * Stages a resource/project description attached to the next question.
+     *
+     * @param theContext context text
+     */
+    public static void stageContext(final String theContext) {
+        ourPendingContext = theContext;
     }
 
     /**
@@ -140,6 +153,11 @@ public class ColleagueView extends ViewPart {
         if(staged != null && !staged.isEmpty()) {
             ourQuestion.setText(staged);
         }
+        final String stagedContext = ourPendingContext;
+        ourPendingContext = null;
+        if(stagedContext != null && !stagedContext.isEmpty()) {
+            ourAttachedContext = stagedContext;
+        }
 
         loadModels();
     }
@@ -166,13 +184,19 @@ public class ColleagueView extends ViewPart {
         return ourLastAnswer;
     }
 
-    /** Applies a question staged after this instance was created. */
-    public void applyStagedQuestion() {
+    /** Applies a question and context staged after this instance was created. */
+    public void applyStaged() {
         final String staged = ourPendingQuestion;
         ourPendingQuestion = null;
         if(staged != null && !staged.isEmpty() && ourQuestion != null && !ourQuestion.isDisposed()) {
             ourQuestion.setText(staged);
             setFocus();
+        }
+        final String stagedContext = ourPendingContext;
+        ourPendingContext = null;
+        if(stagedContext != null && !stagedContext.isEmpty()) {
+            ourAttachedContext = stagedContext;
+            setStatus("Контекст объекта прикреплён к вопросу");
         }
     }
 
@@ -221,8 +245,10 @@ public class ColleagueView extends ViewPart {
         }
         ourSelfTestDone = true;
         ourSelfTestPending = true;
-        ourQuestion.setText("Ответь одним словом: сколько будет 2+2?");
-        System.err.println("[colleague] UI selftest: sending question");
+        ourAttachedContext = "File: demo/Demo.bsl\nContent:\n&НаКлиенте\n"
+            + "Процедура ДемонстрацияКонтекста() КонецПроцедуры";
+        ourQuestion.setText("Какая процедура описана в приложенном контексте? Ответь одним словом.");
+        System.err.println("[colleague] UI selftest: sending question with context");
         sendQuestion();
     }
 
@@ -232,7 +258,9 @@ public class ColleagueView extends ViewPart {
             return;
         }
         final String model = ourModelCombo.getText().trim();
-        appendLine("Вы: " + question);
+        final String context = ourAttachedContext;
+        ourAttachedContext = "";
+        appendLine("Вы: " + (context.isEmpty() ? "" : "[контекст приложен] ") + question);
         ourQuestion.setText("");
         ourBusy = true;
         ourAskButton.setEnabled(false);
@@ -240,7 +268,8 @@ public class ColleagueView extends ViewPart {
 
         Job.create("Colleague: question", (monitor) -> {
             try {
-                final String answer = ourSession.ask(model.isEmpty() ? null : model, question);
+                final String answer =
+                    ourSession.ask(model.isEmpty() ? null : model, context, question);
                 final int split = answer.lastIndexOf("\n--- ");
                 final String body = split > 0 ? answer.substring(0, split).strip() : answer;
                 final String stats = split > 0 ? answer.substring(split + 1).strip() : "";
