@@ -256,6 +256,7 @@ public final class ChatPanel {
                     + " hf=" + BridgeBrowser.optString(theArguments, "hf")
                     + " kd=" + BridgeBrowser.optString(theArguments, "kd")
                     + " qvlen=" + BridgeBrowser.optString(theArguments, "qvlen")
+                    + " ch=" + BridgeBrowser.optString(theArguments, "ch")
                     + " clicked=" + BridgeBrowser.optString(theArguments, "clicked");
                 if(!state.equals(ourLastPageState)) {
                     ourLastPageState = state;

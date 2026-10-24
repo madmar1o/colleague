@@ -241,7 +241,9 @@ final class BridgeBrowser {
                 + method);
         }
         if("sync".equals(method)) {
-            traceCall("navigation", method, parseArgs(json));
+            final JsonObject syncArgs = parseArgs(json);
+            traceCall("navigation", method, syncArgs);
+            handle(method, syncArgs);
             syncPollViaLocation();
             return;
         }
@@ -283,8 +285,13 @@ final class BridgeBrowser {
         if("[]".equals(batch)) {
             return;
         }
-        ourBrowser.execute("window.colleagueEvents(" + batch.replace("<", "\\u003c")
-            + ")");
+        final String script = "window.colleagueEvents(" + batch.replace("<", "\\u003c")
+            + ")";
+        ourBrowser.getDisplay().timerExec(0, () -> {
+            if(!ourBrowser.isDisposed()) {
+                ourBrowser.execute(script);
+            }
+        });
     }
 
     /**

@@ -169,8 +169,10 @@ function apiCall(method, obj) {
   }
   window.location.href = "colleague:" + method + ":" + encodeURIComponent(json);
 }
+var __pollSeq = 0;
 setInterval(function () {
-  if (window.__bridgeReady) { apiCall("sync", {}); }
+  __pollSeq++;
+  apiCall("sync", { ch: CHANNEL, poll: String(__pollSeq) });
 }, 1500);
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
