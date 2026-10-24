@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui.internal;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -9,8 +10,12 @@ import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.custom.StyleRange;
+import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.events.KeyAdapter;
 import org.eclipse.swt.events.KeyEvent;
+import org.eclipse.swt.graphics.Color;
+import org.eclipse.swt.graphics.RGB;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
@@ -42,11 +47,16 @@ public final class ChatPanel {
     private final ChatSession ourSession;
     private final String ourModel;
 
-    private Text ourConversation;
+    private StyledText ourConversation;
     private Text ourQuestion;
     private Button ourAskButton;
     private Label ourStatusLabel;
     private Label ourModeLabel;
+
+    private final List<StyleRange> ourStyleRanges = new ArrayList<>();
+    private Color ourUserBubble;
+    private Color ourAnswerBubble;
+    private Color ourErrorBubble;
 
     private String ourAttachedContext = "";
     private String ourLastAnswer = "";
@@ -144,6 +154,7 @@ public final class ChatPanel {
         if(!ourConversation.isDisposed()) {
             ourConversation.setText("");
         }
+        ourStyleRanges.clear();
         ourLastAnswer = "";
         setStatus("Диалог сброшен");
     }
@@ -153,14 +164,23 @@ public final class ChatPanel {
         if(ourConversation != null && !ourConversation.isDisposed()) {
             ourConversation.dispose();
         }
+        for(final Color color : new Color[] {ourUserBubble, ourAnswerBubble,
+            ourErrorBubble}) {
+            if(color != null && !color.isDisposed()) {
+                color.dispose();
+            }
+        }
     }
 
     private void createControls(final Composite theParent) {
         final Composite root = new Composite(theParent, SWT.NONE);
         root.setLayout(new GridLayout(1, false));
 
-        ourConversation = new Text(root, SWT.MULTI | SWT.READ_ONLY | SWT.WRAP | SWT.V_SCROLL);
+        ourConversation = new StyledText(root,
+            SWT.READ_ONLY | SWT.MULTI | SWT.WRAP | SWT.V_SCROLL);
+        ourConversation.setMargins(6, 6, 6, 2);
         ourConversation.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
+        initBubbleColors();
 
         final Composite header = new Composite(root, SWT.NONE);
         header.setLayoutData(new GridData(SWT.FILL, SWT.BOTTOM, true, false));
@@ -331,7 +351,54 @@ public final class ChatPanel {
         if(ourConversation.getCharCount() > 0) {
             ourConversation.append("\n\n");
         }
-        ourConversation.append(theText);
+        final boolean user = theText.startsWith("Вы:");
+        final boolean error = theText.startsWith("Ошибка:");
+        final String bubbleText = user ? "\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0"
+            + theText : theText;
+        final int start = ourConversation.getCharCount();
+        ourConversation.append(bubbleText);
+        final Color bubble = error ? ourErrorBubble : (user ? ourUserBubble : ourAnswerBubble);
+        final int prefixEnd = bubbleText.indexOf(':') + 1;
+        if(prefixEnd > 1) {
+            final StyleRange header = new StyleRange(start, prefixEnd, null, bubble);
+            header.fontStyle = SWT.BOLD;
+            ourStyleRanges.add(header);
+            ourStyleRanges.add(new StyleRange(start + prefixEnd,
+                bubbleText.length() - prefixEnd, null, bubble));
+        } else {
+            ourStyleRanges.add(new StyleRange(start, bubbleText.length(), null, bubble));
+        }
+        ourConversation.setStyleRanges(
+            ourStyleRanges.toArray(new StyleRange[ourStyleRanges.size()]));
+        ourConversation.setSelection(start + bubbleText.length());
+        ourConversation.showSelection();
+    }
+
+    private void initBubbleColors() {
+        final Display display = ourConversation.getDisplay();
+        final Color base = ourConversation.getBackground() == null
+            ? display.getSystemColor(SWT.COLOR_WIDGET_BACKGROUND)
+            : ourConversation.getBackground();
+        final RGB baseRgb = base.getRGB();
+        final boolean dark = (baseRgb.red + baseRgb.green + baseRgb.blue) / 3 < 128;
+        if(dark) {
+            ourUserBubble = mix(display, baseRgb, new RGB(64, 100, 148), 0.55);
+            ourAnswerBubble = mix(display, baseRgb, new RGB(74, 80, 92), 0.6);
+            ourErrorBubble = mix(display, baseRgb, new RGB(150, 74, 74), 0.55);
+        } else {
+            ourUserBubble = mix(display, baseRgb, new RGB(120, 170, 230), 0.3);
+            ourAnswerBubble = mix(display, baseRgb, new RGB(214, 219, 226), 0.45);
+            ourErrorBubble = mix(display, baseRgb, new RGB(240, 178, 178), 0.45);
+        }
+    }
+
+    private static Color mix(final Display theDisplay, final RGB theBase, final RGB theTarget,
+        final double theFactor) {
+        final double rest = 1.0 - theFactor;
+        return new Color(theDisplay,
+            (int)(theBase.red * rest + theTarget.red * theFactor),
+            (int)(theBase.green * rest + theTarget.green * theFactor),
+            (int)(theBase.blue * rest + theTarget.blue * theFactor));
     }
 
     private void setStatus(final String theText) {
