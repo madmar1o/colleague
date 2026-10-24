@@ -390,11 +390,11 @@ window.colleaguePush = function (kind, payload) {
   switch (kind) {
     case "ready":
       window.__bridgeReady = true;
+      clearTimeout(__warmTimer);
       if (data.palette) { applyPalette(data.palette); }
       if (data.name) { document.getElementById("hdrname").textContent = data.name; }
       if (data.sub) { document.getElementById("hdrsub").textContent = data.sub; }
       if (typeof data.mode === "boolean") { setMode(data.mode); }
-      apiCall("bridgeReady", {});
       break;
     case "readyPalette": applyPalette(data); break;
     case "history":

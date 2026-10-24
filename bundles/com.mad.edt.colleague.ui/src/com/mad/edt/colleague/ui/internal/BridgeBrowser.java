@@ -10,6 +10,7 @@ import java.util.function.BiConsumer;
 
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.browser.Browser;
+import org.eclipse.swt.browser.BrowserFunction;
 import org.eclipse.swt.browser.LocationEvent;
 import org.eclipse.swt.browser.LocationListener;
 import org.eclipse.swt.layout.GridData;
@@ -21,29 +22,31 @@ import com.google.gson.JsonParser;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 
 /**
- * Shared embedded-browser plumbing for the chat and contacts panels. The page
- * calls Java by invoking {@code window.colleague(method, jsonArgs)} — a
- * function contributed by an async batch of the browser backend — and takes
- * the result of that call as an array of {@code [kind, json]} event batches
- * that it feeds into its own {@code colleaguePush}. The very same array is
- * returned for a {@code sync} poll, which covers events Java produced on its
- * own (answers, status changes). As a fallback for backends without function
- * support, the page may navigate to
- * {@code colleague:<method>:<urlencoded json>}; those navigations are vetoed
- * and dispatched here. Events pushed before the page announced itself are
- * queued and delivered with the first reply.
+ * Shared embedded-browser plumbing for the chat and contacts panels. Two call
+ * channels are supported because the browser backends differ in when they
+ * expose host objects to a document written without a real navigation:
+ * <ul>
+ * <li>{@code window.colleague(method, jsonArgs)} — a host function whose
+ * invocation Java serves directly; it may only appear after the first
+ * intercepted {@code colleague:} navigation on some backends;</li>
+ * <li>a vetoed navigation to
+ * {@code colleague:<method>:<urlencoded json>} — always delivered.</li>
+ * </ul>
+ * Events flow one way only: Java queues them and answers every incoming call
+ * (on either channel) with the batch of queued {@code [kind, json]} events as
+ * the value it returns from the function. The page polls with
+ * {@code colleague("sync", "{}")} whenever it has no call of its own to make,
+ * so Java never has to run script inside the page.
  */
 final class BridgeBrowser {
 
-    /** Prefix of the navigation-based fallback call channel. */
+    /** Prefix of the navigation-based call channel. */
     private static final String PROTOCOL = "colleague:";
 
     private final Browser ourBrowser;
     private final BiConsumer<String, JsonObject> ourHandler;
     private final List<String[]> ourQueue = new ArrayList<>();
     private boolean ourReady;
-    /** Set while a page function call is being served on the UI thread. */
-    private boolean ourInPageCall;
 
     /**
      * @param theParent parent composite; the browser fills it via layout data
@@ -72,13 +75,12 @@ final class BridgeBrowser {
                 // not needed: the page never really navigates
             }
         });
-        final org.eclipse.swt.browser.BrowserFunction function =
-            new org.eclipse.swt.browser.BrowserFunction(ourBrowser, "colleague") {
-                @Override
-                public Object function(final Object... theArguments) {
-                    return invokePageCall(theArguments);
-                }
-            };
+        final BrowserFunction function = new BrowserFunction(ourBrowser, "colleague") {
+            @Override
+            public Object function(final Object... theArguments) {
+                return invokePageCall(theArguments);
+            }
+        };
         if(!loadPage(theResource)) {
             function.dispose();
             throw new IllegalStateException("page load failed: " + theResource);
@@ -93,8 +95,8 @@ final class BridgeBrowser {
     }
 
     /**
-     * Sends one event to the page: through the running function call when the
-     * page is polling, through the queue until it does.
+     * Queues one event for the page. It leaves with the reply to the next
+     * call the page makes.
      *
      * @param theKind event name seen by the page
      * @param thePayload JSON payload of the event
@@ -103,98 +105,63 @@ final class BridgeBrowser {
         synchronized(ourQueue) {
             ourQueue.add(new String[] {theKind, thePayload.toString()});
         }
-        if(ourReady && !ourInPageCall && !ourBrowser.isDisposed()) {
-            drainQueue();
-        }
     }
 
-    /** @return {@code true} once the page announced its push endpoint */
+    /** @return {@code true} once the page announced itself on any channel */
     boolean isReady() {
         return ourReady;
     }
 
     /**
-     * Called on the UI thread from page code with the async batch arguments.
+     * Serves one {@code window.colleague} invocation from the page.
      *
-     * @param theArguments raw batch arguments seen by the backend
-     * @return JSON array text of {@code [kind, json]} events the page should
-     *         apply right now, possibly empty; returned as text because the
-     *         backend marshals plain Java objects as proxies, not values
+     * @param theArguments raw arguments seen by the backend
+     * @return JSON array text of {@code [kind, json]} events collected while
+     *         the call was served; returned as text because the backends
+     *         marshal complex Java values as proxies rather than plain values
      */
     private String invokePageCall(final Object... theArguments) {
-        final JsonArray events = new JsonArray();
         if(theArguments.length < 1 || !(theArguments[0] instanceof String)) {
-            return events.toString();
+            return new JsonArray().toString();
         }
         final String method = (String)theArguments[0];
-        final JsonObject arguments;
-        ourInPageCall = true;
-        try {
-            if("sync".equals(method)) {
-                arguments = new JsonObject();
-                markReady();
-            } else if(theArguments.length > 1 && theArguments[1] != null) {
-                arguments = parseArgs(theArguments[1]);
-            } else {
-                arguments = new JsonObject();
-            }
-            if("bridgeReady".equals(method)) {
-                markReady();
-                handle(method, arguments);
-            } else {
-                handle(method, arguments);
-            }
-        } finally {
-            ourInPageCall = false;
+        JsonObject arguments = new JsonObject();
+        if(!"sync".equals(method) && theArguments.length > 1
+            && theArguments[1] != null) {
+            arguments = parseArgs(theArguments[1]);
         }
+        if("bridgeReady".equals(method) || "sync".equals(method)) {
+            ourReady = true;
+        }
+        handle(method, arguments);
+        return drainBatch();
+    }
+
+    /**
+     * Removes every queued event and renders it as the JSON batch the page
+     * applies through its own {@code colleaguePush}.
+     *
+     * @return {@code [["kind","{json}"],...]} text, possibly {@code []}
+     */
+    private String drainBatch() {
+        final JsonArray events = new JsonArray();
         synchronized(ourQueue) {
-            while(!ourQueue.isEmpty()) {
-                final String[] entry = ourQueue.remove(0);
+            for(final String[] entry : ourQueue) {
                 final JsonArray event = new JsonArray();
                 event.add(entry[0]);
                 event.add(entry[1]);
                 events.add(event);
             }
+            ourQueue.clear();
         }
         return events.toString();
     }
 
-    /** Pushes queued events into the open async function call. */
-    private void drainQueue() {
-        if(ourBrowser.isDisposed() || ourBrowser.getDisplay().getThread()
-            != Thread.currentThread()) {
-            return;
-        }
-        final JsonArray events = new JsonArray();
-        synchronized(ourQueue) {
-            while(!ourQueue.isEmpty()) {
-                final String[] entry = ourQueue.remove(0);
-                final JsonArray event = new JsonArray();
-                event.add(entry[0]);
-                event.add(entry[1]);
-                events.add(event);
-            }
-        }
-        if(events.size() == 0) {
-            return;
-        }
-        ourBrowser.execute("window.colleagueEvents("
-            + events.toString().replace("<", "\\u003c") + ")");
-    }
-
-    private void markReady() {
-        if(!ourReady) {
-            ourReady = true;
-            if(!ourInPageCall) {
-                drainQueue();
-            }
-        }
-    }
-
     private boolean loadPage(final String theResource) {
         try {
-            final java.net.URL entry = org.eclipse.core.runtime.Platform
-                .getBundle(ColleagueUIPlugin.PLUGIN_ID).getEntry(theResource);
+            final java.net.URL entry = ColleagueUIPlugin.PLUGIN_ID == null
+                ? null : org.eclipse.core.runtime.Platform
+                    .getBundle(ColleagueUIPlugin.PLUGIN_ID).getEntry(theResource);
             if(entry == null) {
                 System.err.println("colleague: " + theResource
                     + " missing from the bundle");
@@ -221,6 +188,7 @@ final class BridgeBrowser {
         }
     }
 
+    /** Serves a call that arrived as a vetoed {@code colleague:} navigation. */
     private void dispatchLocation(final String theLocation) {
         final String rest = theLocation.substring(PROTOCOL.length());
         final int split = rest.indexOf(':');
@@ -234,10 +202,31 @@ final class BridgeBrowser {
                 json = encoded;
             }
         }
-        if("bridgeReady".equals(method)) {
-            markReady();
+        if("bridgeReady".equals(method) || "sync".equals(method)) {
+            ourReady = true;
+        }
+        if("sync".equals(method)) {
+            syncPollViaLocation();
+            return;
         }
         handle(method, parseArgs(json));
+    }
+
+    /**
+     * A polling call cannot be answered on the navigation channel; its events
+     * are handed over with the next function call, or in a pinch run through
+     * a script that the backend does accept on a navigated document.
+     */
+    private void syncPollViaLocation() {
+        if(ourBrowser.isDisposed()) {
+            return;
+        }
+        final String batch = drainBatch();
+        if("[]".equals(batch)) {
+            return;
+        }
+        ourBrowser.execute("window.colleagueEvents(" + batch.replace("<", "\\u003c")
+            + ")");
     }
 
     private void handle(final String theMethod, final JsonObject theArguments) {

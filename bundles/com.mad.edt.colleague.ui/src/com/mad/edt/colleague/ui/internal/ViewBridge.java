@@ -17,6 +17,9 @@ final class ViewBridge {
     /** Where the embedded browser keeps its profile (cache, cookies). */
     private static final String EDGE_DATA_DIR_PROPERTY = "org.eclipse.swt.browser.EdgeDataDir";
 
+    /** Selects the modern browser backend; the legacy one lacks DOM APIs our pages use. */
+    private static final String DEFAULT_TYPE_PROPERTY = "org.eclipse.swt.browser.DefaultType";
+
     private static boolean ourDataDirChecked;
 
     private ViewBridge() {
@@ -33,6 +36,9 @@ final class ViewBridge {
             return;
         }
         ourDataDirChecked = true;
+        if(System.getProperty(DEFAULT_TYPE_PROPERTY) == null) {
+            System.setProperty(DEFAULT_TYPE_PROPERTY, "edge");
+        }
         if(System.getProperty(EDGE_DATA_DIR_PROPERTY) != null) {
             return;
         }
