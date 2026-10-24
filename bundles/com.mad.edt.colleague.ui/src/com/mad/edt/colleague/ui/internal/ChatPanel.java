@@ -227,6 +227,7 @@ public final class ChatPanel {
             ourBridge = new BridgeBrowser(ourRoot, "web/chat.html", this::handleBridge);
             push("ready", null);
             watchTheme();
+            traceGeometry();
             return true;
         } catch (final RuntimeException | LinkageError | org.eclipse.swt.SWTError ex) {
             System.err.println("colleague: embedded browser unavailable, plain fallback: "
@@ -240,6 +241,35 @@ public final class ChatPanel {
             return false;
         }
         return true;
+    }
+
+    /** Logs where the chat browser sits on screen and who receives SWT input. */
+    private void traceGeometry() {
+        if(!Boolean.getBoolean("colleague.browser.selftest")) {
+            return;
+        }
+        final Control control = ourBridge.getControl();
+        control.addListener(SWT.MouseDown, event -> System.out.println(
+            "[colleague] browser SWT mousedown x=" + event.x + " y=" + event.y));
+        control.addListener(SWT.FocusIn,
+            event -> System.out.println("[colleague] browser SWT focusin"));
+        control.addListener(SWT.FocusOut,
+            event -> System.out.println("[colleague] browser SWT focusout"));
+        Display.getDefault().timerExec(8000, () -> {
+            if(ourRoot.isDisposed() || control.isDisposed()) {
+                return;
+            }
+            final org.eclipse.swt.graphics.Point topLeft = control.toDisplay(0, 0);
+            final org.eclipse.swt.graphics.Point bottom =
+                control.toDisplay(control.getSize().x, control.getSize().y);
+            final org.eclipse.swt.graphics.Point abs =
+                control.toDisplay(control.getLocation());
+            System.out.println("[colleague] browser screen rect x=" + topLeft.x
+                + " y=" + topLeft.y + " .. " + bottom.x + "," + bottom.y
+                + " locInParent=" + abs.x + "," + abs.y
+                + " size=" + control.getSize().x + "x" + control.getSize().y
+                + " visible=" + control.isVisible() + " focused=" + control.isFocusControl());
+        });
     }
 
     private void handleBridge(final String theMethod, final JsonObject theArguments) {
