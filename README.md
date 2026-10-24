@@ -78,3 +78,5 @@ java -jar <edt>\plugins\org.eclipse.equinox.launcher_*.jar -nosplash -consoleLog
 | M3 | agent loop + skills (SKILL.md, tools JSON) | готово |
 | M4 | EDT UI: view, команды, контекст проекта | готово |
 | M5 | p2 install + проверка на workspace ERPUH_DEMO | готово |
+| M6.1–M6.2 | чат-мессенджер: контакты + вкладки чатов | готово |
+| M6.3 | диалог подключения провайдера (Preferences + SecureStorage) | план |
