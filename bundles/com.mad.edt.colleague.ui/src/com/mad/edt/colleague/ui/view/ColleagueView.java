@@ -260,7 +260,12 @@ public class ColleagueView extends ViewPart {
         final String model = ourModelCombo.getText().trim();
         final String context = ourAttachedContext;
         ourAttachedContext = "";
-        appendLine("Вы: " + (context.isEmpty() ? "" : "[контекст приложен] ") + question);
+        if(!context.isEmpty()) {
+            appendLine("Вы: " + question + "  [к вопросу приложен контекст проекта, "
+                + context.length() + " символов]");
+        } else {
+            appendLine("Вы: " + question);
+        }
         ourQuestion.setText("");
         ourBusy = true;
         ourAskButton.setEnabled(false);
