@@ -109,6 +109,13 @@ public final class ChatSession {
     }
 
     /**
+     * @return a snapshot of the conversation so far, for re-rendering views
+     */
+    public List<ChatMessage> snapshotHistory() {
+        return List.copyOf(history);
+    }
+
+    /**
      * Reasoning-capable models stream their chain of thought into a separate
      * field and can exhaust the answer budget there, so the direct answer is
      * requested for known templates.

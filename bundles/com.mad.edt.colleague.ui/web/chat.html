@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Colleague</title>
+<style>
+:root {
+  --bg: #1b1f27; --panel: #232833; --panel2: #2b3140; --text: #dfe4ec;
+  --muted: #8b93a3; --accent: #4d7fb3; --accent2: #38648f;
+  --user: #2f5c86; --answer: #262c39; --error: #5a2e2e; --line: #333a49;
+  --chip: #2b3a4d; --code: #171b22;
+}
+body[data-theme="light"] {
+  --bg: #f2f4f8; --panel: #ffffff; --panel2: #e9edf3; --text: #20242b;
+  --muted: #6b7280; --accent: #2f6cad; --accent2: #28598c;
+  --user: #cfe4f7; --answer: #ffffff; --error: #f6dada; --line: #d7dde6;
+  --chip: #dce8f3; --code: #eef1f5;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--text); font-size: 13px;
+  font-family: "Segoe UI", "PT Sans", Tahoma, sans-serif;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+header {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: var(--panel); border-bottom: 1px solid var(--line); flex: none;
+}
+.avatar {
+  width: 38px; height: 38px; border-radius: 50%; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 600; color: #fff; font-size: 15px; user-select: none;
+}
+.avatar.bot { background: linear-gradient(135deg, #4d7fb3, #7a5aa8); }
+.hdr { flex: 1 1 auto; min-width: 0; }
+.hdr .name { font-weight: 600; font-size: 14px; }
+.hdr .sub { color: var(--muted); font-size: 11px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.iconbtn {
+  flex: none; border: 1px solid var(--line); background: var(--panel2);
+  color: var(--text); border-radius: 16px; padding: 5px 12px; font-size: 12px;
+  cursor: pointer;
+}
+.iconbtn:hover { border-color: var(--accent); }
+.iconbtn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+main {
+  flex: 1 1 auto; overflow-y: auto; padding: 12px 14px 4px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.row { display: flex; align-items: flex-end; gap: 8px; max-width: 100%; }
+.row.out { justify-content: flex-end; }
+.bubble {
+  max-width: 78%; padding: 8px 12px 18px; border-radius: 14px; position: relative;
+  background: var(--answer); border: 1px solid var(--line);
+  white-space: pre-wrap; word-wrap: break-word; line-height: 1.45;
+}
+.row.out .bubble { background: var(--user); border-color: transparent;
+  border-bottom-right-radius: 4px; }
+.row.in .bubble { border-bottom-left-radius: 4px; }
+.bubble.error { background: var(--error); }
+.meta {
+  position: absolute; right: 10px; bottom: 3px; font-size: 10px;
+  color: var(--muted); display: flex; gap: 4px; align-items: center;
+}
+.ticks { color: #58b7f0; letter-spacing: -3px; font-weight: 700; }
+.copylink { color: var(--muted); cursor: pointer; font-size: 11px; }
+.smallavatar {
+  width: 30px; height: 30px; border-radius: 50%; flex: none; font-size: 12px;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  background: linear-gradient(135deg, #4d7fb3, #7a5aa8); user-select: none;
+}
+pre.code {
+  background: var(--code); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; margin: 6px 0; overflow-x: auto; white-space: pre;
+  font-family: Consolas, "Courier New", monospace; font-size: 12px;
+}
+code.inline { background: var(--code); border-radius: 4px; padding: 1px 5px;
+  font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+pre.code .head { display: flex; justify-content: space-between; color: var(--muted);
+  font-size: 11px; margin-bottom: 4px; }
+pre.code .head span.copylink { cursor: pointer; }
+a { color: var(--accent); }
+.tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  background: var(--chip); border: 1px solid var(--line); color: var(--text);
+  border-radius: 12px; padding: 3px 10px; font-size: 11px; cursor: pointer;
+}
+.chip.pending { color: var(--muted); }
+.chip.done::before { content: "\2713 "; color: #4caf7d; }
+.statusline { color: var(--muted); font-size: 11px; padding: 2px 14px; flex: none;
+  min-height: 16px; }
+form.composer {
+  flex: none; display: flex; gap: 8px; padding: 8px 12px 10px; align-items: flex-end;
+  border-top: 1px solid var(--line); background: var(--panel);
+}
+textarea#q {
+  flex: 1 1 auto; resize: none; min-height: 46px; max-height: 140px;
+  background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 12px; padding: 9px 12px; font: inherit; outline: none;
+}
+textarea#q:focus { border-color: var(--accent); }
+button.send {
+  flex: none; background: var(--accent); color: #fff; border: none;
+  border-radius: 12px; padding: 10px 18px; font-size: 13px; cursor: pointer;
+}
+button.send:disabled { background: var(--panel2); color: var(--muted); }
+.hint { color: var(--muted); font-size: 11px; padding: 0 12px 6px; flex: none;
+  background: var(--panel); }
+</style>
+</head>
+<body>
+<header>
+  <div class="avatar bot" id="hdravatar">C</div>
+  <div class="hdr">
+    <div class="name" id="hdrname">Colleague</div>
+    <div class="sub" id="hdrsub">ассистент по проекту</div>
+  </div>
+  <button class="iconbtn" id="btnmode" title="Дважды ESC или клик — режим правки">&#9881; правка: выкл</button>
+  <button class="iconbtn" id="btnnew" title="Новый диалог">новый</button>
+</header>
+<main id="msgs"></main>
+<div class="statusline" id="status"></div>
+<form class="composer" id="composer">
+  <textarea id="q" placeholder="Спросите о проекте… (Ctrl+Enter — отправить)"></textarea>
+  <button class="send" id="btnsend" type="submit">Спросить</button>
+</form>
+<div class="hint">Ctrl+Enter — отправить · Ctrl+V с картинкой — приложить файл · два ESC — режим правки</div>
+<script>
+"use strict";
+/* Bridge to the Java side: window.colleague.call(method, jsonArgs). */
+var BRIDGE = null;
+/* The Java bridge shows up either as window.colleague (WebKit/custom backends)
+   or as window.chrome.webview.hostObjects.colleague (Edge backend). */
+function locateBridge() {
+  if (window.colleague && window.colleague.call) { return window.colleague; }
+  var host = window.chrome && window.chrome.webview && window.chrome.webview.hostObjects;
+  if (host) {
+    if (host.sync && host.sync.colleague) { return host.sync.colleague; }
+    if (host.colleague) { return host.colleague; }
+  }
+  return null;
+}
+function apiCall(method, obj) {
+  var b = BRIDGE || (BRIDGE = locateBridge());
+  try {
+    if (b && b.call) {
+      var r = b.call(method, JSON.stringify(obj || {}));
+      if (r && typeof r.then === "function") { r.then(function () { }, function () { }); }
+    }
+  } catch (e) { /* ignore */ }
+}
+var msgs = document.getElementById("msgs");
+var statusEl = document.getElementById("status");
+var qEl = document.getElementById("q");
+var sendEl = document.getElementById("btnsend");
+var modeEl = document.getElementById("btnmode");
+var pendingTools = null;
+
+function esc(s) {
+  return s.replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+/* Minimal own markdown: fences, inline code, bold, italic, links, headings. */
+function mdToHtml(src) {
+  var out = "", i = 0;
+  while (i < src.length) {
+    var fence = src.indexOf("```", i);
+    if (fence < 0) { out += inlineMd(esc(src.substring(i))); break; }
+    out += inlineMd(esc(src.substring(i, fence)));
+    var nl = src.indexOf("\n", fence);
+    var close = nl < 0 ? -1 : src.indexOf("```", nl + 1);
+    if (close < 0) { out += inlineMd(esc(src.substring(fence))); break; }
+    var lang = src.substring(fence + 3, nl).trim();
+    var body = src.substring(nl + 1, close);
+    out += '<pre class="code"><div class="head"><span>' + esc(lang || "код") +
+      '</span><span class="copylink" onclick="copyPre(this)">копировать</span></div>' +
+      esc(body.replace(/\n$/, "")) + "</pre>";
+    i = close + 3;
+  }
+  return out;
+}
+function inlineMd(s) {
+  s = s.replace(/`([^`\n]+)`/g, '<code class="inline">$1</code>');
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+  s = s.replace(/(^|\s)\*([^*\n]+)\*/g, "$1<i>$2</i>");
+  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,
+    '<a href="#" onclick="return false;">$1</a>');
+  s = s.replace(/^(#{1,3})\s+(.*)$/gm, "<b>$2</b>");
+  return s;
+}
+function copyPre(node) {
+  var pre = node.closest("pre");
+  var body = pre.textContent.replace(/^копировать|^[^\n]*код?\n/, "");
+  var idx = pre.textContent.indexOf("\n", pre.textContent.indexOf("копировать"));
+  body = pre.textContent.substring(idx + 1);
+  var t = document.createElement("textarea");
+  t.value = body; document.body.appendChild(t); t.select();
+  try { document.execCommand("copy"); } catch (e) { }
+  document.body.removeChild(t);
+  node.textContent = "готово";
+  setTimeout(function () { node.textContent = "копировать"; }, 1200);
+}
+function now() {
+  var d = new Date(), h = ("0" + d.getHours()).slice(-2),
+    m = ("0" + d.getMinutes()).slice(-2);
+  return h + ":" + m;
+}
+function scrollDown() { msgs.scrollTop = msgs.scrollHeight; }
+
+function addIncoming(kind, text, time) {
+  var row = document.createElement("div"); row.className = "row in";
+  var av = document.createElement("div"); av.className = "smallavatar"; av.textContent = "C";
+  var b = document.createElement("div");
+  b.className = "bubble" + (kind === "error" ? " error" : "");
+  b.innerHTML = (kind === "error" ? esc(text) : mdToHtml(text)) +
+    '<span class="meta">' + esc(time || now()) +
+    ' <span class="copylink" onclick="copyBubble(this)">копир.</span></span>';
+  row.appendChild(av); row.appendChild(b); msgs.appendChild(row); scrollDown();
+  return b;
+}
+function addOutgoing(text, time) {
+  var row = document.createElement("div"); row.className = "row out";
+  var b = document.createElement("div"); b.className = "bubble";
+  b.textContent = text;
+  var meta = document.createElement("span"); meta.className = "meta";
+  meta.innerHTML = esc(time || now()) + ' <span class="ticks">&#10003;&#10003;</span>';
+  b.appendChild(meta);
+  row.appendChild(b); msgs.appendChild(row); scrollDown();
+}
+function copyBubble(node) {
+  var b = node.closest(".bubble");
+  var clone = b.cloneNode(true);
+  var meta = clone.querySelector(".meta"); if (meta) { meta.remove(); }
+  var t = document.createElement("textarea");
+  t.value = clone.textContent; document.body.appendChild(t); t.select();
+  try { document.execCommand("copy"); } catch (e) { }
+  document.body.removeChild(t);
+  node.textContent = "готово";
+  setTimeout(function () { node.textContent = "копир."; }, 1200);
+}
+function setTools(list) {
+  pendingTools = null;
+  if (!list || list.length === 0) { return; }
+  var row = document.createElement("div"); row.className = "tools";
+  list.forEach(function (t) { row.appendChild(chipFor(t)); });
+  msgs.appendChild(row); scrollDown(); pendingTools = row;
+}
+function chipFor(t) {
+  var c = document.createElement("span");
+  c.className = "chip " + (t.state === "done" ? "done" : "pending");
+  c.textContent = t.name + (t.detail ? ": " + t.detail : "");
+  c.onclick = function () { apiCall("openInEditor", { file: t.file || t.name }); };
+  return c;
+}
+function addTool(t) {
+  if (!pendingTools) { setTools([]); }
+  if (pendingTools) { pendingTools.appendChild(chipFor(t)); scrollDown(); }
+}
+function setStatus(s) { statusEl.textContent = s || ""; }
+function setMode(on) {
+  modeEl.classList.toggle("on", !!on);
+  modeEl.innerHTML = "&#9881; правка: " + (on ? "вкл" : "выкл");
+}
+function sendNow() {
+  var text = qEl.value.trim();
+  if (!text || sendEl.disabled) { return; }
+  qEl.value = "";
+  apiCall("send", { text: text });
+}
+document.getElementById("composer").addEventListener("submit", function (e) {
+  e.preventDefault(); sendNow();
+});
+qEl.addEventListener("keydown", function (e) {
+  if (e.ctrlKey && (e.key === "Enter")) { e.preventDefault(); sendNow(); return; }
+  if (e.key === "Escape") { doubleEsc(e); }
+});
+var lastEsc = 0;
+function doubleEsc(e) {
+  var t = Date.now();
+  if (lastEsc && t - lastEsc < 1000) { lastEsc = 0; apiCall("toggleEdit", {}); }
+  else { lastEsc = t; }
+}
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Escape" && document.activeElement !== qEl) { doubleEsc(e); }
+});
+modeEl.addEventListener("click", function () { apiCall("toggleEdit", {}); });
+document.getElementById("btnnew").addEventListener("click", function () {
+  apiCall("newChat", {});
+});
+qEl.addEventListener("paste", function (e) {
+  var items = (e.clipboardData && e.clipboardData.items) || [];
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].kind === "file" || items[i].type.indexOf("image/") === 0) {
+      e.preventDefault(); apiCall("attachFile", {}); return;
+    }
+  }
+});
+/* Java -> JS entry point. */
+window.colleaguePush = function (kind, payload) {
+  var data = {};
+  try { data = payload ? JSON.parse(payload) : {}; } catch (e) { data = { text: String(payload || "") }; }
+  switch (kind) {
+    case "ready":
+      if (data.theme) { document.body.dataset.theme = data.theme; }
+      if (data.name) { document.getElementById("hdrname").textContent = data.name; }
+      if (data.sub) { document.getElementById("hdrsub").textContent = data.sub; }
+      if (typeof data.mode === "boolean") { setMode(data.mode); }
+      apiCall("bridgeReady", {});
+      break;
+    case "history":
+      msgs.textContent = "";
+      (data.items || []).forEach(function (m) {
+        if (m.kind === "user") { addOutgoing(m.text, m.time); }
+        else { addIncoming(m.kind === "error" ? "error" : "answer", m.text, m.time); }
+      });
+      break;
+    case "user": addOutgoing(data.text || "", data.time); break;
+    case "answer": setTools(data.tools || []); addIncoming("answer", data.text || "", data.time); break;
+    case "error": addIncoming("error", data.text || "", data.time); break;
+    case "tool": addTool(data); break;
+    case "status": setStatus(data.text || ""); break;
+    case "mode": setMode(!!data.on); setStatus(data.text || ""); break;
+    case "busy": sendEl.disabled = !!data.busy; setStatus(data.text || ""); break;
+    case "input": qEl.value = data.text || ""; qEl.focus(); break;
+  }
+};
+function tryBridge() {
+  var b = locateBridge();
+  if (b) { BRIDGE = b; apiCall("bridgeReady", {}); return true; }
+  return false;
+}
+if (!tryBridge()) {
+  window.addEventListener("load", function () {
+    var attempt = 0;
+    var retry = function () {
+      if (tryBridge() || attempt++ > 10) {
+        if (!BRIDGE) { setStatus("Мост Java недоступен — страница загружена без подключения."); }
+        return;
+      }
+      setTimeout(retry, 250);
+    };
+    retry();
+  });
+}
+</script>
+</body>
+</html>
