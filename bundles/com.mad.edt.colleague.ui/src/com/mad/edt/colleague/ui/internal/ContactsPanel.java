@@ -69,8 +69,26 @@ public final class ContactsPanel {
 
     private Tree ourTree;
     private Button ourConnectButton;
+    private Button ourModeButton;
     private Runnable ourOnAddProvider;
+    private Runnable ourOnModeToggle;
     private boolean ourLoading;
+
+    /**
+     * @param theOnModeToggle invoked when the layout mode button is pressed
+     */
+    public void setOnModeToggle(final Runnable theOnModeToggle) {
+        ourOnModeToggle = theOnModeToggle;
+    }
+
+    /**
+     * @param theLabel caption of the mode toggle button
+     */
+    public void setModeLabel(final String theLabel) {
+        if(ourModeButton != null && !ourModeButton.isDisposed()) {
+            ourModeButton.setText(theLabel);
+        }
+    }
 
     /**
      * @param theOnAddProvider invoked when the connect button is pressed
@@ -148,6 +166,13 @@ public final class ContactsPanel {
         final Button refreshButton = new Button(header, SWT.PUSH);
         refreshButton.setText("Обновить");
         refreshButton.addListener(SWT.Selection, event -> reload());
+        ourModeButton = new Button(header, SWT.PUSH);
+        ourModeButton.setText("Мобильный");
+        ourModeButton.addListener(SWT.Selection, event -> {
+            if(ourOnModeToggle != null) {
+                ourOnModeToggle.run();
+            }
+        });
 
         ourTree = new Tree(root, SWT.SINGLE | SWT.BORDER | SWT.HIDE_SELECTION);
         final GridData treeData = new GridData(SWT.FILL, SWT.FILL, true, true);

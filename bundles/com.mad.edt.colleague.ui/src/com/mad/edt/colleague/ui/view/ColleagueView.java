@@ -8,7 +8,12 @@ import org.eclipse.core.runtime.IStatus;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.CTabFolder;
 import org.eclipse.swt.custom.CTabItem;
+import org.eclipse.swt.custom.SashForm;
 import org.eclipse.swt.layout.FillLayout;
+import org.eclipse.swt.layout.GridData;
+import org.eclipse.swt.layout.GridLayout;
+import org.eclipse.swt.custom.StackLayout;
+import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.custom.SashForm;
@@ -51,6 +56,14 @@ public class ColleagueView extends ViewPart {
     private final Map<String, ChatPanel> ourPanels = new HashMap<>();
 
     private SashForm ourSash;
+    private Composite ourContactsArea;
+    private Composite ourTabsArea;
+    private Composite ourMobileHolder;
+    private Composite ourMobileStack;
+    private StackLayout ourRootStack;
+    private StackLayout ourMobileStackLayout;
+    private Button ourBackButton;
+    private boolean ourModeMobile;
     private ContactsPanel ourContacts;
     private CTabFolder ourTabFolder;
 
@@ -93,22 +106,105 @@ public class ColleagueView extends ViewPart {
     @Override
     public void createPartControl(final Composite theParent) {
         final Composite root = new Composite(theParent, SWT.NONE);
-        root.setLayout(new FillLayout());
+        ourRootStack = new StackLayout();
+        root.setLayout(ourRootStack);
         ourSash = new SashForm(root, SWT.HORIZONTAL);
 
-        final Composite contactsArea = new Composite(ourSash, SWT.NONE);
-        contactsArea.setLayout(new FillLayout());
-        ourContacts = new ContactsPanel(contactsArea, this::openContact, this::onContactsLoaded);
+        ourContactsArea = new Composite(ourSash, SWT.NONE);
+        ourContactsArea.setLayout(new FillLayout());
+        ourContacts = new ContactsPanel(ourContactsArea, this::openContact, this::onContactsLoaded);
         ourContacts.setOnAddProvider(this::addProviderWizard);
+        ourContacts.setOnModeToggle(this::toggleMode);
 
-        final Composite tabsArea = new Composite(ourSash, SWT.NONE);
-        tabsArea.setLayout(new FillLayout());
-        ourTabFolder = new CTabFolder(tabsArea, SWT.TOP | SWT.FLAT);
+        ourTabsArea = new Composite(ourSash, SWT.NONE);
+        ourTabsArea.setLayout(new FillLayout());
+        ourTabFolder = new CTabFolder(ourTabsArea, SWT.TOP | SWT.FLAT);
         ourTabFolder.setTabHeight(24);
 
         ourSash.setWeights(1, 2);
+
+        ourMobileHolder = new Composite(root, SWT.NONE);
+        final GridLayout mobileLayout = new GridLayout(1, false);
+        mobileLayout.marginWidth = 0;
+        mobileLayout.marginHeight = 0;
+        ourMobileHolder.setLayout(mobileLayout);
+        ourBackButton = new Button(ourMobileHolder, SWT.PUSH);
+        ourBackButton.setText("← Контакты");
+        ourBackButton.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
+        ourBackButton.addListener(SWT.Selection, event -> showMobilePage(ourContactsArea));
+        ourBackButton.setVisible(false);
+        final Composite contentRow = new Composite(ourMobileHolder, SWT.NONE);
+        contentRow.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
+        contentRow.setLayout(new FillLayout());
+        ourMobileStack = new Composite(contentRow, SWT.NONE);
+        ourMobileStackLayout = new StackLayout();
+        ourMobileStack.setLayout(ourMobileStackLayout);
+
+        ourRootStack.topControl = ourSash;
+        ourModeMobile = modePreference();
+        if(ourModeMobile) {
+            applyMode(true);
+        }
         com.mad.edt.colleague.llm.ProviderStore.loadIntoSettings();
         ourContacts.reload();
+    }
+
+    private static boolean modePreference() {
+        return org.eclipse.core.runtime.preferences.InstanceScope.INSTANCE
+            .getNode("com.mad.edt.colleague.ui").getBoolean("ui.mobile", false);
+    }
+
+    private static void saveModePreference(final boolean theMobile) {
+        final org.osgi.service.prefs.Preferences node =
+            org.eclipse.core.runtime.preferences.InstanceScope.INSTANCE
+                .getNode("com.mad.edt.colleague.ui");
+        node.putBoolean("ui.mobile", theMobile);
+        try {
+            node.flush();
+        } catch (final org.osgi.service.prefs.BackingStoreException ex) {
+            // in-memory value is enough for this session
+        }
+    }
+
+    private void toggleMode() {
+        ourModeMobile = !ourModeMobile;
+        saveModePreference(ourModeMobile);
+        applyMode(ourModeMobile);
+    }
+
+    /** Re-parents the shared panels between the desktop sash and mobile stack. */
+    private void applyMode(final boolean theMobile) {
+        if(ourTabFolder.isDisposed()) {
+            return;
+        }
+        if(theMobile) {
+            ourContactsArea.setParent(ourMobileStack);
+            ourTabsArea.setParent(ourMobileStack);
+            ourRootStack.topControl = ourMobileHolder;
+            ourMobileStackLayout.topControl = ourContactsArea;
+            ourBackButton.setVisible(false);
+            showMobilePage(ourContactsArea);
+        } else {
+            ourContactsArea.setParent(ourSash);
+            ourTabsArea.setParent(ourSash);
+            ourSash.setWeights(1, 2);
+            ourRootStack.topControl = ourSash;
+            ourBackButton.setVisible(false);
+        }
+        ourSash.layout(true);
+        ourMobileHolder.layout(true);
+        if(ourContacts != null) {
+            ourContacts.setModeLabel(ourModeMobile ? "Десктоп" : "Мобильный");
+        }
+    }
+
+    private void showMobilePage(final Composite thePage) {
+        if(ourModeMobile && !thePage.isDisposed()) {
+            ourMobileStackLayout.topControl = thePage;
+            ourBackButton.setVisible(thePage == ourTabsArea);
+            ourMobileStack.layout(true);
+            ourBackButton.getParent().layout(true);
+        }
     }
 
     @Override
@@ -272,6 +368,9 @@ public class ColleagueView extends ViewPart {
             }
         });
         ourTabFolder.setSelection(tab);
+        if(ourModeMobile) {
+            showMobilePage(ourTabsArea);
+        }
         return panel;
     }
 
