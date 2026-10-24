@@ -142,19 +142,40 @@ public final class CodeSearch {
         if(tokens.isEmpty() || ourIndex.isEmpty()) {
             return "";
         }
+        final List<Entry> snapshot = ourIndex;
+
+        // Pass 1: score every path cheaply, before any file content is read,
+        // so path matches survive even when the read budget cuts the scan.
+        final int[] nameScores = new int[snapshot.size()];
+        final Integer[] order = new Integer[snapshot.size()];
+        for(int index = 0; index < snapshot.size(); index++) {
+            int nameScore = 0;
+            for(final String token : tokens) {
+                if(snapshot.get(index).ourLowerPath.contains(token)) {
+                    nameScore += 5;
+                }
+            }
+            nameScores[index] = nameScore;
+            order[index] = Integer.valueOf(index);
+        }
+        java.util.Arrays.sort(order, (left, right) ->
+            Integer.compare(nameScores[right.intValue()], nameScores[left.intValue()]));
+
         final long deadline = System.nanoTime() + SCAN_BUDGET_MS * 1_000_000L;
         long readBytes = 0L;
         int scannedFiles = 0;
         int visitedFiles = 0;
         boolean cutByTime = false;
         boolean cutByBytes = false;
-        final List<Entry> snapshot = ourIndex;
 
         final Comparator<Hit> byScore = Comparator.comparingInt(hit -> hit.ourScore);
         final PriorityQueue<Hit> top = new PriorityQueue<>(byScore);
 
-        for(final Entry entry : snapshot) {
+        for(final Integer position : order) {
             visitedFiles++;
+            final int index = position.intValue();
+            final Entry entry = snapshot.get(index);
+            final int nameScore = nameScores[index];
             if(System.nanoTime() > deadline) {
                 cutByTime = true;
                 break;
@@ -162,12 +183,6 @@ public final class CodeSearch {
             if(readBytes >= READ_BUDGET_BYTES) {
                 cutByBytes = true;
                 break;
-            }
-            int nameScore = 0;
-            for(final String token : tokens) {
-                if(entry.ourLowerPath.contains(token)) {
-                    nameScore += 5;
-                }
             }
             final Path location = entry.ourLocation;
             try {

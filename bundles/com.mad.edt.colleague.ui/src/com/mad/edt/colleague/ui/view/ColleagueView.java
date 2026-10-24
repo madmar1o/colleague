@@ -150,6 +150,14 @@ public class ColleagueView extends ViewPart {
         Job.create("Colleague: project index", (monitor) -> {
             final int files = ourCodeSearch.reindex(monitor);
             System.err.println("[colleague] context index ready: " + files + " files");
+            if(Boolean.getBoolean("colleague.search.selftest")) {
+                final long startedAt = System.nanoTime();
+                final String found = ourCodeSearch.search("модуль объекта справочник проводка");
+                final long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+                System.err.println("[colleague] search selftest: " + found.length()
+                    + " chars in " + elapsedMs + " ms, first line: "
+                    + found.lines().findFirst().orElse("<none>"));
+            }
             return Status.OK_STATUS;
         }).schedule();
 
