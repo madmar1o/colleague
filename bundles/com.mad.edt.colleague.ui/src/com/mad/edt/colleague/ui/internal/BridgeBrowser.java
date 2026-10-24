@@ -47,6 +47,9 @@ final class BridgeBrowser {
     private final BiConsumer<String, JsonObject> ourHandler;
     private final List<String[]> ourQueue = new ArrayList<>();
     private boolean ourReady;
+    private boolean ourFuncSeen;
+    private boolean ourLocationSeen;
+    private boolean ourDeliverySeen;
 
     /**
      * @param theParent parent composite; the browser fills it via layout data
@@ -133,6 +136,11 @@ final class BridgeBrowser {
         if("bridgeReady".equals(method) || "sync".equals(method)) {
             ourReady = true;
         }
+        if(!ourFuncSeen) {
+            ourFuncSeen = true;
+            System.out.println("[colleague] bridge: first page call via function: "
+                + method);
+        }
         handle(method, arguments);
         return drainBatch();
     }
@@ -154,7 +162,12 @@ final class BridgeBrowser {
             }
             ourQueue.clear();
         }
-        return events.toString();
+        final String batch = events.toString();
+        if(!"[]".equals(batch) && !ourDeliverySeen) {
+            ourDeliverySeen = true;
+            System.out.println("[colleague] bridge: first event batch delivered to the page");
+        }
+        return batch;
     }
 
     private boolean loadPage(final String theResource) {
@@ -204,6 +217,11 @@ final class BridgeBrowser {
         }
         if("bridgeReady".equals(method) || "sync".equals(method)) {
             ourReady = true;
+        }
+        if(!ourLocationSeen) {
+            ourLocationSeen = true;
+            System.out.println("[colleague] bridge: first page call via navigation: "
+                + method);
         }
         if("sync".equals(method)) {
             syncPollViaLocation();
