@@ -69,7 +69,15 @@ public final class ContactsPanel {
 
     private Tree ourTree;
     private Button ourConnectButton;
+    private Runnable ourOnAddProvider;
     private boolean ourLoading;
+
+    /**
+     * @param theOnAddProvider invoked when the connect button is pressed
+     */
+    public void setOnAddProvider(final Runnable theOnAddProvider) {
+        ourOnAddProvider = theOnAddProvider;
+    }
 
     /**
      * @param theParent parent composite (caller provides the layout)
@@ -168,9 +176,13 @@ public final class ContactsPanel {
         });
 
         ourConnectButton = new Button(root, SWT.PUSH);
-        ourConnectButton.setText("+ Подключить провайдер (M6.3)");
-        ourConnectButton.setEnabled(false);
+        ourConnectButton.setText("+ Подключить провайдер");
         ourConnectButton.setLayoutData(new GridData(SWT.FILL, SWT.BOTTOM, true, false));
+        ourConnectButton.addListener(SWT.Selection, event -> {
+            if(ourOnAddProvider != null) {
+                ourOnAddProvider.run();
+            }
+        });
     }
 
     private void selectContact() {
