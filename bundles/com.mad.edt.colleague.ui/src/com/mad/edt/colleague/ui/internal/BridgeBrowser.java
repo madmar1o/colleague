@@ -50,6 +50,7 @@ final class BridgeBrowser {
     private boolean ourFuncSeen;
     private boolean ourLocationSeen;
     private boolean ourDeliverySeen;
+    private static int ourCallSeq;
 
     /**
      * @param theParent parent composite; the browser fills it via layout data
@@ -152,9 +153,9 @@ final class BridgeBrowser {
             System.out.println("[colleague] bridge: first page call via function: "
                 + method);
         }
+        final int seq = traceCall("function", method, arguments);
         handle(method, arguments);
-        return drainBatch();
-    }
+        return drainBatch(seq);    }
 
     /**
      * Removes every queued event and renders it as the JSON batch the page
@@ -162,7 +163,7 @@ final class BridgeBrowser {
      *
      * @return {@code [["kind","{json}"],...]} text, possibly {@code []}
      */
-    private String drainBatch() {
+    private String drainBatch(final int theCallSeq) {
         final JsonArray events = new JsonArray();
         synchronized(ourQueue) {
             for(final String[] entry : ourQueue) {
@@ -174,9 +175,14 @@ final class BridgeBrowser {
             ourQueue.clear();
         }
         final String batch = events.toString();
-        if(!"[]".equals(batch) && !ourDeliverySeen) {
-            ourDeliverySeen = true;
-            System.out.println("[colleague] bridge: first event batch delivered to the page");
+        if(!"[]".equals(batch)) {
+            if(!ourDeliverySeen) {
+                ourDeliverySeen = true;
+                System.out.println("[colleague] bridge: first event batch delivered "
+                    + "to the page");
+            }
+            System.out.println("[colleague] bridge: " + events.size()
+                + " event(s) delivered in reply to call #" + theCallSeq);
         }
         return batch;
     }
@@ -235,10 +241,33 @@ final class BridgeBrowser {
                 + method);
         }
         if("sync".equals(method)) {
+            traceCall("navigation", method, parseArgs(json));
             syncPollViaLocation();
             return;
         }
+        traceCall("navigation", method, parseArgs(json));
         handle(method, parseArgs(json));
+    }
+
+    /**
+     * Diagnostic trace of one page call. Prints the first calls of every kind
+     * so a missing polling call is distinguishable from a silent handler.
+     *
+     * @param theChannel channel the call arrived on
+     * @param theMethod page method name
+     * @param theArguments parsed call arguments
+     * @return sequence number of this call, for the event batch trace
+     */
+    private static int traceCall(final String theChannel, final String theMethod,
+        final JsonObject theArguments) {
+        final int seq = ourCallSeq++;
+        if(seq < 8 || !"sync".equals(theMethod)) {
+            final String args = theArguments.toString();
+            System.out.println("[colleague] bridge call #" + seq + " via " + theChannel
+                + ": " + theMethod + (args.length() > 1 && ! "{}".equals(args)
+                    ? " " + (args.length() > 160 ? args.substring(0, 160) : args) : ""));
+        }
+        return seq;
     }
 
     /**
@@ -250,7 +279,7 @@ final class BridgeBrowser {
         if(ourBrowser.isDisposed()) {
             return;
         }
-        final String batch = drainBatch();
+        final String batch = drainBatch(-1);
         if("[]".equals(batch)) {
             return;
         }
