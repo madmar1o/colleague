@@ -249,6 +249,10 @@ public final class ChatPanel {
                     : "Готов к работе");
                 return;
             case "send":
+                if(Boolean.getBoolean("colleague.browser.selftest")) {
+                    System.out.println("[colleague] bridge: page reached the panel's "
+                        + "input handler");
+                }
                 sendQuestion(BridgeBrowser.optString(theArguments, "text"));
                 return;
             case "newChat":
@@ -266,6 +270,11 @@ public final class ChatPanel {
             default:
                 return;
         }
+    }
+
+    /** @return {@code true} when the chat page announced itself on the bridge */
+    public boolean isBridgeReady() {
+        return ourBridge != null && ourBridge.isReady();
     }
 
     private void toggleEdit() {

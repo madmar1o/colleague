@@ -78,6 +78,8 @@ public class ColleagueView extends ViewPart {
     private ChatPanel ourLastAnsweredPanel;
     private boolean ourSelfTestDone;
     private boolean ourSelfTestPending;
+    private boolean ourBrowserTestDone;
+    private boolean ourBrowserTestPending;
 
     /**
      * Stages a question for the open instance or for the next view creation.
@@ -408,6 +410,12 @@ public class ColleagueView extends ViewPart {
                 System.err.println("[colleague] UI selftest answer: ["
                     + answer.replace('\n', ' ') + "]");
             }
+            if(ourBrowserTestPending) {
+                ourBrowserTestPending = false;
+                System.err.println("[colleague] browser selftest answer: ["
+                    + answer.replace('\n', ' ').substring(0,
+                        Math.min(120, answer.replace('\n', ' ').length())) + "]");
+            }
         });
         ourTabFolder.setSelection(tab);
         if(ourModeMobile) {
@@ -435,6 +443,32 @@ public class ColleagueView extends ViewPart {
         panel.fillQuestion("Какая процедура описана в приложенном контексте? Ответь одним словом.");
         System.err.println("[colleague] UI selftest: sending question with context");
         panel.send();
+        scheduleBrowserTest(panel);
+    }
+
+    /**
+     * Second selftest phase: after the chat page had time to connect to the
+     * bridge, ask the very same panel through its normal question pipeline.
+     * The question then round-trips: events leave for the page, the page
+     * renders them, and the answer arrives as an ordinary LLM reply. The
+     * markers show the full chain works while the page is actually attached.
+     */
+    private void scheduleBrowserTest(final ChatPanel thePanel) {
+        if(!Boolean.getBoolean("colleague.browser.selftest") || ourBrowserTestDone) {
+            return;
+        }
+        ourBrowserTestDone = true;
+        Display.getDefault().timerExec(25000, () -> {
+            if(ourTabFolder.isDisposed() || thePanel == null) {
+                return;
+            }
+            ourBrowserTestPending = true;
+            System.err.println("[colleague] browser selftest: sending while the page "
+                + "is attached: bridgeReady=" + thePanel.isBridgeReady());
+            thePanel.fillQuestion("Повтори одним словом: какая процедура была в контексте "
+                + "выше?");
+            thePanel.send();
+        });
     }
 
     /**
