@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
@@ -77,6 +78,7 @@ public final class ContactsPanel {
     private Composite ourRoot;
     private BridgeBrowser ourBridge;
     private String ourLastPalette = "";
+    private Color ourPageBackground;
 
     private Tree ourTree;
     private Button ourModeButton;
@@ -170,6 +172,9 @@ public final class ContactsPanel {
         if(ourRoot != null && !ourRoot.isDisposed()) {
             ourRoot.dispose();
         }
+        if(ourPageBackground != null && !ourPageBackground.isDisposed()) {
+            ourPageBackground.dispose();
+        }
     }
 
     /**
@@ -200,10 +205,10 @@ public final class ContactsPanel {
     private void createControls(final Composite theParent) {
         ourRoot = new Composite(theParent, SWT.NONE);
         ourRoot.setLayout(new GridLayout(1, false));
-        if(createBrowser()) {
-            return;
+        createBrowser();
+        if(ourBridge == null) {
+            createFallback(theParent);
         }
-        createFallback(theParent);
     }
 
     /**
@@ -211,25 +216,40 @@ public final class ContactsPanel {
      *
      * @return {@code true} when the browser path is active
      */
-    private boolean createBrowser() {
+    private void createBrowser() {
         try {
             ViewBridge.ensureUserDataDir();
             ourBridge = new BridgeBrowser(ourRoot, "web/contacts.html", this::handleBridge);
             final JsonObject ready = ThemeSupport.pagePalette(ourRoot);
             ourLastPalette = ready.toString();
+            applyNativePalette(ready);
             ready.addProperty("modeLabel", ourModeLabel);
             ourBridge.push("ready", ready);
             watchTheme();
-            return true;
+            return;
         } catch (final RuntimeException | LinkageError | org.eclipse.swt.SWTError ex) {
             System.err.println("colleague: contacts browser unavailable, plain fallback: "
                 + ex.getMessage());
             ourBridge = null;
+        }
+        if(ourRoot.getChildren().length != 1) {
             for(final Control child : ourRoot.getChildren()) {
                 child.dispose();
             }
-            return false;
         }
+    }
+
+    /** Paints the panel container with the page background color. */
+    private void applyNativePalette(final JsonObject thePalette) {
+        if(ourRoot.isDisposed()) {
+            return;
+        }
+        final Color fresh = ThemeSupport.pageColor(ourRoot.getDisplay(), thePalette, "bg");
+        if(ourPageBackground != null && !ourPageBackground.isDisposed()) {
+            ourPageBackground.dispose();
+        }
+        ourPageBackground = fresh;
+        ourRoot.setBackground(fresh);
     }
 
     private void handleBridge(final String theMethod, final JsonObject theArguments) {
@@ -427,6 +447,7 @@ public final class ContactsPanel {
         ThemeSupport.watchPalette(ourRoot, palette -> {
             if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
                 ourLastPalette = palette.toString();
+                applyNativePalette(palette);
                 ourBridge.push("readyPalette", palette);
             }
         });

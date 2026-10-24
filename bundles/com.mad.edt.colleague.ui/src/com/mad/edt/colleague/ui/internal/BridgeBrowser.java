@@ -10,34 +10,40 @@ import java.util.function.BiConsumer;
 
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.browser.Browser;
-import org.eclipse.swt.browser.BrowserFunction;
 import org.eclipse.swt.browser.LocationEvent;
 import org.eclipse.swt.browser.LocationListener;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.Composite;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 
 /**
- * Shared embedded-browser plumbing for the chat and contacts panels: loads a
- * bundled HTML page, then relays calls from the page to Java through two
- * channels: a named host object (fast path, may be unavailable depending on
- * the browser backend) and the {@code colleague:<method>:<urlencoded json>}
- * navigation protocol (always available, vetoed before it navigates).
- * Events travel back through {@code window.colleaguePush(kind, json)}; calls
- * issued before the page signals {@code bridgeReady} are queued.
+ * Shared embedded-browser plumbing for the chat and contacts panels. The page
+ * calls Java by invoking {@code window.colleague(method, jsonArgs)} — a
+ * function contributed by an async batch of the browser backend — and takes
+ * the result of that call as an array of {@code [kind, json]} event batches
+ * that it feeds into its own {@code colleaguePush}. The very same array is
+ * returned for a {@code sync} poll, which covers events Java produced on its
+ * own (answers, status changes). As a fallback for backends without function
+ * support, the page may navigate to
+ * {@code colleague:<method>:<urlencoded json>}; those navigations are vetoed
+ * and dispatched here. Events pushed before the page announced itself are
+ * queued and delivered with the first reply.
  */
 final class BridgeBrowser {
 
-    /** Prefix of the navigation-based call channel. */
+    /** Prefix of the navigation-based fallback call channel. */
     private static final String PROTOCOL = "colleague:";
 
     private final Browser ourBrowser;
     private final BiConsumer<String, JsonObject> ourHandler;
-    private final List<String> ourQueue = new ArrayList<>();
+    private final List<String[]> ourQueue = new ArrayList<>();
     private boolean ourReady;
+    /** Set while a page function call is being served on the UI thread. */
+    private boolean ourInPageCall;
 
     /**
      * @param theParent parent composite; the browser fills it via layout data
@@ -63,11 +69,18 @@ final class BridgeBrowser {
 
             @Override
             public void changed(final LocationEvent theEvent) {
-                // the page re-registers after any real navigation
+                // not needed: the page never really navigates
             }
         });
-        new BridgeFunction(ourBrowser, "colleague");
+        final org.eclipse.swt.browser.BrowserFunction function =
+            new org.eclipse.swt.browser.BrowserFunction(ourBrowser, "colleague") {
+                @Override
+                public Object function(final Object... theArguments) {
+                    return invokePageCall(theArguments);
+                }
+            };
         if(!loadPage(theResource)) {
+            function.dispose();
             throw new IllegalStateException("page load failed: " + theResource);
         }
     }
@@ -80,35 +93,102 @@ final class BridgeBrowser {
     }
 
     /**
-     * Sends one event to the page, queueing it until the page is ready.
+     * Sends one event to the page: through the running function call when the
+     * page is polling, through the queue until it does.
      *
      * @param theKind event name seen by the page
      * @param thePayload JSON payload of the event
      */
     void push(final String theKind, final JsonObject thePayload) {
-        final String call = "window.colleaguePush('" + theKind + "','"
-            + escapeJs(thePayload.toString()) + "')";
-        if(!ourReady) {
-            ourQueue.add(call);
-            return;
+        synchronized(ourQueue) {
+            ourQueue.add(new String[] {theKind, thePayload.toString()});
         }
-        if(ourBrowser.isDisposed()) {
-            return;
-        }
-        if(ourBrowser.getDisplay().getThread() == Thread.currentThread()) {
-            ourBrowser.execute(call);
-        } else {
-            ourBrowser.getDisplay().asyncExec(() -> {
-                if(!ourBrowser.isDisposed()) {
-                    ourBrowser.execute(call);
-                }
-            });
+        if(ourReady && !ourInPageCall && !ourBrowser.isDisposed()) {
+            drainQueue();
         }
     }
 
     /** @return {@code true} once the page announced its push endpoint */
     boolean isReady() {
         return ourReady;
+    }
+
+    /**
+     * Called on the UI thread from page code with the async batch arguments.
+     *
+     * @param theArguments raw batch arguments seen by the backend
+     * @return JSON array text of {@code [kind, json]} events the page should
+     *         apply right now, possibly empty; returned as text because the
+     *         backend marshals plain Java objects as proxies, not values
+     */
+    private String invokePageCall(final Object... theArguments) {
+        final JsonArray events = new JsonArray();
+        if(theArguments.length < 1 || !(theArguments[0] instanceof String)) {
+            return events.toString();
+        }
+        final String method = (String)theArguments[0];
+        final JsonObject arguments;
+        ourInPageCall = true;
+        try {
+            if("sync".equals(method)) {
+                arguments = new JsonObject();
+                markReady();
+            } else if(theArguments.length > 1 && theArguments[1] != null) {
+                arguments = parseArgs(theArguments[1]);
+            } else {
+                arguments = new JsonObject();
+            }
+            if("bridgeReady".equals(method)) {
+                markReady();
+                handle(method, arguments);
+            } else {
+                handle(method, arguments);
+            }
+        } finally {
+            ourInPageCall = false;
+        }
+        synchronized(ourQueue) {
+            while(!ourQueue.isEmpty()) {
+                final String[] entry = ourQueue.remove(0);
+                final JsonArray event = new JsonArray();
+                event.add(entry[0]);
+                event.add(entry[1]);
+                events.add(event);
+            }
+        }
+        return events.toString();
+    }
+
+    /** Pushes queued events into the open async function call. */
+    private void drainQueue() {
+        if(ourBrowser.isDisposed() || ourBrowser.getDisplay().getThread()
+            != Thread.currentThread()) {
+            return;
+        }
+        final JsonArray events = new JsonArray();
+        synchronized(ourQueue) {
+            while(!ourQueue.isEmpty()) {
+                final String[] entry = ourQueue.remove(0);
+                final JsonArray event = new JsonArray();
+                event.add(entry[0]);
+                event.add(entry[1]);
+                events.add(event);
+            }
+        }
+        if(events.size() == 0) {
+            return;
+        }
+        ourBrowser.execute("window.colleagueEvents("
+            + events.toString().replace("<", "\\u003c") + ")");
+    }
+
+    private void markReady() {
+        if(!ourReady) {
+            ourReady = true;
+            if(!ourInPageCall) {
+                drainQueue();
+            }
+        }
     }
 
     private boolean loadPage(final String theResource) {
@@ -154,23 +234,13 @@ final class BridgeBrowser {
                 json = encoded;
             }
         }
+        if("bridgeReady".equals(method)) {
+            markReady();
+        }
         handle(method, parseArgs(json));
     }
 
     private void handle(final String theMethod, final JsonObject theArguments) {
-        if("bridgeReady".equals(theMethod)) {
-            if(ourReady) {
-                return;
-            }
-            ourReady = true;
-            final List<String> replay = new ArrayList<>(ourQueue);
-            ourQueue.clear();
-            for(final String call : replay) {
-                if(!ourBrowser.isDisposed()) {
-                    ourBrowser.execute(call);
-                }
-            }
-        }
         ourHandler.accept(theMethod, theArguments);
     }
 
@@ -192,28 +262,5 @@ final class BridgeBrowser {
     static String optString(final JsonObject theObject, final String theName) {
         return theObject.has(theName) && !theObject.get(theName).isJsonNull()
             ? theObject.get(theName).getAsString() : "";
-    }
-
-    private static String escapeJs(final String theText) {
-        return theText.replace("\\", "\\\\").replace("'", "\\'")
-            .replace("\r", "\\r").replace("\n", "\\n").replace("<", "\\u003c");
-    }
-
-    /** Host object channel exposed to page scripts where supported. */
-    private final class BridgeFunction extends BrowserFunction {
-
-        private BridgeFunction(final Browser theBrowser, final String theName) {
-            super(theBrowser, theName);
-        }
-
-        @Override
-        public Object function(final Object... theArguments) {
-            if(theArguments.length < 1 || !(theArguments[0] instanceof String)) {
-                return Boolean.FALSE;
-            }
-            handle((String)theArguments[0],
-                parseArgs(theArguments.length > 1 ? theArguments[1] : null));
-            return Boolean.TRUE;
-        }
     }
 }

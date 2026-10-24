@@ -392,6 +392,7 @@ public class ColleagueView extends ViewPart {
         final Composite body = new Composite(ourTabFolder, SWT.NONE);
         body.setLayout(new FillLayout());
         final ChatPanel panel = new ChatPanel(body, session, theContact.getModel());
+        panel.attachThemeAnchor(ourRoot);
         panel.setToolSupplier(() -> AgentMode.isOn()
             ? WorkspaceTools.withWrite(ourCodeSearch)
             : WorkspaceTools.readOnly(ourCodeSearch));

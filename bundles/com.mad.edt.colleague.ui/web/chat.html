@@ -32,7 +32,7 @@ header {
   display: flex; align-items: center; justify-content: center;
   font-weight: 600; color: #fff; font-size: 15px; user-select: none;
 }
-.avatar.bot { background: linear-gradient(135deg, #4d7fb3, #7a5aa8); }
+.avatar.bot { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
 .hdr { flex: 1 1 auto; min-width: 0; }
 .hdr .name { font-weight: 600; font-size: 14px; }
 .hdr .sub { color: var(--muted); font-size: 11px; white-space: nowrap;
@@ -68,7 +68,7 @@ main {
 .smallavatar {
   width: 30px; height: 30px; border-radius: 50%; flex: none; font-size: 12px;
   display: flex; align-items: center; justify-content: center; color: #fff;
-  background: linear-gradient(135deg, #4d7fb3, #7a5aa8); user-select: none;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); user-select: none;
 }
 pre.code {
   background: var(--code); border: 1px solid var(--line); border-radius: 8px;
@@ -107,6 +107,24 @@ button.send {
 button.send:disabled { background: var(--panel2); color: var(--muted); }
 .hint { color: var(--muted); font-size: 11px; padding: 0 12px 6px; flex: none;
   background: var(--panel); }
+.welcome {
+  margin: auto; max-width: 420px; text-align: center; color: var(--muted);
+  font-size: 13px; line-height: 1.6; padding: 20px; user-select: none;
+}
+.welcome .bigavatar {
+  width: 64px; height: 64px; margin: 0 auto 12px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; font-weight: 600; color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+}
+.typing { display: inline-flex; gap: 4px; align-items: center; padding: 4px 2px; }
+.typing i {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--muted);
+  display: inline-block; animation: blink 1.2s infinite;
+}
+.typing i:nth-child(2) { animation-delay: .2s; }
+.typing i:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
 </style>
 </head>
 <body>
@@ -119,7 +137,14 @@ button.send:disabled { background: var(--panel2); color: var(--muted); }
   <button class="iconbtn" id="btnmode" title="Дважды ESC или клик — режим правки">&#9881; правка: выкл</button>
   <button class="iconbtn" id="btnnew" title="Новый диалог">новый</button>
 </header>
-<main id="msgs"></main>
+<main id="msgs">
+  <div class="welcome" id="welcome">
+    <div class="bigavatar">C</div>
+    Задайте вопрос об этом проекте. Коллега поискал по коду, найдёт нужные
+    модули и пришлёт ответ со ссылками на файлы. Двойной ESC включает режим
+    правки — тогда он сможет ещё и менять файлы по вашему указанию.
+  </div>
+</main>
 <div class="statusline" id="status"></div>
 <form class="composer" id="composer">
   <textarea id="q" placeholder="Спросите о проекте… (Ctrl+Enter — отправить)"></textarea>
@@ -128,16 +153,46 @@ button.send:disabled { background: var(--panel2); color: var(--muted); }
 <div class="hint">Ctrl+Enter — отправить · Ctrl+V с картинкой — приложить файл · два ESC — режим правки</div>
 <script>
 "use strict";
-/* Bridge to the Java side: a vetoed navigation protocol. Every call is a
-   navigation to colleague:<method>:<urlencoded-json> that Java intercepts
-   and cancels before it happens. This channel works on every browser
-   backend, unlike host objects which the embedded widgets expose late or
-   not at all. Events come back through window.colleaguePush. */
+/* Bridge to Java. Primary channel: a call to the batch function
+   window.colleague(method, json) contributed by the embedded browser; the
+   value it returns is an array of [kind, json] events to apply right away.
+   A "sync" poll collects events Java produced on its own. Fallback for
+   backends without function support: a vetoed navigation to
+   colleague:<method>:<urlencoded-json>. */
+var CHANNEL = "none";
+function applyEvents(list) {
+  if (!list || !list.length) { return; }
+  for (var i = 0; i < list.length; i++) {
+    var e = list[i];
+    if (e && e.length >= 2) { window.colleaguePush(e[0], e[1]); }
+  }
+}
+function unwrap(v) {
+  if (typeof v === "string") {
+    try { return JSON.parse(v); } catch (e) { return null; }
+  }
+  return v;
+}
+window.colleagueEvents = function (list) { applyEvents(unwrap(list)); };
 function apiCall(method, obj) {
   var json;
   try { json = JSON.stringify(obj || {}); } catch (e) { json = "{}"; }
+  if (CHANNEL === "func"
+      || (CHANNEL === "none" && typeof window.colleague === "function")) {
+    CHANNEL = "func";
+    try {
+      var r = window.colleague(method, json);
+      if (r && typeof r.then === "function") {
+        r.then(function (v) { applyEvents(unwrap(v)); }, function () { });
+      } else { applyEvents(unwrap(r)); }
+      return;
+    } catch (e) { CHANNEL = "none"; }
+  }
   window.location.href = "colleague:" + method + ":" + encodeURIComponent(json);
 }
+setInterval(function () {
+  if (window.__bridgeReady) { apiCall("sync", {}); }
+}, 1500);
 var msgs = document.getElementById("msgs");
 var statusEl = document.getElementById("status");
 var qEl = document.getElementById("q");
@@ -196,8 +251,37 @@ function now() {
   return h + ":" + m;
 }
 function scrollDown() { msgs.scrollTop = msgs.scrollHeight; }
+function hideWelcome() {
+  var w = document.getElementById("welcome");
+  if (w) { w.remove(); }
+}
+function restoreWelcome() {
+  if (document.getElementById("welcome")) { return; }
+  var w = document.createElement("div");
+  w.className = "welcome"; w.id = "welcome";
+  w.innerHTML = '<div class="bigavatar">C</div> Задайте вопрос об этом проекте. ' +
+    'Коллега поискал по коду, найдёт нужные модули и пришлёт ответ со ссылками ' +
+    'на файлы. Двойной ESC включает режим правки — тогда он сможет ещё и менять ' +
+    'файлы по вашему указанию.';
+  msgs.appendChild(w);
+}
+function showTyping() {
+  hideWelcome();
+  hideTyping();
+  var row = document.createElement("div");
+  row.className = "row in"; row.id = "typingrow";
+  var av = document.createElement("div"); av.className = "smallavatar"; av.textContent = "C";
+  var b = document.createElement("div"); b.className = "bubble";
+  b.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+  row.appendChild(av); row.appendChild(b); msgs.appendChild(row); scrollDown();
+}
+function hideTyping() {
+  var t = document.getElementById("typingrow");
+  if (t) { t.remove(); }
+}
 
 function addIncoming(kind, text, time) {
+  hideTyping();
   var row = document.createElement("div"); row.className = "row in";
   var av = document.createElement("div"); av.className = "smallavatar"; av.textContent = "C";
   var b = document.createElement("div");
@@ -209,6 +293,7 @@ function addIncoming(kind, text, time) {
   return b;
 }
 function addOutgoing(text, time) {
+  hideWelcome();
   var row = document.createElement("div"); row.className = "row out";
   var b = document.createElement("div"); b.className = "bubble";
   b.textContent = text;
@@ -231,6 +316,7 @@ function copyBubble(node) {
 function setTools(list) {
   pendingTools = null;
   if (!list || list.length === 0) { return; }
+  hideWelcome();
   var row = document.createElement("div"); row.className = "tools";
   list.forEach(function (t) { row.appendChild(chipFor(t)); });
   msgs.appendChild(row); scrollDown(); pendingTools = row;
@@ -303,6 +389,7 @@ window.colleaguePush = function (kind, payload) {
   try { data = payload ? JSON.parse(payload) : {}; } catch (e) { data = { text: String(payload || "") }; }
   switch (kind) {
     case "ready":
+      window.__bridgeReady = true;
       if (data.palette) { applyPalette(data.palette); }
       if (data.name) { document.getElementById("hdrname").textContent = data.name; }
       if (data.sub) { document.getElementById("hdrsub").textContent = data.sub; }
@@ -312,6 +399,7 @@ window.colleaguePush = function (kind, payload) {
     case "readyPalette": applyPalette(data); break;
     case "history":
       msgs.textContent = "";
+      if (!(data.items || []).length) { restoreWelcome(); }
       (data.items || []).forEach(function (m) {
         if (m.kind === "user") { addOutgoing(m.text, m.time); }
         else { addIncoming(m.kind === "error" ? "error" : "answer", m.text, m.time); }
@@ -323,7 +411,11 @@ window.colleaguePush = function (kind, payload) {
     case "tool": addTool(data); break;
     case "status": setStatus(data.text || ""); break;
     case "mode": setMode(!!data.on); setStatus(data.text || ""); break;
-    case "busy": sendEl.disabled = !!data.busy; setStatus(data.text || ""); break;
+    case "busy":
+      sendEl.disabled = !!data.busy;
+      setStatus(data.text || "");
+      if (data.busy) { showTyping(); } else { hideTyping(); }
+      break;
     case "input": qEl.value = data.text || ""; qEl.focus(); break;
   }
 };

@@ -37,7 +37,7 @@ final class ViewBridge {
             return;
         }
         final File directory = new File(System.getProperty("java.io.tmpdir", "."),
-            "colleague-webview2");
+            "colleague-browser-profile");
         if(!directory.isDirectory() && !directory.mkdirs()) {
             System.err.println("colleague: cannot create browser data directory "
                 + directory.getAbsolutePath());

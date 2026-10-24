@@ -136,12 +136,42 @@ td.act { white-space: nowrap; }
 
 <script>
 "use strict";
-/* Bridge to Java: vetoed navigation protocol, see chat page for details. */
+/* Bridge to Java: batch function channel with navigation fallback, see the
+   chat page for the full protocol. */
+var CHANNEL = "none";
+function applyEvents(list) {
+  if (!list || !list.length) { return; }
+  for (var i = 0; i < list.length; i++) {
+    var e = list[i];
+    if (e && e.length >= 2) { window.colleaguePush(e[0], e[1]); }
+  }
+}
+function unwrap(v) {
+  if (typeof v === "string") {
+    try { return JSON.parse(v); } catch (e) { return null; }
+  }
+  return v;
+}
+window.colleagueEvents = function (list) { applyEvents(unwrap(list)); };
 function apiCall(method, obj) {
   var json;
   try { json = JSON.stringify(obj || {}); } catch (e) { json = "{}"; }
+  if (CHANNEL === "func"
+      || (CHANNEL === "none" && typeof window.colleague === "function")) {
+    CHANNEL = "func";
+    try {
+      var r = window.colleague(method, json);
+      if (r && typeof r.then === "function") {
+        r.then(function (v) { applyEvents(unwrap(v)); }, function () { });
+      } else { applyEvents(unwrap(r)); }
+      return;
+    } catch (e) { CHANNEL = "none"; }
+  }
   window.location.href = "colleague:" + method + ":" + encodeURIComponent(json);
 }
+setInterval(function () {
+  if (window.__bridgeReady) { apiCall("sync", {}); }
+}, 1500);
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
@@ -313,6 +343,7 @@ window.colleaguePush = function (kind, payload) {
   try { data = payload ? JSON.parse(payload) : {}; } catch (e) { data = {}; }
   switch (kind) {
     case "ready":
+      window.__bridgeReady = true;
       if (data.palette) { applyPalette(data.palette); }
       if (data.modeLabel) { document.getElementById("btnmode").textContent = data.modeLabel; }
       apiCall("bridgeReady", {});

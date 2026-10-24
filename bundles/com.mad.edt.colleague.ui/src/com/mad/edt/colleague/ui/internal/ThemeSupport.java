@@ -23,6 +23,34 @@ final class ThemeSupport {
     }
 
     /**
+     * Builds an SWT color equal to one entry (e.g. {@code bg}) of a palette so
+     * that native widgets can be filled to match the surrounding theme colors.
+     *
+     * @param theDisplay display to allocate the color on
+     * @param thePalette palette produced by {@link #pagePalette(Control)}
+     * @param theKey palette entry name
+     * @return always a fresh independent color the caller must dispose
+     */
+    static Color pageColor(final Display theDisplay, final JsonObject thePalette,
+        final String theKey) {
+        final String hex = thePalette.has(theKey) && !thePalette.get(theKey).isJsonNull()
+            ? thePalette.get(theKey).getAsString() : "";
+        if(hex.length() == 7 && hex.charAt(0) == '#') {
+            try {
+                return new Color(theDisplay,
+                    Integer.parseInt(hex.substring(1, 3), 16),
+                    Integer.parseInt(hex.substring(3, 5), 16),
+                    Integer.parseInt(hex.substring(5, 7), 16));
+            } catch (final NumberFormatException ex) {
+                // fall through to the widget default
+            }
+        }
+        final RGB fallback = theDisplay
+            .getSystemColor(SWT.COLOR_WIDGET_BACKGROUND).getRGB();
+        return new Color(theDisplay, fallback.red, fallback.green, fallback.blue);
+    }
+
+    /**
      * Polls the widget palette of a control twice a second from a daemon
      * thread and reports every actual change on the UI thread. Theme switches
      * in the workbench give no universal SWT notification, so periodic
@@ -68,18 +96,42 @@ final class ThemeSupport {
     /**
      * Builds the palette object understood by the pages: a {@code theme} flag
      * plus {@code bg, panel, panel2, text, muted, accent, user, answer,
-     * error, line, chip, code} as {@code #rrggbb} strings.
+     * error, line, chip, code} as {@code #rrggbb} strings. The base colors are
+     * taken from the closest themed ancestor of the anchor: workbench themes
+     * color the view container itself, while plain composites built by the
+     * plug-in still report neutral system defaults, which would otherwise
+     * produce a light page inside a dark workbench.
      *
-     * @param theAnchor control whose background and foreground carry the theme
+     * @param theAnchor control whose themed background and foreground carry
+     *            the workbench theme
      * @return palette JSON ready to push to the page
      */
     static JsonObject pagePalette(final Control theAnchor) {
         final Display display = theAnchor.getDisplay();
-        final Color background = theAnchor.getBackground() != null
-            ? theAnchor.getBackground()
+        final RGB neutralBackground = display
+            .getSystemColor(SWT.COLOR_WIDGET_BACKGROUND).getRGB();
+        final RGB neutralForeground = display
+            .getSystemColor(SWT.COLOR_WIDGET_FOREGROUND).getRGB();
+        Color themedBackground = null;
+        Color themedForeground = null;
+        for(Control probe = theAnchor; probe != null; probe = probe.getParent()) {
+            final Color background = probe.getBackground();
+            final Color foreground = probe.getForeground();
+            if(themedBackground == null && background != null
+                && !background.getRGB().equals(neutralBackground)) {
+                themedBackground = background;
+            }
+            if(themedForeground == null && foreground != null
+                && !foreground.getRGB().equals(neutralForeground)) {
+                themedForeground = foreground;
+            }
+            if(themedBackground != null && themedForeground != null) {
+                break;
+            }
+        }
+        final Color background = themedBackground != null ? themedBackground
             : display.getSystemColor(SWT.COLOR_WIDGET_BACKGROUND);
-        final Color foreground = theAnchor.getForeground() != null
-            ? theAnchor.getForeground()
+        final Color foreground = themedForeground != null ? themedForeground
             : display.getSystemColor(SWT.COLOR_WIDGET_FOREGROUND);
         final RGB bg = background.getRGB();
         final RGB fg = foreground.getRGB();

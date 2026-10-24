@@ -65,6 +65,8 @@ public final class ChatPanel {
 
     private Composite ourRoot;
     private BridgeBrowser ourBridge;
+    private Control ourThemeAnchor;
+    private Color ourPageBackground;
 
     private StyledText ourConversation;
     private Text ourQuestion;
@@ -228,11 +230,14 @@ public final class ChatPanel {
             System.err.println("colleague: embedded browser unavailable, plain fallback: "
                 + ex.getMessage());
             ourBridge = null;
+        }
+        if(ourRoot.getChildren().length != 1) {
             for(final Control child : ourRoot.getChildren()) {
                 child.dispose();
             }
             return false;
         }
+        return true;
     }
 
     private void handleBridge(final String theMethod, final JsonObject theArguments) {
@@ -274,8 +279,11 @@ public final class ChatPanel {
     private void push(final String theKind, final JsonObject thePayload) {
         final JsonObject payload = thePayload == null ? new JsonObject() : thePayload;
         if("ready".equals(theKind)) {
-            final JsonObject palette = ThemeSupport.pagePalette(ourRoot);
+            final JsonObject palette = ThemeSupport.pagePalette(
+                ourThemeAnchor != null && !ourThemeAnchor.isDisposed()
+                    ? ourThemeAnchor : ourRoot);
             ourLastPalette = palette.toString();
+            applyNativePalette(palette);
             payload.add("palette", palette);
             payload.addProperty("name", "Colleague");
             payload.addProperty("sub", ourModel == null || ourModel.isEmpty()
@@ -286,6 +294,37 @@ public final class ChatPanel {
     }
 
     /**
+     * Paints the panel container itself with the page background color so no
+     * neutral-colored strip remains around the HTML page.
+     */
+    private void applyNativePalette(final JsonObject thePalette) {
+        if(ourRoot.isDisposed()) {
+            return;
+        }
+        final Color fresh = ThemeSupport.pageColor(ourRoot.getDisplay(), thePalette, "bg");
+        if(ourPageBackground != null && !ourPageBackground.isDisposed()) {
+            ourPageBackground.dispose();
+        }
+        ourPageBackground = fresh;
+        ourRoot.setBackground(fresh);
+    }
+
+    /**
+     * Names the workbench control whose themed colors define the page palette.
+     *
+     * @param theAnchor a control directly colored by the workbench theme
+     */
+    public void attachThemeAnchor(final Control theAnchor) {
+        ourThemeAnchor = theAnchor;
+        if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
+            final JsonObject palette = ThemeSupport.pagePalette(theAnchor);
+            ourLastPalette = palette.toString();
+            applyNativePalette(palette);
+            ourBridge.push("readyPalette", palette);
+        }
+    }
+
+    /**
      * Watches for workbench theme color changes while the browser is alive and
      * re-pushes the page palette whenever the derived colors actually differ.
      */
@@ -293,6 +332,7 @@ public final class ChatPanel {
         ThemeSupport.watchPalette(ourRoot, palette -> {
             if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
                 ourLastPalette = palette.toString();
+                applyNativePalette(palette);
                 ourBridge.push("readyPalette", palette);
             }
         });
@@ -644,7 +684,7 @@ public final class ChatPanel {
             ourRoot.dispose();
         }
         for(final Color color : new Color[] {ourUserBubble, ourAnswerBubble,
-            ourErrorBubble}) {
+            ourErrorBubble, ourPageBackground}) {
             if(color != null && !color.isDisposed()) {
                 color.dispose();
             }
