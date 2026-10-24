@@ -419,10 +419,23 @@ window.colleaguePush = function (kind, payload) {
     case "input": qEl.value = data.text || ""; qEl.focus(); break;
   }
 };
-/* Announce the page as soon as it is fully loaded; Java queues its events
-   until then and replays them in order. */
-window.addEventListener("load", function () { apiCall("bridgeReady", {}); });
-if (document.readyState === "complete") { apiCall("bridgeReady", {}); }
+/* Announce the page: on some backends the host function only becomes
+   visible after the first real navigation, so the very first apiCall
+   deliberately takes the location channel once (a no-op), after which the
+   function channel is used. If the navigation side never served anything,
+   the next sync poll retries through the function. */
+window.__colleagueWarmed = false;
+var __warmTimer = setTimeout(function () {
+  if (!window.__bridgeReady) { apiCall("bridgeReady", {}); }
+}, 2500);
+window.addEventListener("load", function () {
+  apiCall("noop", {});
+  apiCall("bridgeReady", {});
+});
+if (document.readyState === "complete") {
+  apiCall("noop", {});
+  apiCall("bridgeReady", {});
+}
 </script>
 </body>
 </html>
