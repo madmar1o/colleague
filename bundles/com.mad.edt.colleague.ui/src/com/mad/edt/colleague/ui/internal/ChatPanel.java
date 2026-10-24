@@ -171,7 +171,7 @@ public final class ChatPanel {
         ourAttachedContext = "";
         if(!context.isEmpty()) {
             appendLine("Вы: " + question + "  [к вопросу прикреплён контекст проекта, "
-                + context.length() + " символов]");
+                + context.length() + " символов, остаётся в диалоге до «Нового диалога»]");
         } else {
             appendLine("Вы: " + question);
         }

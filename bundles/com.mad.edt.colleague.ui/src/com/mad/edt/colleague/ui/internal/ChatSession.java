@@ -47,11 +47,13 @@ public final class ChatSession {
         if(systemPrompt != null && !systemPrompt.isEmpty()) {
             request.addMessage(ChatMessage.system(systemPrompt));
         }
-        if(theContext != null && !theContext.isEmpty()) {
-            request.addMessage(ChatMessage.system("Workspace context:\n" + theContext));
-        }
+        final ChatMessage contextMessage = theContext != null && !theContext.isEmpty()
+            ? ChatMessage.system("Workspace context:\n" + theContext) : null;
         for(final ChatMessage message : history) {
             request.addMessage(message);
+        }
+        if(contextMessage != null) {
+            request.addMessage(contextMessage);
         }
         request.addMessage(ChatMessage.user(theQuestion));
         request.think(usesReasoningTemplate(theModel));
@@ -60,6 +62,9 @@ public final class ChatSession {
         final ChatResult result = provider.chat(request.build());
         final long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
 
+        if(contextMessage != null) {
+            history.add(contextMessage);
+        }
         history.add(ChatMessage.user(theQuestion));
         history.add(ChatMessage.assistant(result.getContent()));
         trimHistory();
