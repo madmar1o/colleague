@@ -141,8 +141,7 @@ final class BridgeBrowser {
         }
         final String method = (String)theArguments[0];
         JsonObject arguments = new JsonObject();
-        if(!"sync".equals(method) && theArguments.length > 1
-            && theArguments[1] != null) {
+        if(theArguments.length > 1 && theArguments[1] != null) {
             arguments = parseArgs(theArguments[1]);
         }
         if("bridgeReady".equals(method) || "sync".equals(method)) {

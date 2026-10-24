@@ -190,8 +190,18 @@ function apiCall(method, obj) {
   }
   window.location.href = "colleague:" + method + ":" + encodeURIComponent(json);
 }
+var __kdCount = 0;
+document.addEventListener("keydown", function () { __kdCount++; }, true);
+document.addEventListener("mousedown", function () { window.__lastClick = true; }, true);
 setInterval(function () {
-  if (window.__bridgeReady) { apiCall("sync", {}); }
+  if (window.__bridgeReady) {
+    var ae = document.activeElement;
+    apiCall("sync", { ae: ae ? ae.tagName + "#" + (ae.id || "") : "none",
+      hf: String(document.hasFocus()), kd: String(__kdCount),
+      qvlen: String(qEl.value.length),
+      clicked: String(!!window.__lastClick) });
+    window.__lastClick = false;
+  }
 }, 1500);
 var msgs = document.getElementById("msgs");
 var statusEl = document.getElementById("status");

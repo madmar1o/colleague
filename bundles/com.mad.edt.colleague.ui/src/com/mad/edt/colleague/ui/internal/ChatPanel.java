@@ -89,6 +89,7 @@ public final class ChatPanel {
     private Function<String, String> ourAutoContextSupplier;
     private long ourLastEscapeAt;
     private String ourLastPalette = "";
+    private String ourLastPageState = "";
 
     /**
      * @param theParent the tab body composite, laid out by the caller
@@ -250,6 +251,18 @@ public final class ChatPanel {
                     : "Готов к работе");
                 schedulePageSendProof();
                 return;
+            case "sync": {
+                final String state = BridgeBrowser.optString(theArguments, "ae")
+                    + " hf=" + BridgeBrowser.optString(theArguments, "hf")
+                    + " kd=" + BridgeBrowser.optString(theArguments, "kd")
+                    + " qvlen=" + BridgeBrowser.optString(theArguments, "qvlen")
+                    + " clicked=" + BridgeBrowser.optString(theArguments, "clicked");
+                if(!state.equals(ourLastPageState)) {
+                    ourLastPageState = state;
+                    System.out.println("[colleague] page focus state: " + state);
+                }
+                return;
+            }
             case "send":
                 if(Boolean.getBoolean("colleague.browser.selftest")) {
                     System.out.println("[colleague] bridge: page reached the panel's "
