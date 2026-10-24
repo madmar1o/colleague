@@ -188,18 +188,25 @@ function apiCall(method, obj) {
       return;
     } catch (e) { CHANNEL = "none"; }
   }
+  // Navigation-channel calls are kept rare: each one makes the webview
+  // briefly leave and re-enter its document, which would interrupt the
+  // user's typing if it happened on a timer.
   window.location.href = "colleague:" + method + ":" + encodeURIComponent(json);
 }
 var __kdCount = 0;
 var __pollSeq = 0;
-document.addEventListener("keydown", function () { __kdCount++; }, true);
-document.addEventListener("mousedown", function () { window.__lastClick = true; }, true);
+var __lastUserAt = 0;
+function userActivity() { __lastUserAt = Date.now(); }
+document.addEventListener("keydown", function () { __kdCount++; userActivity(); }, true);
+document.addEventListener("mousedown", function () { window.__lastClick = true; userActivity(); }, true);
 /* The page polls whether or not the bridge announced itself: on backends
    where the host function never appears, the polling call is the only way
    queued events can still reach the page. The payload carries page-side
-   focus diagnostics. */
+   focus diagnostics. While the user is active the polling goes quiet so a
+   navigation-channel call cannot interrupt typing or focus. */
 setInterval(function () {
   __pollSeq++;
+  if (Date.now() - __lastUserAt < 2500) { return; }
   var ae = document.activeElement;
   apiCall("sync", { ae: ae ? ae.tagName + "#" + (ae.id || "") : "none",
     hf: String(document.hasFocus()), kd: String(__kdCount),
@@ -364,6 +371,14 @@ qEl.addEventListener("keydown", function (e) {
   if (e.ctrlKey && (e.key === "Enter")) { e.preventDefault(); sendNow(); return; }
   if (e.key === "Escape") { doubleEsc(e); }
 });
+/* If a workbench focus change ever takes the caret out of the composer,
+   the next typed character brings it back instead of going nowhere. */
+document.addEventListener("keydown", function (e) {
+  if (e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey
+      && (!document.activeElement || document.activeElement === document.body)) {
+    qEl.focus();
+  }
+}, true);
 var lastEsc = 0;
 function doubleEsc(e) {
   var t = Date.now();

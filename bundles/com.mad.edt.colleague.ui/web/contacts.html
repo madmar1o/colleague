@@ -170,8 +170,12 @@ function apiCall(method, obj) {
   window.location.href = "colleague:" + method + ":" + encodeURIComponent(json);
 }
 var __pollSeq = 0;
+var __lastUserAt = 0;
+document.addEventListener("keydown", function () { __lastUserAt = Date.now(); }, true);
+document.addEventListener("mousedown", function () { __lastUserAt = Date.now(); }, true);
 setInterval(function () {
   __pollSeq++;
+  if (Date.now() - __lastUserAt < 2500) { return; }
   apiCall("sync", { ch: CHANNEL, poll: String(__pollSeq) });
 }, 1500);
 function esc(s) {
