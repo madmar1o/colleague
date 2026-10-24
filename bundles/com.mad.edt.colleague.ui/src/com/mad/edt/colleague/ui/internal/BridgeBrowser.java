@@ -259,8 +259,20 @@ final class BridgeBrowser {
             + ")");
     }
 
+    /**
+     * Runs the panel handler after the current page call has been answered.
+     * Handlers may open new tabs and create new embedded browsers; a browser
+     * must never be created inside a page callback — the backend deadlocks.
+     */
     private void handle(final String theMethod, final JsonObject theArguments) {
-        ourHandler.accept(theMethod, theArguments);
+        if(ourBrowser.isDisposed()) {
+            return;
+        }
+        ourBrowser.getDisplay().timerExec(0, () -> {
+            if(!ourBrowser.isDisposed()) {
+                ourHandler.accept(theMethod, theArguments);
+            }
+        });
     }
 
     static JsonObject parseArgs(final Object theArgument) {
