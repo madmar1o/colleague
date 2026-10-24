@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Colleague contacts</title>
+<style>
+:root {
+  --bg: #1b1f27; --panel: #232833; --panel2: #2b3140; --text: #dfe4ec;
+  --muted: #8b93a3; --accent: #4d7fb3; --user: #2f5c86; --answer: #262c39;
+  --error: #5a2e2e; --line: #333a49; --chip: #2b3a4d; --code: #171b22;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--text); font-size: 13px;
+  font-family: "Segoe UI", "PT Sans", Tahoma, sans-serif;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+header {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  background: var(--panel); border-bottom: 1px solid var(--line); flex: none;
+}
+header .title { flex: 1 1 auto; font-weight: 600; font-size: 14px; }
+button {
+  border: 1px solid var(--line); background: var(--panel2); color: var(--text);
+  border-radius: 14px; padding: 5px 12px; font-size: 12px; cursor: pointer;
+  font-family: inherit;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+main { flex: 1 1 auto; overflow-y: auto; padding: 10px; }
+.prov {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px 10px; margin-bottom: 8px;
+}
+.prov .head { display: flex; align-items: center; gap: 8px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: #4caf7d; }
+.dot.bad { background: #d05a5a; }
+.prov .pname { font-weight: 600; }
+.prov .purl { color: var(--muted); font-size: 11px; flex: 1 1 auto; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.badge {
+  flex: none; font-size: 10px; color: #fff; background: var(--accent);
+  border-radius: 8px; padding: 2px 8px;
+}
+.models { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.model {
+  background: var(--chip); border: 1px solid var(--line); color: var(--text);
+  border-radius: 12px; padding: 4px 11px; font-size: 12px; cursor: pointer;
+}
+.model:hover { border-color: var(--accent); }
+.errline { color: var(--muted); font-size: 11px; margin-top: 5px; }
+.statusline { color: var(--muted); font-size: 11px; padding: 2px 12px; flex: none;
+  min-height: 16px; }
+footer {
+  flex: none; display: flex; gap: 8px; padding: 8px 10px;
+  border-top: 1px solid var(--line); background: var(--panel);
+}
+footer button { flex: 1 1 auto; }
+.overlay {
+  position: fixed; left: 0; top: 0; right: 0; bottom: 0; display: none;
+  background: rgba(0, 0, 0, 0.45); z-index: 40;
+}
+.overlay.shown { display: flex; align-items: center; justify-content: center; }
+.sheet {
+  width: min(560px, 94%); max-height: 92%; overflow-y: auto;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px;
+}
+.sheet h2 { margin: 0 0 10px; font-size: 15px; }
+table.plist { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+table.plist th, table.plist td {
+  text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line);
+  font-size: 12px; vertical-align: middle;
+}
+table.plist th { color: var(--muted); font-weight: 600; font-size: 11px; }
+input[type=text], input[type=password], select {
+  width: 100%; background: var(--panel2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px;
+  font: inherit; outline: none;
+}
+input[type=text]:focus, input[type=password]:focus, select:focus { border-color: var(--accent); }
+.fieldrow { margin-bottom: 8px; }
+.fieldrow label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+.hintline { color: var(--muted); font-size: 11px; min-height: 15px; margin: 4px 0; }
+.hintline.ok { color: #4caf7d; }
+.hintline.bad { color: #e08585; }
+.btnrow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.btnrow button { flex: 0 1 auto; }
+td.act { white-space: nowrap; }
+</style>
+</head>
+<body>
+<header>
+  <div class="title">Контакты</div>
+  <button id="btnrefresh" title="Перечитать провайдеры">⟳</button>
+  <button id="btnsettings" title="Провайдеры">⚙ провайдеры</button>
+  <button id="btnmode">Мобильный</button>
+</header>
+<main id="list"></main>
+<div class="statusline" id="status">Загружаю провайдеров…</div>
+<footer>
+  <button class="primary" id="btnadd">+ Подключить провайдер</button>
+</footer>
+
+<div class="overlay" id="overlay">
+  <div class="sheet">
+    <h2>Провайдеры</h2>
+    <table class="plist">
+      <thead><tr><th>провайдер</th><th>адрес</th><th>по ум.</th><th></th></tr></thead>
+      <tbody id="prows"></tbody>
+    </table>
+    <div class="fieldrow"><label>идентификатор</label>
+      <input type="text" id="f_id" placeholder="например cloud"></div>
+    <div class="fieldrow"><label>протокол</label>
+      <select id="f_type">
+        <option value="ollama">локальный рантайм (ollama)</option>
+        <option value="openai">OpenAI-совместимый</option>
+      </select></div>
+    <div class="fieldrow"><label>адрес сервиса</label>
+      <input type="text" id="f_url" placeholder="http://хост:порт"></div>
+    <div class="fieldrow"><label>ключ API (если нужен)</label>
+      <input type="password" id="f_key" placeholder="пусто — без ключа"></div>
+    <div class="btnrow">
+      <button id="btnTest">Проверить</button>
+      <button class="primary" id="btnSave">Сохранить</button>
+      <button id="btnClose">Закрыть</button>
+    </div>
+    <div class="hintline" id="thint"></div>
+    <div class="fieldrow"><label>модель по умолчанию (после проверки)</label>
+      <select id="f_model"><option value="">— не выбрана —</option></select></div>
+    <div class="fieldrow"><label><input type="checkbox" id="f_default">
+      сделать этим провайдером пользуются новые диалоги</label></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* Bridge to Java: vetoed navigation protocol, see chat page for details. */
+function apiCall(method, obj) {
+  var json;
+  try { json = JSON.stringify(obj || {}); } catch (e) { json = "{}"; }
+  window.location.href = "colleague:" + method + ":" + encodeURIComponent(json);
+}
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+function applyPalette(p) {
+  var map = {
+    bg: "--bg", panel: "--panel", panel2: "--panel2", text: "--text",
+    muted: "--muted", accent: "--accent", user: "--user", answer: "--answer",
+    error: "--error", line: "--line", chip: "--chip", code: "--code"
+  };
+  var st = document.documentElement.style;
+  for (var key in map) {
+    if (p[key]) { st.setProperty(map[key], p[key]); }
+  }
+}
+var listEl = document.getElementById("list");
+var statusEl = document.getElementById("status");
+var overlay = document.getElementById("overlay");
+var prows = document.getElementById("prows");
+var modelSel = document.getElementById("f_model");
+var thint = document.getElementById("thint");
+var editing = null; /* id of the provider currently loaded into the form */
+
+function setStatus(s) { statusEl.textContent = s || ""; }
+
+function renderContacts(data) {
+  listEl.textContent = "";
+  var any = false;
+  (data.providers || []).forEach(function (p) {
+    var box = document.createElement("div"); box.className = "prov";
+    var head = document.createElement("div"); head.className = "head";
+    var dot = document.createElement("span");
+    dot.className = "dot" + (p.ok ? "" : " bad");
+    dot.title = p.ok ? "доступен" : "недоступен";
+    var name = document.createElement("span"); name.className = "pname";
+    name.textContent = p.id;
+    var url = document.createElement("span"); url.className = "purl";
+    url.textContent = p.baseUrl || "";
+    head.appendChild(dot); head.appendChild(name); head.appendChild(url);
+    if (p["default"]) {
+      var b = document.createElement("span"); b.className = "badge";
+      b.textContent = "по умолч.";
+      head.appendChild(b);
+    }
+    box.appendChild(head);
+    if (p.ok && p.models && p.models.length) {
+      any = true;
+      var mrow = document.createElement("div"); mrow.className = "models";
+      p.models.forEach(function (m) {
+        var mb = document.createElement("button"); mb.className = "model";
+        mb.textContent = m;
+        mb.onclick = function () {
+          apiCall("openContact", { provider: p.id, model: m });
+        };
+        mrow.appendChild(mb);
+      });
+      box.appendChild(mrow);
+    } else if (!p.ok) {
+      var e = document.createElement("div"); e.className = "errline";
+      e.textContent = p.error || "не отвечает";
+      box.appendChild(e);
+    }
+    listEl.appendChild(box);
+  });
+  if (!any && !data.loading) {
+    setStatus(data.message || "Ни один провайдер не отвечает — «⚙ провайдеры»");
+  } else if (data.loading) {
+    setStatus("Загружаю провайдеров…");
+  } else {
+    setStatus("");
+  }
+}
+
+function renderSettings(data) {
+  prows.textContent = "";
+  (data.providers || []).forEach(function (p) {
+    var tr = document.createElement("tr");
+    var n = document.createElement("td"); n.textContent = p.id;
+    var u = document.createElement("td"); u.textContent = p.baseUrl;
+    u.title = p.baseUrl;
+    var r = document.createElement("td");
+    var rb = document.createElement("input");
+    rb.type = "radio"; rb.name = "defprov"; rb.checked = !!p["default"];
+    rb.onchange = function () { apiCall("setDefault", { id: p.id }); };
+    r.appendChild(rb);
+    var a = document.createElement("td"); a.className = "act";
+    var ed = document.createElement("button"); ed.textContent = "изменить";
+    ed.onclick = function () { fillForm(p); };
+    var rm = document.createElement("button"); rm.textContent = "удалить";
+    rm.onclick = function () { apiCall("removeProvider", { id: p.id }); };
+    a.appendChild(ed); a.appendChild(rm);
+    tr.appendChild(n); tr.appendChild(u); tr.appendChild(r); tr.appendChild(a);
+    prows.appendChild(tr);
+  });
+}
+
+function fillForm(p) {
+  editing = p.id;
+  document.getElementById("f_id").value = p.id;
+  document.getElementById("f_id").disabled = true;
+  document.getElementById("f_type").value = p.type === "OPENAI_COMPATIBLE" ? "openai" : "ollama";
+  document.getElementById("f_url").value = p.baseUrl || "";
+  document.getElementById("f_key").value = "";
+  document.getElementById("f_key").placeholder = p.hasKey ? "ключ задан — пусто, чтобы оставить" : "пусто — без ключа";
+  document.getElementById("f_default").checked = !!p["default"];
+  modelSel.textContent = "";
+  addModelOption(p.defaultModel || "", p.defaultModel || "");
+  thint.textContent = "";
+  thint.className = "hintline";
+}
+
+function addModelOption(v, label) {
+  var o = document.createElement("option");
+  o.value = v; o.textContent = label;
+  modelSel.appendChild(o);
+}
+
+function clearForm() {
+  editing = null;
+  document.getElementById("f_id").value = "";
+  document.getElementById("f_id").disabled = false;
+  document.getElementById("f_type").value = "ollama";
+  document.getElementById("f_url").value = "";
+  document.getElementById("f_key").value = "";
+  document.getElementById("f_key").placeholder = "пусто — без ключа";
+  document.getElementById("f_default").checked = false;
+  modelSel.textContent = "";
+  addModelOption("", "— не выбрана —");
+  thint.textContent = "";
+  thint.className = "hintline";
+}
+
+document.getElementById("btnrefresh").onclick = function () {
+  setStatus("Загружаю провайдеров…"); apiCall("refresh", {});
+};
+document.getElementById("btnmode").onclick = function () { apiCall("toggleMode", {}); };
+document.getElementById("btnsettings").onclick = function () {
+  overlay.classList.add("shown"); clearForm(); apiCall("loadSettings", {});
+};
+document.getElementById("btnadd").onclick = function () {
+  overlay.classList.add("shown"); clearForm(); apiCall("loadSettings", {});
+};
+document.getElementById("btnClose").onclick = function () {
+  overlay.classList.remove("shown");
+};
+document.getElementById("btnTest").onclick = function () {
+  thint.textContent = "проверяю…"; thint.className = "hintline";
+  apiCall("testProvider", {
+    id: document.getElementById("f_id").value.trim(),
+    type: document.getElementById("f_type").value,
+    url: document.getElementById("f_url").value.trim(),
+    key: document.getElementById("f_key").value
+  });
+};
+document.getElementById("btnSave").onclick = function () {
+  apiCall("saveProvider", {
+    id: document.getElementById("f_id").value.trim(),
+    type: document.getElementById("f_type").value,
+    url: document.getElementById("f_url").value.trim(),
+    key: document.getElementById("f_key").value,
+    model: modelSel.value,
+    isDefault: document.getElementById("f_default").checked
+  });
+};
+
+window.colleaguePush = function (kind, payload) {
+  var data = {};
+  try { data = payload ? JSON.parse(payload) : {}; } catch (e) { data = {}; }
+  switch (kind) {
+    case "ready":
+      if (data.palette) { applyPalette(data.palette); }
+      if (data.modeLabel) { document.getElementById("btnmode").textContent = data.modeLabel; }
+      apiCall("bridgeReady", {});
+      break;
+    case "readyPalette": applyPalette(data); break;
+    case "contactsData": renderContacts(data); break;
+    case "settingsData": renderSettings(data); break;
+    case "testResult":
+      if (data.ok) {
+        var current = modelSel.value;
+        modelSel.textContent = "";
+        addModelOption("", "— не выбрана —");
+        (data.models || []).forEach(function (m) { addModelOption(m, m); });
+        if (current) { modelSel.value = current; }
+        thint.textContent = "связь есть, моделей: " + (data.models || []).length;
+        thint.className = "hintline ok";
+      } else {
+        thint.textContent = "ошибка: " + (data.error || "не удалось связаться");
+        thint.className = "hintline bad";
+      }
+      break;
+    case "modeLabel": document.getElementById("btnmode").textContent = data.text || "Мобильный"; break;
+    case "saved":
+      thint.textContent = data.ok ? "сохранено" : "не сохранено: " + (data.error || "");
+      thint.className = data.ok ? "hintline ok" : "hintline bad";
+      apiCall("loadSettings", {});
+      break;
+    case "status": setStatus(data.text || ""); break;
+  }
+};
+window.addEventListener("load", function () { apiCall("bridgeReady", {}); });
+if (document.readyState === "complete") { apiCall("bridgeReady", {}); }
+</script>
+</body>
+</html>

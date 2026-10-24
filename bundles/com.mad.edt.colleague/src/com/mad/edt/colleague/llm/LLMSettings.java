@@ -22,8 +22,34 @@ public final class LLMSettings {
 
     private static final Map<String, ProviderConfig> CONFIGS = createDefaultConfigs();
 
+    /** Provider used for new chats unless the user picked another one. */
+    private static volatile String ourDefaultProviderId = LOCAL_PROVIDER_ID;
+
     private LLMSettings() {
         // utility
+    }
+
+    /**
+     * @return identifier of the provider marked as default, never {@code null};
+     *         falls back to an existing registered provider when the stored
+     *         identifier points to a removed one
+     */
+    public static synchronized String getDefaultProviderId() {
+        if(CONFIGS.containsKey(ourDefaultProviderId)) {
+            return ourDefaultProviderId;
+        }
+        return CONFIGS.containsKey(LOCAL_PROVIDER_ID)
+            ? LOCAL_PROVIDER_ID
+            : CONFIGS.keySet().iterator().next();
+    }
+
+    /**
+     * Marks a registered provider as the default one.
+     *
+     * @param theId provider identifier, {@code null} resets to the built-in local
+     */
+    public static synchronized void setDefaultProviderId(final String theId) {
+        ourDefaultProviderId = theId == null ? LOCAL_PROVIDER_ID : theId;
     }
 
     /**

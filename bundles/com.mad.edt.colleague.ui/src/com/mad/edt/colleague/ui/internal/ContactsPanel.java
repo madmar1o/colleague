@@ -18,16 +18,23 @@ import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Tree;
 import org.eclipse.swt.widgets.TreeItem;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.mad.edt.colleague.llm.ILLMProvider;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
+import com.mad.edt.colleague.llm.LLMProviderType;
 import com.mad.edt.colleague.llm.LLMSettings;
+import com.mad.edt.colleague.llm.ProviderConfig;
+import com.mad.edt.colleague.llm.ProviderStore;
 
 /**
- * Messenger-style contact list: one node per configured LLM provider with
- * its chat-capable models as children. Selecting a model opens a chat tab.
- * Model discovery runs in a background job; the tree is updated via the UI
- * thread. Connecting new providers arrives in a later milestone, so the
- * add button is a visible placeholder now.
+ * Messenger-style contact list rendered by the bundled {@code web/contacts.html}
+ * page inside an embedded browser: one card per configured provider with its
+ * chat-capable models as chips; clicking a chip opens a chat tab. Provider
+ * management (add, edit, remove, default provider) is a part of the same page,
+ * so the whole panel including its buttons is drawn by HTML and follows the
+ * light or dark theme chosen in EDT. When no browser backend is available the
+ * panel falls back to a plain SWT tree plus buttons.
  */
 public final class ContactsPanel {
 
@@ -67,11 +74,15 @@ public final class ContactsPanel {
     private final Consumer<Contact> ourOnContactSelected;
     private final Consumer<List<Contact>> ourOnLoaded;
 
+    private Composite ourRoot;
+    private BridgeBrowser ourBridge;
+    private String ourLastPalette = "";
+
     private Tree ourTree;
-    private Button ourConnectButton;
     private Button ourModeButton;
     private Runnable ourOnAddProvider;
     private Runnable ourOnModeToggle;
+    private String ourModeLabel = "Мобильный";
     private boolean ourLoading;
 
     /**
@@ -85,13 +96,21 @@ public final class ContactsPanel {
      * @param theLabel caption of the mode toggle button
      */
     public void setModeLabel(final String theLabel) {
+        ourModeLabel = theLabel == null ? "Мобильный" : theLabel;
+        if(ourBridge != null && ourBridge.isReady()) {
+            final JsonObject payload = new JsonObject();
+            payload.addProperty("text", ourModeLabel);
+            ourBridge.push("modeLabel", payload);
+            return;
+        }
         if(ourModeButton != null && !ourModeButton.isDisposed()) {
-            ourModeButton.setText(theLabel);
+            ourModeButton.setText(ourModeLabel);
         }
     }
 
     /**
-     * @param theOnAddProvider invoked when the connect button is pressed
+     * @param theOnAddProvider invoked when the connect button is pressed in
+     *            the fallback layout; the HTML page manages providers itself
      */
     public void setOnAddProvider(final Runnable theOnAddProvider) {
         ourOnAddProvider = theOnAddProvider;
@@ -114,49 +133,308 @@ public final class ContactsPanel {
      * @return the top-level control of the panel
      */
     public Control getControl() {
-        return ourTree;
+        return ourRoot;
     }
 
     /** Reloads provider model lists in the background. */
     public void reload() {
-        if(ourLoading || ourTree.isDisposed()) {
+        if(ourLoading || ourRoot == null || ourRoot.isDisposed()) {
             return;
         }
         ourLoading = true;
         Job.create("Colleague: contacts", (monitor) -> {
-            final List<Object[]> providers = new ArrayList<>();
-            for(final String id : LLMSettings.getProviderIds()) {
-                try {
-                    final ILLMProvider provider =
-                        LLMProviderFactory.create(LLMSettings.getConfig(id));
-                    final List<String> models = provider.listModels().stream()
-                        .filter(name -> !name.contains("embed") && !name.startsWith("bge"))
-                        .collect(Collectors.toList());
-                    providers.add(new Object[] {Boolean.TRUE, id,
-                        provider.getConfig().getBaseUrl(), models});
-                } catch (final Exception ex) {
-                    final String reason = ex.getMessage() == null ? ex.getClass().getSimpleName()
-                        : ex.getMessage();
-                    providers.add(new Object[] {Boolean.FALSE, id, reason, List.of()});
+            final List<Object[]> providers = probeProviders();
+            Display.getDefault().asyncExec(() -> {
+                if(ourRoot == null || ourRoot.isDisposed()) {
+                    return;
                 }
-            }
-            Display.getDefault().asyncExec(() -> fillTree(providers));
+                ourLoading = false;
+                if(ourBridge != null) {
+                    pushContacts(providers);
+                } else {
+                    fillTree(providers);
+                }
+            });
             return Status.OK_STATUS;
         }).schedule();
     }
 
     /** Releases the SWT controls. */
     public void dispose() {
+        if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
+            ourBridge.getControl().dispose();
+        }
         if(ourTree != null && !ourTree.isDisposed()) {
             ourTree.dispose();
         }
+        if(ourRoot != null && !ourRoot.isDisposed()) {
+            ourRoot.dispose();
+        }
+    }
+
+    /**
+     * Queries every registered provider for its chat-capable models.
+     *
+     * @return one entry per provider: {@code [ok, id, baseUrlOrError, models]}
+     */
+    private static List<Object[]> probeProviders() {
+        final List<Object[]> providers = new ArrayList<>();
+        for(final String id : LLMSettings.getProviderIds()) {
+            try {
+                final ILLMProvider provider =
+                    LLMProviderFactory.create(LLMSettings.getConfig(id));
+                final List<String> models = provider.listModels().stream()
+                    .filter(name -> !name.contains("embed") && !name.startsWith("bge"))
+                    .collect(Collectors.toList());
+                providers.add(new Object[] {Boolean.TRUE, id,
+                    provider.getConfig().getBaseUrl(), models});
+            } catch (final Exception ex) {
+                final String reason = ex.getMessage() == null ? ex.getClass().getSimpleName()
+                    : ex.getMessage();
+                providers.add(new Object[] {Boolean.FALSE, id, reason, List.of()});
+            }
+        }
+        return providers;
     }
 
     private void createControls(final Composite theParent) {
-        final Composite root = new Composite(theParent, SWT.NONE);
-        root.setLayout(new GridLayout(1, false));
+        ourRoot = new Composite(theParent, SWT.NONE);
+        ourRoot.setLayout(new GridLayout(1, false));
+        if(createBrowser()) {
+            return;
+        }
+        createFallback(theParent);
+    }
 
-        final Composite header = new Composite(root, SWT.NONE);
+    /**
+     * Tries the embedded browser with the bundled contacts page.
+     *
+     * @return {@code true} when the browser path is active
+     */
+    private boolean createBrowser() {
+        try {
+            ViewBridge.ensureUserDataDir();
+            ourBridge = new BridgeBrowser(ourRoot, "web/contacts.html", this::handleBridge);
+            final JsonObject ready = ThemeSupport.pagePalette(ourRoot);
+            ourLastPalette = ready.toString();
+            ready.addProperty("modeLabel", ourModeLabel);
+            ourBridge.push("ready", ready);
+            watchTheme();
+            return true;
+        } catch (final RuntimeException | LinkageError | org.eclipse.swt.SWTError ex) {
+            System.err.println("colleague: contacts browser unavailable, plain fallback: "
+                + ex.getMessage());
+            ourBridge = null;
+            for(final Control child : ourRoot.getChildren()) {
+                child.dispose();
+            }
+            return false;
+        }
+    }
+
+    private void handleBridge(final String theMethod, final JsonObject theArguments) {
+        switch(theMethod) {
+            case "bridgeReady":
+                reload();
+                return;
+            case "refresh":
+                reload();
+                return;
+            case "openContact":
+                ourOnContactSelected.accept(new Contact(
+                    BridgeBrowser.optString(theArguments, "provider"),
+                    BridgeBrowser.optString(theArguments, "model")));
+                return;
+            case "toggleMode":
+                if(ourOnModeToggle != null) {
+                    ourOnModeToggle.run();
+                }
+                return;
+            case "loadSettings":
+                pushSettings();
+                return;
+            case "setDefault":
+                LLMSettings.setDefaultProviderId(BridgeBrowser.optString(theArguments, "id"));
+                ProviderStore.saveFromSettings();
+                reload();
+                return;
+            case "removeProvider":
+                removeProvider(BridgeBrowser.optString(theArguments, "id"));
+                return;
+            case "testProvider":
+                testProvider(theArguments);
+                return;
+            case "saveProvider":
+                saveProvider(theArguments);
+                return;
+            default:
+                return;
+        }
+    }
+
+    private void removeProvider(final String theId) {
+        if(theId.isEmpty() || LLMSettings.LOCAL_PROVIDER_ID.equals(theId)) {
+            pushSaved(false, "встроенный локальный провайдер удалить нельзя");
+            return;
+        }
+        LLMSettings.unregister(theId);
+        if(theId.equals(LLMSettings.getDefaultProviderId())) {
+            LLMSettings.setDefaultProviderId(LLMSettings.LOCAL_PROVIDER_ID);
+        }
+        ProviderStore.saveFromSettings();
+        pushSaved(true, "");
+        reload();
+    }
+
+    private void testProvider(final JsonObject theArguments) {
+        final String type = BridgeBrowser.optString(theArguments, "type");
+        final String url = BridgeBrowser.optString(theArguments, "url");
+        if(url.isEmpty()) {
+            final JsonObject result = new JsonObject();
+            result.addProperty("ok", Boolean.FALSE);
+            result.addProperty("error", "не задан адрес сервиса");
+            ourBridge.push("testResult", result);
+            return;
+        }
+        Job.create("Colleague: provider test", (monitor) -> {
+            final JsonObject result = new JsonObject();
+            try {
+                final ProviderConfig config = ProviderConfig
+                    .builder("_probe", toType(type))
+                    .baseUrl(url)
+                    .apiKey(BridgeBrowser.optString(theArguments, "key"))
+                    .build();
+                final List<String> models = LLMProviderFactory.create(config).listModels()
+                    .stream()
+                    .filter(name -> !name.contains("embed") && !name.startsWith("bge"))
+                    .collect(Collectors.toList());
+                final JsonArray array = new JsonArray();
+                models.forEach(array::add);
+                result.add("models", array);
+                result.addProperty("ok", Boolean.TRUE);
+            } catch (final Exception ex) {
+                result.addProperty("ok", Boolean.FALSE);
+                result.addProperty("error", ex.getMessage() == null
+                    ? ex.getClass().getSimpleName() : ex.getMessage());
+            }
+            Display.getDefault().asyncExec(() -> {
+                if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
+                    ourBridge.push("testResult", result);
+                }
+            });
+            return Status.OK_STATUS;
+        }).schedule();
+    }
+
+    private void saveProvider(final JsonObject theArguments) {
+        final String id = BridgeBrowser.optString(theArguments, "id");
+        final String url = BridgeBrowser.optString(theArguments, "url");
+        if(id.isEmpty() || url.isEmpty()) {
+            pushSaved(false, "нужны идентификатор и адрес сервиса");
+            return;
+        }
+        if(id.contains("\u0000") || id.contains("/")) {
+            pushSaved(false, "некорректный идентификатор");
+            return;
+        }
+        String key = BridgeBrowser.optString(theArguments, "key");
+        final ProviderConfig previous = LLMSettings.getConfig(id);
+        if(key.isEmpty() && previous != null && previous.getApiKey() != null) {
+            key = previous.getApiKey();
+        }
+        final String model = BridgeBrowser.optString(theArguments, "model");
+        LLMSettings.register(ProviderConfig.builder(id, toType(BridgeBrowser.optString(theArguments, "type")))
+            .baseUrl(url)
+            .apiKey(key)
+            .defaultModel(model.isEmpty() ? null : model)
+            .build());
+        if(theArguments.has("isDefault") && theArguments.get("isDefault").getAsBoolean()) {
+            LLMSettings.setDefaultProviderId(id);
+        }
+        ProviderStore.saveFromSettings();
+        pushSaved(true, "");
+        reload();
+    }
+
+    private static LLMProviderType toType(final String thePageValue) {
+        return "openai".equals(thePageValue)
+            ? LLMProviderType.OPENAI_COMPATIBLE : LLMProviderType.OLLAMA;
+    }
+
+    private void pushSaved(final boolean theOk, final String theError) {
+        final JsonObject payload = new JsonObject();
+        payload.addProperty("ok", Boolean.valueOf(theOk));
+        payload.addProperty("error", theError);
+        ourBridge.push("saved", payload);
+    }
+
+    private void pushSettings() {
+        final JsonArray providers = new JsonArray();
+        for(final String id : LLMSettings.getProviderIds()) {
+            final ProviderConfig config = LLMSettings.getConfig(id);
+            if(config == null) {
+                continue;
+            }
+            final JsonObject item = new JsonObject();
+            item.addProperty("id", config.getId());
+            item.addProperty("type", config.getType().name());
+            item.addProperty("baseUrl", config.getBaseUrl());
+            item.addProperty("hasKey", Boolean.valueOf(config.getApiKey() != null
+                && !config.getApiKey().isEmpty()));
+            item.addProperty("defaultModel", config.getDefaultModel() == null
+                ? "" : config.getDefaultModel());
+            item.addProperty("default", Boolean.valueOf(
+                id.equals(LLMSettings.getDefaultProviderId())));
+            providers.add(item);
+        }
+        final JsonObject payload = new JsonObject();
+        payload.add("providers", providers);
+        ourBridge.push("settingsData", payload);
+    }
+
+    private void pushContacts(final List<Object[]> theProviders) {
+        final String defaultId = LLMSettings.getDefaultProviderId();
+        final JsonArray providers = new JsonArray();
+        final List<Contact> available = new ArrayList<>();
+        for(final Object[] entry : theProviders) {
+            final boolean ok = ((Boolean)entry[0]).booleanValue();
+            final String id = String.valueOf(entry[1]);
+            final JsonObject item = new JsonObject();
+            item.addProperty("id", id);
+            item.addProperty("baseUrl", ok ? String.valueOf(entry[2]) : "");
+            item.addProperty("ok", Boolean.valueOf(ok));
+            if(!ok) {
+                item.addProperty("error", String.valueOf(entry[2]));
+            }
+            item.addProperty("default", Boolean.valueOf(id.equals(defaultId)));
+            final JsonArray models = new JsonArray();
+            for(final Object modelName : (List<?>)entry[3]) {
+                final String model = String.valueOf(modelName);
+                models.add(model);
+                available.add(new Contact(id, model));
+            }
+            item.add("models", models);
+            providers.add(item);
+        }
+        final JsonObject payload = new JsonObject();
+        payload.add("providers", providers);
+        ourBridge.push("contactsData", payload);
+        ourOnLoaded.accept(available);
+    }
+
+    /** Re-sends the palette whenever the workbench theme colors change. */
+    private void watchTheme() {
+        ThemeSupport.watchPalette(ourRoot, palette -> {
+            if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
+                ourLastPalette = palette.toString();
+                ourBridge.push("readyPalette", palette);
+            }
+        });
+    }
+
+    /** Plain tree layout used when no browser backend is available. */
+    private void createFallback(final Composite theParent) {
+        final Composite header = new Composite(ourRoot, SWT.NONE);
         header.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
         final GridLayout headerLayout = new GridLayout(3, false);
         headerLayout.marginWidth = 0;
@@ -167,14 +445,14 @@ public final class ContactsPanel {
         refreshButton.setText("Обновить");
         refreshButton.addListener(SWT.Selection, event -> reload());
         ourModeButton = new Button(header, SWT.PUSH);
-        ourModeButton.setText("Мобильный");
+        ourModeButton.setText(ourModeLabel);
         ourModeButton.addListener(SWT.Selection, event -> {
             if(ourOnModeToggle != null) {
                 ourOnModeToggle.run();
             }
         });
 
-        ourTree = new Tree(root, SWT.SINGLE | SWT.BORDER | SWT.HIDE_SELECTION);
+        ourTree = new Tree(ourRoot, SWT.SINGLE | SWT.BORDER | SWT.HIDE_SELECTION);
         final GridData treeData = new GridData(SWT.FILL, SWT.FILL, true, true);
         treeData.widthHint = 240;
         ourTree.setLayoutData(treeData);
@@ -200,10 +478,10 @@ public final class ContactsPanel {
             }
         });
 
-        ourConnectButton = new Button(root, SWT.PUSH);
-        ourConnectButton.setText("+ Подключить провайдер");
-        ourConnectButton.setLayoutData(new GridData(SWT.FILL, SWT.BOTTOM, true, false));
-        ourConnectButton.addListener(SWT.Selection, event -> {
+        final Button connectButton = new Button(ourRoot, SWT.PUSH);
+        connectButton.setText("+ Подключить провайдер");
+        connectButton.setLayoutData(new GridData(SWT.FILL, SWT.BOTTOM, true, false));
+        connectButton.addListener(SWT.Selection, event -> {
             if(ourOnAddProvider != null) {
                 ourOnAddProvider.run();
             }
@@ -218,10 +496,9 @@ public final class ContactsPanel {
     }
 
     private void fillTree(final List<Object[]> theProviders) {
-        if(ourTree.isDisposed()) {
+        if(ourTree == null || ourTree.isDisposed()) {
             return;
         }
-        ourLoading = false;
         ourTree.removeAll();
         final List<Contact> available = new ArrayList<>();
         for(final Object[] entry : theProviders) {

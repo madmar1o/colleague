@@ -1,9 +1,5 @@
 package com.mad.edt.colleague.ui.internal;
 
-import java.io.File;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -16,8 +12,6 @@ import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.browser.Browser;
-import org.eclipse.swt.browser.BrowserFunction;
 import org.eclipse.swt.custom.StyleRange;
 import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.events.KeyAdapter;
@@ -34,9 +28,7 @@ import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Text;
 
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.mad.edt.colleague.agent.AgentAnswer;
 import com.mad.edt.colleague.agent.AgentLoop;
 import com.mad.edt.colleague.agent.AgentMode;
@@ -48,12 +40,13 @@ import com.mad.edt.colleague.ui.ColleagueUIPlugin;
  * One chat conversation tab bound to a dedicated {@link ChatSession}.
  * <p>
  * The conversation is rendered by the bundled {@code web/chat.html} page
- * inside an embedded Edge browser: bubbles, markdown answers and tool chips
- * are drawn by the page; the Java side receives bridge calls ({@code send},
+ * inside an embedded browser: bubbles, markdown answers and the composer are
+ * drawn by the page, the Java side receives bridge calls ({@code send},
  * {@code newChat}, {@code toggleEdit}, ...) and pushes events back through
- * {@code window.colleaguePush(kind, json)}. When no browser backend can be
- * created the panel falls back to a plain styled-text conversation so the
- * feature keeps working everywhere.
+ * {@code window.colleaguePush(kind, json)}. The page palette is derived from
+ * the workbench theme, so the chat follows the light or dark skin chosen in
+ * EDT. When no browser backend can be created the panel falls back to a
+ * plain styled-text conversation so the feature keeps working everywhere.
  */
 public final class ChatPanel {
 
@@ -63,11 +56,6 @@ public final class ChatPanel {
     /** Max gap between two ESC presses that toggles the edit mode. */
     private static final long ESC_WINDOW_MS = 1_000L;
 
-    /** Where the WebView2 user data folder lives; set before browser creation. */
-    private static final String EDGE_DATA_DIR_PROPERTY = "org.eclipse.swt.browser.EdgeDataDir";
-
-    private static boolean ourEdgeDirChecked;
-
     /** Live panels, kept in sync when the process-wide edit mode changes. */
     private static final List<ChatPanel> OUR_PANELS =
         new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -76,10 +64,7 @@ public final class ChatPanel {
     private final String ourModel;
 
     private Composite ourRoot;
-    private Browser ourBrowser;
-    private File ourPageFile;
-    private boolean ourBridgeReady;
-    private final List<String> ourPendingPushes = new ArrayList<>();
+    private BridgeBrowser ourBridge;
 
     private StyledText ourConversation;
     private Text ourQuestion;
@@ -100,6 +85,7 @@ public final class ChatPanel {
     private Supplier<List<IToolExecutor>> ourToolSupplier;
     private Function<String, String> ourAutoContextSupplier;
     private long ourLastEscapeAt;
+    private String ourLastPalette = "";
 
     /**
      * @param theParent the tab body composite, laid out by the caller
@@ -122,8 +108,8 @@ public final class ChatPanel {
 
     /** Puts focus into the question box. */
     public void setFocus() {
-        if(ourBrowser != null && !ourBrowser.isDisposed()) {
-            ourBrowser.setFocus();
+        if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
+            ourBridge.getControl().setFocus();
             return;
         }
         if(ourQuestion != null && !ourQuestion.isDisposed()) {
@@ -138,10 +124,10 @@ public final class ChatPanel {
      */
     public void fillQuestion(final String theQuestion) {
         ourCachedQuestion = theQuestion;
-        if(ourBrowser != null && !ourBrowser.isDisposed()) {
+        if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
             final JsonObject payload = new JsonObject();
             payload.addProperty("text", theQuestion);
-            push("input", payload);
+            ourBridge.push("input", payload);
             return;
         }
         if(ourQuestion != null && !ourQuestion.isDisposed()) {
@@ -202,7 +188,8 @@ public final class ChatPanel {
     /** Clears the conversation and the stored session history. */
     private void reset() {
         ourSession.reset();
-        if(ourBrowser != null && !ourBrowser.isDisposed()) {
+        ourLastAnswer = "";
+        if(ourBridge != null) {
             pushHistory();
             setStatus("Диалог сброшен");
             return;
@@ -211,37 +198,7 @@ public final class ChatPanel {
             ourConversation.setText("");
         }
         ourStyleRanges.clear();
-        ourLastAnswer = "";
         setStatus("Диалог сброшен");
-    }
-
-    /** Releases the SWT controls. */
-    public void dispose() {
-        OUR_PANELS.remove(this);
-        if(ourBrowser != null && !ourBrowser.isDisposed()) {
-            ourBrowser.dispose();
-        }
-        if(ourConversation != null && !ourConversation.isDisposed()) {
-            ourConversation.dispose();
-        }
-        if(ourRoot != null && !ourRoot.isDisposed()) {
-            ourRoot.dispose();
-        }
-        for(final Color color : new Color[] {ourUserBubble, ourAnswerBubble,
-            ourErrorBubble}) {
-            if(color != null && !color.isDisposed()) {
-                color.dispose();
-            }
-        }
-        final File page = ourPageFile;
-        ourPageFile = null;
-        if(page != null) {
-            try {
-                Files.deleteIfExists(page.toPath());
-            } catch (final Exception ignored) {
-                // temp file, the OS cleans the temp directory eventually
-            }
-        }
     }
 
     private void createControls(final Composite theParent) {
@@ -256,123 +213,89 @@ public final class ChatPanel {
     }
 
     /**
-     * Tries the Edge browser backend with the bundled chat page.
+     * Tries the embedded browser with the bundled chat page.
      *
      * @return {@code true} when the browser path is active
      */
     private boolean createBrowser() {
         try {
-            ensureEdgeDataDir();
-            ourBrowser = new Browser(ourRoot, SWT.NONE);
+            ViewBridge.ensureUserDataDir();
+            ourBridge = new BridgeBrowser(ourRoot, "web/chat.html", this::handleBridge);
+            push("ready", null);
+            watchTheme();
+            return true;
         } catch (final RuntimeException | LinkageError | org.eclipse.swt.SWTError ex) {
             System.err.println("colleague: embedded browser unavailable, plain fallback: "
                 + ex.getMessage());
-            ourBrowser = null;
-        }
-        if(ourBrowser == null) {
+            ourBridge = null;
+            for(final Control child : ourRoot.getChildren()) {
+                child.dispose();
+            }
             return false;
         }
-        ourBrowser.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
-        new BridgeFunction(ourBrowser, "colleague");
-        if(!loadPage()) {
-            ourBrowser.dispose();
-            ourBrowser = null;
-            return false;
-        }
-        return true;
     }
 
-    /** WebView2 refuses its default user-data location next to java.exe; pick temp. */
-    private static synchronized void ensureEdgeDataDir() {
-        if(ourEdgeDirChecked) {
-            return;
+    private void handleBridge(final String theMethod, final JsonObject theArguments) {
+        switch(theMethod) {
+            case "bridgeReady":
+                pushHistory();
+                setStatus(AgentMode.isOn()
+                    ? "Режим правки ВКЛЮЧЁН — агент с инструментами проекта"
+                    : "Готов к работе");
+                return;
+            case "send":
+                sendQuestion(BridgeBrowser.optString(theArguments, "text"));
+                return;
+            case "newChat":
+                reset();
+                return;
+            case "toggleEdit":
+                toggleEdit();
+                return;
+            case "copy":
+                ViewBridge.copyToClipboard(ourRoot, BridgeBrowser.optString(theArguments, "text"));
+                return;
+            case "attachFile":
+                setStatus("Файлы пока не прикрепляются — используйте контекст проекта из поиска");
+                return;
+            default:
+                return;
         }
-        ourEdgeDirChecked = true;
-        if(System.getProperty(EDGE_DATA_DIR_PROPERTY) != null) {
-            return;
-        }
-        final File dir = new File(System.getProperty("java.io.tmpdir", "."), "colleague-webview2");
-        if(!dir.exists() && !dir.mkdirs()) {
-            return;
-        }
-        System.setProperty(EDGE_DATA_DIR_PROPERTY, dir.getAbsolutePath());
     }
 
-    /** Loads {@code web/chat.html} from the bundle as the browser content. */
-    private boolean loadPage() {
-        try {
-            final java.net.URL entry = org.eclipse.core.runtime.Platform.getBundle(
-                ColleagueUIPlugin.PLUGIN_ID).getEntry("web/chat.html");
-            if(entry == null) {
-                System.err.println("colleague: web/chat.html missing from the bundle");
-                return false;
-            }
-            final StringBuilder text = new StringBuilder();
-            try (InputStream stream = entry.openStream();
-                java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(stream, StandardCharsets.UTF_8))) {
-                final char[] buffer = new char[8192];
-                int read;
-                while((read = reader.read(buffer)) > 0) {
-                    text.append(buffer, 0, read);
-                }
-            }
-            if(!ourBrowser.setText(text.toString())) {
-                System.err.println("colleague: setText on the browser was refused");
-                return false;
-            }
-            final JsonObject ready = new JsonObject();
-            ready.addProperty("theme", preferredTheme());
-            ready.addProperty("name", "Colleague");
-            ready.addProperty("sub", ourModel == null || ourModel.isEmpty()
+    private void toggleEdit() {
+        final boolean on = AgentMode.toggle();
+        refreshModeIndicators();
+        setStatus(on
+            ? "Режим правки ВКЛЮЧЁН — агент с инструментами проекта"
+            : "Режим правки ВЫКЛЮЧЕН");
+    }
+
+    private void push(final String theKind, final JsonObject thePayload) {
+        final JsonObject payload = thePayload == null ? new JsonObject() : thePayload;
+        if("ready".equals(theKind)) {
+            final JsonObject palette = ThemeSupport.pagePalette(ourRoot);
+            ourLastPalette = palette.toString();
+            payload.add("palette", palette);
+            payload.addProperty("name", "Colleague");
+            payload.addProperty("sub", ourModel == null || ourModel.isEmpty()
                 ? "ассистент по проекту" : ourModel);
-            ready.addProperty("mode", Boolean.valueOf(AgentMode.isOn()));
-            push("ready", ready);
-            return true;
-        } catch (final Exception ex) {
-            System.err.println("colleague: chat page load failed: " + ex.getMessage());
-            return false;
+            payload.addProperty("mode", Boolean.valueOf(AgentMode.isOn()));
         }
+        ourBridge.push(theKind, payload);
     }
 
     /**
-     * Dark or light page theme picked from the workbench widget colors so the
-     * chat blends into the EDT skin.
+     * Watches for workbench theme color changes while the browser is alive and
+     * re-pushes the page palette whenever the derived colors actually differ.
      */
-    private String preferredTheme() {
-        final Display display = ourRoot.getDisplay();
-        final Color base = display.getSystemColor(SWT.COLOR_WIDGET_BACKGROUND);
-        final RGB rgb = base.getRGB();
-        return (rgb.red + rgb.green + rgb.blue) / 3 < 128 ? "dark" : "light";
-    }
-
-    /** Sends one event to the page; queues it until the page answers bridgeReady. */
-    private void push(final String theKind, final JsonObject thePayload) {
-        final String call = "window.colleaguePush('" + theKind + "','"
-            + escapeJs(thePayload.toString()) + "')";
-        if(!ourBridgeReady) {
-            ourPendingPushes.add(call);
-            return;
-        }
-        if(ourBrowser == null || ourBrowser.isDisposed()) {
-            return;
-        }
-        final Runnable send = () -> {
-            if(ourBrowser != null && !ourBrowser.isDisposed()) {
-                ourBrowser.execute(call);
+    private void watchTheme() {
+        ThemeSupport.watchPalette(ourRoot, palette -> {
+            if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
+                ourLastPalette = palette.toString();
+                ourBridge.push("readyPalette", palette);
             }
-        };
-        if(ourRoot != null && !ourRoot.isDisposed()
-            && ourRoot.getDisplay().getThread() == Thread.currentThread()) {
-            send.run();
-        } else {
-            Display.getDefault().asyncExec(send);
-        }
-    }
-
-    private static String escapeJs(final String theText) {
-        return theText.replace("\\", "\\\\").replace("'", "\\'")
-            .replace("\r", "\\r").replace("\n", "\\n").replace("<", "\\u003c");
+        });
     }
 
     /** Replays the stored conversation into the page after a reload or reset. */
@@ -393,97 +316,8 @@ public final class ChatPanel {
         }
         final JsonObject payload = new JsonObject();
         payload.add("items", items);
-        push("history", payload);
+        ourBridge.push("history", payload);
     }
-
-    /** Bridge object exposed to the page as {@code window.colleague}. */
-    private final class BridgeFunction extends BrowserFunction {
-
-        private BridgeFunction(final Browser theBrowser, final String theName) {
-            super(theBrowser, theName);
-        }
-
-        @Override
-        public Object function(final Object... theArguments) {
-            if(theArguments.length < 1 || !(theArguments[0] instanceof String)) {
-                return Boolean.FALSE;
-            }
-            final String method = (String)theArguments[0];
-            final JsonObject args = parseArgs(theArguments.length > 1 ? theArguments[1] : null);
-            switch(method) {
-                case "bridgeReady":
-                    if(ourBridgeReady) {
-                        return Boolean.TRUE;
-                    }
-                    ourBridgeReady = true;
-                    for(final String call : new ArrayList<>(ourPendingPushes)) {
-                        if(ourBrowser != null && !ourBrowser.isDisposed()) {
-                            ourBrowser.execute(call);
-                        }
-                    }
-                    ourPendingPushes.clear();
-                    pushHistory();
-                    return Boolean.TRUE;
-                case "send":
-                    sendQuestion(optString(args, "text"));
-                    return Boolean.TRUE;
-                case "newChat":
-                    reset();
-                    return Boolean.TRUE;
-                case "toggleEdit":
-                    final boolean on = AgentMode.toggle();
-                    refreshModeIndicators();
-                    setStatus(on
-                        ? "Режим правки ВКЛЮЧЁН — агент с инструментами проекта"
-                        : "Режим правки ВЫКЛЮЧЕН");
-                    return Boolean.TRUE;
-                case "copy":
-                    copyToClipboard(optString(args, "text"));
-                    return Boolean.TRUE;
-                case "attachFile":
-                    setStatus("Файлы пока не прикрепляются — приложите контекст кнопкой на панели контактов");
-                    return Boolean.TRUE;
-                default:
-                    return Boolean.FALSE;
-            }
-        }
-    }
-
-    private static JsonObject parseArgs(final Object theArgument) {
-        if(theArgument instanceof String) {
-            try {
-                final JsonElement parsed = JsonParser.parseString((String)theArgument);
-                if(parsed.isJsonObject()) {
-                    return parsed.getAsJsonObject();
-                }
-            } catch (final RuntimeException ignored) {
-                // fall through to empty object below
-            }
-        }
-        return new JsonObject();
-    }
-
-    private static String optString(final JsonObject theObject, final String theName) {
-        return theObject.has(theName) && !theObject.get(theName).isJsonNull()
-            ? theObject.get(theName).getAsString() : "";
-    }
-
-    private void copyToClipboard(final String theText) {
-        if(theText == null || theText.isEmpty()) {
-            return;
-        }
-        final org.eclipse.swt.dnd.Clipboard clipboard =
-            new org.eclipse.swt.dnd.Clipboard(ourRoot.getDisplay());
-        clipboard.setContents(
-            new Object[] {theText},
-            new org.eclipse.swt.dnd.Transfer[] {org.eclipse.swt.dnd.TextTransfer.getInstance()});
-        if(ourRoot != null && !ourRoot.isDisposed()) {
-            ourRoot.addListener(SWT.Dispose, event -> clipboard.dispose());
-        } else {
-            clipboard.dispose();
-        }
-    }
-
     /** Plain styled-text conversation used when no browser backend is available. */
     private void createFallback(final Composite theParent) {
         ourConversation = new StyledText(theParent,
@@ -558,12 +392,15 @@ public final class ChatPanel {
         final String context = ourAttachedContext;
         ourAttachedContext = "";
         final boolean editMode = AgentMode.isOn() && ourToolSupplier != null;
-        final boolean browser = ourBrowser != null && !ourBrowser.isDisposed();
+        final boolean browser = ourBridge != null && ourBridge.isReady();
         if(browser) {
             final JsonObject user = new JsonObject();
             user.addProperty("text", question);
             user.addProperty("time", timeLabel());
-            push("user", user);
+            ourBridge.push("user", user);
+            final JsonObject busy = new JsonObject();
+            busy.addProperty("busy", Boolean.TRUE);
+            ourBridge.push("busy", busy);
         } else {
             if(!context.isEmpty()) {
                 appendLine("Вы: " + question + "  [к вопросу прикреплён контекст проекта, "
@@ -599,7 +436,7 @@ public final class ChatPanel {
                         final JsonObject payload = new JsonObject();
                         payload.addProperty("text", body);
                         payload.addProperty("time", timeLabel());
-                        push("answer", payload);
+                        ourBridge.push("answer", payload);
                     } else {
                         appendLine("Colleague: " + body);
                     }
@@ -615,7 +452,7 @@ public final class ChatPanel {
                         final JsonObject payload = new JsonObject();
                         payload.addProperty("text", String.valueOf(ex.getMessage()));
                         payload.addProperty("time", timeLabel());
-                        push("error", payload);
+                        ourBridge.push("error", payload);
                     } else {
                         appendLine("Ошибка: " + ex.getMessage());
                     }
@@ -627,10 +464,10 @@ public final class ChatPanel {
                     if(ourAskButton != null && !ourAskButton.isDisposed()) {
                         ourAskButton.setEnabled(true);
                     }
-                    if(browser) {
+                    if(ourBridge != null && ourBridge.isReady()) {
                         final JsonObject busy = new JsonObject();
                         busy.addProperty("busy", Boolean.FALSE);
-                        push("busy", busy);
+                        ourBridge.push("busy", busy);
                     }
                 });
             }
@@ -673,11 +510,7 @@ public final class ChatPanel {
         final long now = System.currentTimeMillis();
         if(ourLastEscapeAt > 0L && now - ourLastEscapeAt < ESC_WINDOW_MS) {
             ourLastEscapeAt = 0L;
-            final boolean on = AgentMode.toggle();
-            refreshModeIndicators();
-            setStatus(on
-                ? "Режим правки ВКЛЮЧЁН — два ESC или клик по кнопке «⚙» выключат"
-                : "Режим правки ВЫКЛЮЧЕН");
+            toggleEdit();
         } else {
             ourLastEscapeAt = now;
             setStatus("Ещё раз ESC — переключить режим правки");
@@ -692,10 +525,10 @@ public final class ChatPanel {
     }
 
     private void updateModeIndicator() {
-        if(ourBrowser != null && !ourBrowser.isDisposed()) {
+        if(ourBridge != null && ourBridge.isReady()) {
             final JsonObject payload = new JsonObject();
             payload.addProperty("on", Boolean.valueOf(AgentMode.isOn()));
-            push("mode", payload);
+            ourBridge.push("mode", payload);
             return;
         }
         if(ourModeButton == null || ourModeButton.isDisposed()) {
@@ -778,10 +611,10 @@ public final class ChatPanel {
     }
 
     private void setStatus(final String theText) {
-        if(ourBrowser != null && !ourBrowser.isDisposed()) {
+        if(ourBridge != null && ourBridge.isReady()) {
             final JsonObject payload = new JsonObject();
             payload.addProperty("text", theText == null ? "" : theText);
-            push("status", payload);
+            ourBridge.push("status", payload);
             return;
         }
         if(ourStatusLabel == null || ourStatusLabel.isDisposed()) {
@@ -797,5 +630,24 @@ public final class ChatPanel {
             });
         }
     }
-}
 
+    /** Releases the SWT controls. */
+    public void dispose() {
+        OUR_PANELS.remove(this);
+        if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
+            ourBridge.getControl().dispose();
+        }
+        if(ourConversation != null && !ourConversation.isDisposed()) {
+            ourConversation.dispose();
+        }
+        if(ourRoot != null && !ourRoot.isDisposed()) {
+            ourRoot.dispose();
+        }
+        for(final Color color : new Color[] {ourUserBubble, ourAnswerBubble,
+            ourErrorBubble}) {
+            if(color != null && !color.isDisposed()) {
+                color.dispose();
+            }
+        }
+    }
+}

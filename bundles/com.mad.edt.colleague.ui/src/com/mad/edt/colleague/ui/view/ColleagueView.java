@@ -326,11 +326,18 @@ public class ColleagueView extends ViewPart {
             return;
         }
         ContactsPanel.Contact preferred = null;
-        final String configured =
-            LLMSettings.getConfig(LLMSettings.LOCAL_PROVIDER_ID).getDefaultModel();
+        final String defaultId = LLMSettings.getDefaultProviderId();
+        final com.mad.edt.colleague.llm.ProviderConfig defaultConfig =
+            LLMSettings.getConfig(LLMSettings.LOCAL_PROVIDER_ID);
+        final String configured = defaultConfig == null ? null : defaultConfig.getDefaultModel();
         for(final ContactsPanel.Contact contact : theAvailable) {
-            if(contact.getProviderId().equals(LLMSettings.LOCAL_PROVIDER_ID)
-                && contact.getModel().equals(configured)) {
+            if(!contact.getProviderId().equals(defaultId)) {
+                continue;
+            }
+            if(preferred == null) {
+                preferred = contact;
+            }
+            if(contact.getModel().equals(configured)) {
                 preferred = contact;
                 break;
             }

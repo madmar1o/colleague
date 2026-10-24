@@ -128,27 +128,15 @@ button.send:disabled { background: var(--panel2); color: var(--muted); }
 <div class="hint">Ctrl+Enter — отправить · Ctrl+V с картинкой — приложить файл · два ESC — режим правки</div>
 <script>
 "use strict";
-/* Bridge to the Java side: window.colleague.call(method, jsonArgs). */
-var BRIDGE = null;
-/* The Java bridge shows up either as window.colleague (WebKit/custom backends)
-   or as window.chrome.webview.hostObjects.colleague (Edge backend). */
-function locateBridge() {
-  if (window.colleague && window.colleague.call) { return window.colleague; }
-  var host = window.chrome && window.chrome.webview && window.chrome.webview.hostObjects;
-  if (host) {
-    if (host.sync && host.sync.colleague) { return host.sync.colleague; }
-    if (host.colleague) { return host.colleague; }
-  }
-  return null;
-}
+/* Bridge to the Java side: a vetoed navigation protocol. Every call is a
+   navigation to colleague:<method>:<urlencoded-json> that Java intercepts
+   and cancels before it happens. This channel works on every browser
+   backend, unlike host objects which the embedded widgets expose late or
+   not at all. Events come back through window.colleaguePush. */
 function apiCall(method, obj) {
-  var b = BRIDGE || (BRIDGE = locateBridge());
-  try {
-    if (b && b.call) {
-      var r = b.call(method, JSON.stringify(obj || {}));
-      if (r && typeof r.then === "function") { r.then(function () { }, function () { }); }
-    }
-  } catch (e) { /* ignore */ }
+  var json;
+  try { json = JSON.stringify(obj || {}); } catch (e) { json = "{}"; }
+  window.location.href = "colleague:" + method + ":" + encodeURIComponent(json);
 }
 var msgs = document.getElementById("msgs");
 var statusEl = document.getElementById("status");
@@ -298,17 +286,30 @@ qEl.addEventListener("paste", function (e) {
   }
 });
 /* Java -> JS entry point. */
+function applyPalette(p) {
+  var map = {
+    bg: "--bg", panel: "--panel", panel2: "--panel2", text: "--text",
+    muted: "--muted", accent: "--accent", user: "--user", answer: "--answer",
+    error: "--error", line: "--line", chip: "--chip", code: "--code"
+  };
+  var rootStyle = document.documentElement.style;
+  for (var key in map) {
+    if (p[key]) { rootStyle.setProperty(map[key], p[key]); }
+  }
+  if (p.theme) { document.body.dataset.theme = p.theme; }
+}
 window.colleaguePush = function (kind, payload) {
   var data = {};
   try { data = payload ? JSON.parse(payload) : {}; } catch (e) { data = { text: String(payload || "") }; }
   switch (kind) {
     case "ready":
-      if (data.theme) { document.body.dataset.theme = data.theme; }
+      if (data.palette) { applyPalette(data.palette); }
       if (data.name) { document.getElementById("hdrname").textContent = data.name; }
       if (data.sub) { document.getElementById("hdrsub").textContent = data.sub; }
       if (typeof data.mode === "boolean") { setMode(data.mode); }
       apiCall("bridgeReady", {});
       break;
+    case "readyPalette": applyPalette(data); break;
     case "history":
       msgs.textContent = "";
       (data.items || []).forEach(function (m) {
@@ -326,24 +327,10 @@ window.colleaguePush = function (kind, payload) {
     case "input": qEl.value = data.text || ""; qEl.focus(); break;
   }
 };
-function tryBridge() {
-  var b = locateBridge();
-  if (b) { BRIDGE = b; apiCall("bridgeReady", {}); return true; }
-  return false;
-}
-if (!tryBridge()) {
-  window.addEventListener("load", function () {
-    var attempt = 0;
-    var retry = function () {
-      if (tryBridge() || attempt++ > 10) {
-        if (!BRIDGE) { setStatus("Мост Java недоступен — страница загружена без подключения."); }
-        return;
-      }
-      setTimeout(retry, 250);
-    };
-    retry();
-  });
-}
+/* Announce the page as soon as it is fully loaded; Java queues its events
+   until then and replays them in order. */
+window.addEventListener("load", function () { apiCall("bridgeReady", {}); });
+if (document.readyState === "complete") { apiCall("bridgeReady", {}); }
 </script>
 </body>
 </html>

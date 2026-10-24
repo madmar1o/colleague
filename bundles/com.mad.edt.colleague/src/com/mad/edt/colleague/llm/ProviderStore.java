@@ -18,6 +18,7 @@ public final class ProviderStore {
 
     private static final String NODE_ID = "com.mad.edt.colleague.llm";
     private static final String KEY_PROVIDERS = "providers.json";
+    private static final String KEY_DEFAULT = "default-provider";
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
@@ -36,7 +37,12 @@ public final class ProviderStore {
             return;
         }
         ourLoaded = true;
-        final String json = node().get(KEY_PROVIDERS, "");
+        final Preferences preferences = node();
+        final String storedDefault = preferences.get(KEY_DEFAULT, "");
+        if(!storedDefault.isEmpty()) {
+            LLMSettings.setDefaultProviderId(storedDefault);
+        }
+        final String json = preferences.get(KEY_PROVIDERS, "");
         if(json.isEmpty()) {
             return;
         }
@@ -67,6 +73,7 @@ public final class ProviderStore {
         }
         final Preferences preferences = node();
         preferences.put(KEY_PROVIDERS, GSON.toJson(stored));
+        preferences.put(KEY_DEFAULT, LLMSettings.getDefaultProviderId());
         try {
             preferences.flush();
         } catch (final BackingStoreException ex) {
