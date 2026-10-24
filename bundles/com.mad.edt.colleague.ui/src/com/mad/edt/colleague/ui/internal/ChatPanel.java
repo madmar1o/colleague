@@ -83,6 +83,7 @@ public final class ChatPanel {
     private String ourLastAnswer = "";
     private String ourCachedQuestion = "";
     private boolean ourBusy;
+    private boolean ourPageProofDone;
     private Consumer<String> ourAnswerListener;
     private Supplier<List<IToolExecutor>> ourToolSupplier;
     private Function<String, String> ourAutoContextSupplier;
@@ -247,6 +248,7 @@ public final class ChatPanel {
                 setStatus(AgentMode.isOn()
                     ? "Режим правки ВКЛЮЧЁН — агент с инструментами проекта"
                     : "Готов к работе");
+                schedulePageSendProof();
                 return;
             case "send":
                 if(Boolean.getBoolean("colleague.browser.selftest")) {
@@ -275,6 +277,34 @@ public final class ChatPanel {
     /** @return {@code true} when the chat page announced itself on the bridge */
     public boolean isBridgeReady() {
         return ourBridge != null && ourBridge.isReady();
+    }
+
+    /**
+     * Debug-only proof that the round trip works with a real user gesture:
+     * once the page is attached, the page itself fills its input and submits
+     * its own form, exactly as clicking the send button would. The question
+     * then arrives back in Java through the page's call channel.
+     */
+    private void schedulePageSendProof() {
+        if(!Boolean.getBoolean("colleague.browser.selftest") || ourBridge == null
+            || ourPageProofDone) {
+            return;
+        }
+        ourPageProofDone = true;
+        Display.getDefault().timerExec(12000, () -> {
+            if(ourRoot.isDisposed()) {
+                return;
+            }
+            final String script =
+                "var q=document.getElementById('q');"
+                + "if(q && !q.value){q.value='proof: please answer with one word';"
+                + "q.dispatchEvent(new Event('input'));"
+                + "var f=document.getElementById('composer');"
+                + "if(f.requestSubmit){f.requestSubmit();}else{"
+                + "f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}}";
+            ourBridge.executeScript(script);
+            System.out.println("[colleague] bridge: page-side gesture injected");
+        });
     }
 
     private void toggleEdit() {

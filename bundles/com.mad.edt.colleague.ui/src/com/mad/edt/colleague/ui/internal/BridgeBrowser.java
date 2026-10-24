@@ -116,6 +116,18 @@ final class BridgeBrowser {
     }
 
     /**
+     * Runs script inside the page. Reserved for self-checks that replay a
+     * user gesture; ordinary events travel as call replies instead.
+     *
+     * @param theScript script body to evaluate in the page
+     */
+    void executeScript(final String theScript) {
+        if(!ourBrowser.isDisposed()) {
+            ourBrowser.execute(theScript);
+        }
+    }
+
+    /**
      * Serves one {@code window.colleague} invocation from the page.
      *
      * @param theArguments raw arguments seen by the backend
