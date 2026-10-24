@@ -158,7 +158,7 @@ public final class ContactsPanel {
 
         final Composite header = new Composite(root, SWT.NONE);
         header.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
-        final GridLayout headerLayout = new GridLayout(2, false);
+        final GridLayout headerLayout = new GridLayout(3, false);
         headerLayout.marginWidth = 0;
         headerLayout.marginHeight = 2;
         header.setLayout(headerLayout);

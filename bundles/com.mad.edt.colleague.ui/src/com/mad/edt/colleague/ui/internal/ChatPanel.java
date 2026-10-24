@@ -42,7 +42,7 @@ public final class ChatPanel {
     private static final int AGENT_MAX_STEPS = 8;
 
     /** Max gap between two ESC presses that toggles the edit mode. */
-    private static final long ESC_WINDOW_MS = 800L;
+    private static final long ESC_WINDOW_MS = 1_000L;
 
     private final ChatSession ourSession;
     private final String ourModel;
@@ -51,7 +51,11 @@ public final class ChatPanel {
     private Text ourQuestion;
     private Button ourAskButton;
     private Label ourStatusLabel;
-    private Label ourModeLabel;
+    private Button ourModeButton;
+
+    /** Live panels, kept in sync when the process-wide edit mode changes. */
+    private static final java.util.List<ChatPanel> OUR_PANELS =
+        new java.util.concurrent.CopyOnWriteArrayList<>();
 
     private final List<StyleRange> ourStyleRanges = new ArrayList<>();
     private Color ourUserBubble;
@@ -75,6 +79,7 @@ public final class ChatPanel {
         ourSession = theSession;
         ourModel = theModel;
         createControls(theParent);
+        OUR_PANELS.add(this);
     }
 
     /**
@@ -161,6 +166,7 @@ public final class ChatPanel {
 
     /** Releases the SWT controls. */
     public void dispose() {
+        OUR_PANELS.remove(this);
         if(ourConversation != null && !ourConversation.isDisposed()) {
             ourConversation.dispose();
         }
@@ -191,7 +197,14 @@ public final class ChatPanel {
         final Button resetButton = new Button(header, SWT.PUSH);
         resetButton.setText("Новый диалог");
         resetButton.addListener(SWT.Selection, event -> reset());
-        ourModeLabel = new Label(header, SWT.NONE);
+        ourModeButton = new Button(header, SWT.TOGGLE);
+        ourModeButton.addListener(SWT.Selection, event -> {
+            AgentMode.setOn(ourModeButton.getSelection());
+            refreshModeIndicators();
+            setStatus(AgentMode.isOn()
+                ? "Режим правки ВКЛЮЧЁН — клик по кнопке «⚙» выключит"
+                : "Режим правки ВЫКЛЮЧЕН");
+        });
         updateModeIndicator();
 
         final Composite input = new Composite(root, SWT.NONE);
@@ -319,19 +332,30 @@ public final class ChatPanel {
         if(ourLastEscapeAt > 0L && now - ourLastEscapeAt < ESC_WINDOW_MS) {
             ourLastEscapeAt = 0L;
             final boolean on = AgentMode.toggle();
-            updateModeIndicator();
-            setStatus(on ? "Режим правки ВКЛЮЧЁН — два ESC выключат" : "Режим правки ВЫКЛЮЧЕН");
+            refreshModeIndicators();
+            setStatus(on
+                ? "Режим правки ВКЛЮЧЁН — два ESC или клик по кнопке «⚙» выключат"
+                : "Режим правки ВЫКЛЮЧЕН");
         } else {
             ourLastEscapeAt = now;
+            setStatus("Ещё раз ESC — переключить режим правки");
+        }
+    }
+
+    /** Redraws the edit-mode button of every live panel. */
+    private static void refreshModeIndicators() {
+        for(final ChatPanel panel : OUR_PANELS) {
+            panel.updateModeIndicator();
         }
     }
 
     private void updateModeIndicator() {
-        if(ourModeLabel == null || ourModeLabel.isDisposed()) {
+        if(ourModeButton == null || ourModeButton.isDisposed()) {
             return;
         }
-        ourModeLabel.setText(AgentMode.isOn()
-            ? "\u2699 режим правки: вкл (код можно менять)" : "\u2699 режим правки: выкл");
+        ourModeButton.setSelection(AgentMode.isOn());
+        ourModeButton.setText(AgentMode.isOn()
+            ? "\u2699 режим правки: вкл" : "\u2699 режим правки: выкл");
     }
 
     private static String applyOrEmpty(final Function<String, String> theFunction,

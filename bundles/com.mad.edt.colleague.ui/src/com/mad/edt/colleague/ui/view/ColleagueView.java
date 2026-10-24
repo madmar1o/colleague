@@ -60,6 +60,7 @@ public class ColleagueView extends ViewPart {
     private final Map<String, ChatSession> ourSessions = new HashMap<>();
     private final Map<String, ChatPanel> ourPanels = new HashMap<>();
 
+    private Composite ourRoot;
     private SashForm ourSash;
     private Composite ourContactsArea;
     private Composite ourTabsArea;
@@ -111,7 +112,8 @@ public class ColleagueView extends ViewPart {
 
     @Override
     public void createPartControl(final Composite theParent) {
-        final Composite root = new Composite(theParent, SWT.NONE);
+        ourRoot = new Composite(theParent, SWT.NONE);
+        final Composite root = ourRoot;
         ourRootStack = new StackLayout();
         root.setLayout(ourRootStack);
         ourSash = new SashForm(root, SWT.HORIZONTAL);
@@ -214,6 +216,9 @@ public class ColleagueView extends ViewPart {
         }
         ourSash.layout(true);
         ourMobileHolder.layout(true);
+        // the root composite owns the StackLayout: changing topControl only
+        // takes effect once its own layout has been re-run
+        ourRoot.layout(true);
         if(ourContacts != null) {
             ourContacts.setModeLabel(ourModeMobile ? "Десктоп" : "Мобильный");
         }
@@ -365,6 +370,9 @@ public class ColleagueView extends ViewPart {
             if(theContact.getModel().equals(item.getText())
                 && item.getData() instanceof ChatPanel) {
                 ourTabFolder.setSelection(item);
+                if(ourModeMobile) {
+                    showMobilePage(ourTabsArea);
+                }
                 return (ChatPanel)item.getData();
             }
         }

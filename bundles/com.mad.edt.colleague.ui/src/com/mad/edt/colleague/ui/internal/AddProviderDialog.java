@@ -1,5 +1,7 @@
 package com.mad.edt.colleague.ui.internal;
 
+import java.util.List;
+
 import org.eclipse.jface.dialogs.TitleAreaDialog;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.graphics.Point;
@@ -30,7 +32,7 @@ public class AddProviderDialog extends TitleAreaDialog {
     private Text ourIdText;
     private Text ourUrlText;
     private Text ourKeyText;
-    private Text ourModelText;
+    private Combo ourModelCombo;
 
     private ProviderConfig ourResult;
 
@@ -80,8 +82,8 @@ public class AddProviderDialog extends TitleAreaDialog {
         ourKeyText.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
 
         new Label(grid, SWT.NONE).setText("Модель по умолчанию:");
-        ourModelText = new Text(grid, SWT.BORDER);
-        ourModelText.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        ourModelCombo = new Combo(grid, SWT.READ_ONLY | SWT.DROP_DOWN);
+        ourModelCombo.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
 
         final Button testButton = new Button(grid, SWT.PUSH);
         testButton.setText("Проверить соединение");
@@ -94,9 +96,21 @@ public class AddProviderDialog extends TitleAreaDialog {
     private void testConnection() {
         try {
             final ILLMProvider probe = LLMProviderFactory.create(buildConfig());
-            final int models = probe.listModels().size();
+            final List<String> models = probe.listModels();
+            ourModelCombo.removeAll();
+            int chatModels = 0;
+            for(final String model : models) {
+                if(!model.contains("embed") && !model.startsWith("bge")) {
+                    ourModelCombo.add(model);
+                    chatModels++;
+                }
+            }
+            if(chatModels == 1) {
+                ourModelCombo.select(0);
+            }
             setErrorMessage(null);
-            setMessage("Доступно, моделей в списке: " + models + ". Можно применять.");
+            setMessage("Доступно, моделей в списке: " + models.size() + " (для чата: "
+                + chatModels + "). Выберите модель в поле «Модель по умолчанию».");
         } catch (final Exception ex) {
             final String reason = ex.getMessage() == null ? ex.getClass().getSimpleName()
                 : ex.getMessage();
@@ -110,8 +124,8 @@ public class AddProviderDialog extends TitleAreaDialog {
         return ProviderConfig.builder(ourIdText.getText().trim(), type)
             .baseUrl(ourUrlText.getText().trim())
             .apiKey(ourKeyText.getText().trim())
-            .defaultModel(ourModelText.getText().trim().isEmpty() ? null
-                : ourModelText.getText().trim())
+            .defaultModel(ourModelCombo.getText().trim().isEmpty() ? null
+                : ourModelCombo.getText().trim())
             .build();
     }
 
