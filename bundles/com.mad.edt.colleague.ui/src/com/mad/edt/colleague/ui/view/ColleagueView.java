@@ -458,6 +458,17 @@ public class ColleagueView extends ViewPart {
             return;
         }
         ourBrowserTestDone = true;
+        Display.getDefault().timerExec(18000, () -> {
+            if(ourTabFolder.isDisposed() || thePanel == null) {
+                return;
+            }
+            System.err.println("[colleague] browser selftest phase2: opening a second "
+                + "model tab (the switch-model path that used to hang)");
+            openContact(new ContactsPanel.Contact(
+                LLMSettings.LOCAL_PROVIDER_ID, "llama3.1:8b"));
+            System.err.println("[colleague] browser selftest phase2: second tab open, "
+                + "UI thread alive");
+        });
         Display.getDefault().timerExec(25000, () -> {
             if(ourTabFolder.isDisposed() || thePanel == null) {
                 return;

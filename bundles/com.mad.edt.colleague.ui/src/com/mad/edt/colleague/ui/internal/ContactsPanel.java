@@ -45,7 +45,7 @@ public final class ContactsPanel {
         private final String ourProviderId;
         private final String ourModel;
 
-        Contact(final String theProviderId, final String theModel) {
+        public Contact(final String theProviderId, final String theModel) {
             ourProviderId = theProviderId;
             ourModel = theModel;
         }
