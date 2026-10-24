@@ -82,6 +82,33 @@ public final class ChatSession {
     }
 
     /**
+     * @return the endpoint this session talks to
+     */
+    public ILLMProvider getProvider() {
+        return provider;
+    }
+
+    /**
+     * @return assistant role instructions, may be {@code null}
+     */
+    public String getSystemPrompt() {
+        return systemPrompt;
+    }
+
+    /**
+     * Appends an exchange produced outside {@link #ask} (for example by the
+     * agent loop) so follow-up questions keep the memory of it.
+     *
+     * @param theQuestion user side of the exchange
+     * @param theAnswer assistant side of the exchange
+     */
+    public void noteExchange(final String theQuestion, final String theAnswer) {
+        history.add(ChatMessage.user(theQuestion));
+        history.add(ChatMessage.assistant(theAnswer));
+        trimHistory();
+    }
+
+    /**
      * Reasoning-capable models stream their chain of thought into a separate
      * field and can exhaust the answer budget there, so the direct answer is
      * requested for known templates.

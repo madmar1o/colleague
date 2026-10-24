@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.CTabFolder;
 import org.eclipse.swt.custom.CTabItem;
@@ -22,11 +24,14 @@ import org.eclipse.ui.part.ViewPart;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.FrameworkUtil;
 
+import com.mad.edt.colleague.agent.AgentMode;
+import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
 import com.mad.edt.colleague.llm.LLMSettings;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
 import com.mad.edt.colleague.ui.internal.ChatSession;
 import com.mad.edt.colleague.ui.internal.ContactsPanel;
+import com.mad.edt.colleague.ui.internal.WorkspaceTools;
 
 /**
  * Chat-messenger shell of the Colleague assistant: the contacts panel lists
@@ -66,6 +71,7 @@ public class ColleagueView extends ViewPart {
     private boolean ourModeMobile;
     private ContactsPanel ourContacts;
     private CTabFolder ourTabFolder;
+    private CodeSearch ourCodeSearch;
 
     private String ourLastAnswer = "";
     private ChatPanel ourLastAnsweredPanel;
@@ -139,6 +145,13 @@ public class ColleagueView extends ViewPart {
         ourMobileStack = new Composite(contentRow, SWT.NONE);
         ourMobileStackLayout = new StackLayout();
         ourMobileStack.setLayout(ourMobileStackLayout);
+
+        ourCodeSearch = new CodeSearch();
+        Job.create("Colleague: project index", (monitor) -> {
+            final int files = ourCodeSearch.reindex(monitor);
+            System.err.println("[colleague] context index ready: " + files + " files");
+            return Status.OK_STATUS;
+        }).schedule();
 
         ourRootStack.topControl = ourSash;
         ourModeMobile = modePreference();
@@ -356,6 +369,11 @@ public class ColleagueView extends ViewPart {
         final Composite body = new Composite(ourTabFolder, SWT.NONE);
         body.setLayout(new FillLayout());
         final ChatPanel panel = new ChatPanel(body, session, theContact.getModel());
+        panel.setToolSupplier(() -> AgentMode.isOn()
+            ? WorkspaceTools.withWrite(ourCodeSearch)
+            : WorkspaceTools.readOnly(ourCodeSearch));
+        panel.setAutoContextSupplier(theQuestion ->
+            ourCodeSearch == null ? "" : ourCodeSearch.search(theQuestion));
         tab.setControl(body);
         tab.setData(panel);
         panel.setAnswerListener(answer -> {
