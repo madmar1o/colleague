@@ -1,34 +1,33 @@
 package com.mad.edt.colleague.ui.view;
 
+import java.util.HashMap;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Map;
 
 import org.eclipse.core.runtime.IStatus;
-import org.eclipse.core.runtime.Status;
-import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.layout.GridData;
-import org.eclipse.swt.layout.GridLayout;
-import org.eclipse.swt.widgets.Button;
-import org.eclipse.swt.widgets.Combo;
+import org.eclipse.swt.custom.CTabFolder;
+import org.eclipse.swt.custom.CTabItem;
+import org.eclipse.swt.layout.FillLayout;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Display;
-import org.eclipse.swt.widgets.Label;
-import org.eclipse.swt.widgets.Text;
+import org.eclipse.swt.custom.SashForm;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.part.ViewPart;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.FrameworkUtil;
 
-import com.mad.edt.colleague.llm.ILLMProvider;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
 import com.mad.edt.colleague.llm.LLMSettings;
-import com.mad.edt.colleague.ui.ColleagueUIPlugin;
+import com.mad.edt.colleague.ui.internal.ChatPanel;
 import com.mad.edt.colleague.ui.internal.ChatSession;
+import com.mad.edt.colleague.ui.internal.ContactsPanel;
 
 /**
- * Chat view of the Colleague assistant: model picker, conversation area and
- * a question input. Answers are produced by the core LLM layer.
+ * Chat-messenger shell of the Colleague assistant: the contacts panel lists
+ * configured LLM providers and their models, selecting a contact opens a chat
+ * tab. Each contact keeps its own conversation through the session registry,
+ * so closing and reopening a tab preserves history while the view lives.
  */
 public class ColleagueView extends ViewPart {
 
@@ -48,16 +47,15 @@ public class ColleagueView extends ViewPart {
     /** The single visible instance (the view is not multiplicable). */
     private static volatile ColleagueView ourInstance;
 
-    private Text ourConversation;
-    private Text ourQuestion;
-    private Combo ourModelCombo;
-    private Button ourAskButton;
-    private Label ourStatusLabel;
+    private final Map<String, ChatSession> ourSessions = new HashMap<>();
+    private final Map<String, ChatPanel> ourPanels = new HashMap<>();
 
-    private ChatSession ourSession;
+    private SashForm ourSash;
+    private ContactsPanel ourContacts;
+    private CTabFolder ourTabFolder;
+
     private String ourLastAnswer = "";
-    private String ourAttachedContext = "";
-    private boolean ourBusy;
+    private ChatPanel ourLastAnsweredPanel;
     private boolean ourSelfTestDone;
     private boolean ourSelfTestPending;
 
@@ -95,77 +93,33 @@ public class ColleagueView extends ViewPart {
     @Override
     public void createPartControl(final Composite theParent) {
         final Composite root = new Composite(theParent, SWT.NONE);
-        root.setLayout(new GridLayout(1, false));
+        root.setLayout(new FillLayout());
+        ourSash = new SashForm(root, SWT.HORIZONTAL);
 
-        final Composite header = new Composite(root, SWT.NONE);
-        header.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
-        final GridLayout headerLayout = new GridLayout(4, false);
-        headerLayout.marginWidth = 0;
-        headerLayout.marginHeight = 4;
-        header.setLayout(headerLayout);
+        final Composite contactsArea = new Composite(ourSash, SWT.NONE);
+        contactsArea.setLayout(new FillLayout());
+        ourContacts = new ContactsPanel(contactsArea, this::openContact, this::onContactsLoaded);
 
-        new Label(header, SWT.NONE).setText("Модель:");
-        ourModelCombo = new Combo(header, SWT.READ_ONLY | SWT.DROP_DOWN);
-        ourModelCombo.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        final Composite tabsArea = new Composite(ourSash, SWT.NONE);
+        tabsArea.setLayout(new FillLayout());
+        ourTabFolder = new CTabFolder(tabsArea, SWT.TOP | SWT.FLAT);
+        ourTabFolder.setTabHeight(24);
 
-        final Button refreshButton = new Button(header, SWT.PUSH);
-        refreshButton.setText("Обновить");
-        refreshButton.addListener(SWT.Selection, event -> loadModels());
-
-        final Button resetButton = new Button(header, SWT.PUSH);
-        resetButton.setText("Новый диалог");
-        resetButton.addListener(SWT.Selection, event -> resetConversation());
-
-        ourConversation = new Text(root, SWT.MULTI | SWT.READ_ONLY | SWT.WRAP | SWT.V_SCROLL);
-        ourConversation.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
-
-        final Composite input = new Composite(root, SWT.NONE);
-        input.setLayoutData(new GridData(SWT.FILL, SWT.BOTTOM, true, false));
-        final GridLayout inputLayout = new GridLayout(2, false);
-        inputLayout.marginWidth = 0;
-        inputLayout.marginHeight = 4;
-        input.setLayout(inputLayout);
-
-        ourQuestion = new Text(input, SWT.MULTI | SWT.WRAP | SWT.V_SCROLL);
-        final GridData questionData = new GridData(SWT.FILL, SWT.CENTER, true, false);
-        questionData.heightHint = 80;
-        ourQuestion.setLayoutData(questionData);
-        ourQuestion.addTraverseListener(event -> {
-            if(event.detail == SWT.TRAVERSE_RETURN && (event.stateMask & SWT.CTRL) != 0) {
-                event.doit = true;
-                sendQuestion();
-            }
-        });
-
-        ourAskButton = new Button(input, SWT.PUSH);
-        ourAskButton.setText("Спросить");
-        ourAskButton.addListener(SWT.Selection, event -> sendQuestion());
-
-        ourStatusLabel = new Label(root, SWT.NONE);
-        ourStatusLabel.setLayoutData(new GridData(SWT.FILL, SWT.BOTTOM, true, false));
-
-        ourSession = new ChatSession(
-            LLMProviderFactory.create(LLMSettings.getConfig(LLMSettings.LOCAL_PROVIDER_ID)),
-            SYSTEM_PROMPT);
-
-        final String staged = ourPendingQuestion;
-        ourPendingQuestion = null;
-        if(staged != null && !staged.isEmpty()) {
-            ourQuestion.setText(staged);
-        }
-        final String stagedContext = ourPendingContext;
-        ourPendingContext = null;
-        if(stagedContext != null && !stagedContext.isEmpty()) {
-            ourAttachedContext = stagedContext;
-        }
-
-        loadModels();
+        ourSash.setWeights(1, 2);
+        ourContacts.reload();
     }
 
     @Override
     public void setFocus() {
-        if(ourQuestion != null && !ourQuestion.isDisposed()) {
-            ourQuestion.setFocus();
+        if(ourTabFolder.getSelection() != null) {
+            final ChatPanel panel = (ChatPanel)ourTabFolder.getSelection().getData();
+            if(panel != null) {
+                panel.setFocus();
+                return;
+            }
+        }
+        if(ourContacts != null) {
+            ourContacts.getControl().setFocus();
         }
     }
 
@@ -174,166 +128,160 @@ public class ColleagueView extends ViewPart {
         if(ourInstance == this) {
             ourInstance = null;
         }
+        if(ourContacts != null) {
+            ourContacts.dispose();
+        }
+        if(ourTabFolder != null && !ourTabFolder.isDisposed()) {
+            ourTabFolder.dispose();
+        }
         super.dispose();
     }
 
     /**
-     * @return the answer of the last successful question, never {@code null}
+     * @return the answer of the last successful question in any tab, never
+     *         {@code null}
      */
     public String getLastAnswer() {
         return ourLastAnswer;
     }
 
-    /** Applies a question and context staged after this instance was created. */
+    /**
+     * Applies a question and context staged after this instance was created:
+     * they go into the active (or default) chat tab without sending them.
+     */
     public void applyStaged() {
+        final ChatPanel panel = targetPanelForStaged();
+        if(panel == null) {
+            return;
+        }
         final String staged = ourPendingQuestion;
         ourPendingQuestion = null;
-        if(staged != null && !staged.isEmpty() && ourQuestion != null && !ourQuestion.isDisposed()) {
-            ourQuestion.setText(staged);
-            setFocus();
+        if(staged != null && !staged.isEmpty()) {
+            panel.fillQuestion(staged);
         }
         final String stagedContext = ourPendingContext;
         ourPendingContext = null;
         if(stagedContext != null && !stagedContext.isEmpty()) {
-            ourAttachedContext = stagedContext;
-            setStatus("Контекст объекта прикреплён к вопросу");
+            panel.attachContext(stagedContext);
         }
     }
 
-    private void loadModels() {
-        setStatus("Загружаю список моделей...");
-        Job.create("Colleague: model list", (monitor) -> {
-            final List<String> models;
-            try {
-                final ILLMProvider provider = LLMProviderFactory
-                    .create(LLMSettings.getConfig(LLMSettings.LOCAL_PROVIDER_ID));
-                models = provider.listModels().stream()
-                    .filter(name -> !name.contains("embed") && !name.startsWith("bge"))
-                    .collect(Collectors.toList());
-            } catch (final Exception ex) {
-                setStatus("Локальный рантайм недоступен: " + ex.getMessage());
-                return new Status(IStatus.ERROR, ColleagueUIPlugin.PLUGIN_ID,
-                    "model list failed", ex);
-            }
-            Display.getDefault().asyncExec(() -> fillModels(models));
-            return Status.OK_STATUS;
-        }).schedule();
+    private ChatPanel targetPanelForStaged() {
+        if(ourTabFolder.isDisposed()) {
+            return null;
+        }
+        final CTabItem active = ourTabFolder.getSelection();
+        if(active != null && active.getData() instanceof ChatPanel) {
+            return (ChatPanel)active.getData();
+        }
+        final ContactsPanel.Contact preferred = ourDefaultContactCache;
+        if(preferred != null) {
+            return openContact(preferred);
+        }
+        return null;
     }
 
-    private void fillModels(final List<String> theModels) {
-        if(ourModelCombo.isDisposed()) {
+    private ContactsPanel.Contact ourDefaultContactCache;
+
+    private void onContactsLoaded(final List<ContactsPanel.Contact> theAvailable) {
+        if(ourTabFolder.isDisposed()) {
             return;
         }
-        ourModelCombo.removeAll();
-        for(final String name : theModels) {
-            ourModelCombo.add(name);
+        if(theAvailable.isEmpty()) {
+            showNoContactsNotice();
+            return;
         }
-        final String configured = LLMSettings.getConfig(LLMSettings.LOCAL_PROVIDER_ID).getDefaultModel();
-        final int preferred = configured == null ? -1 : ourModelCombo.indexOf(configured);
-        if(preferred >= 0) {
-            ourModelCombo.select(preferred);
-        } else if(!theModels.isEmpty()) {
-            ourModelCombo.select(0);
+        ContactsPanel.Contact preferred = null;
+        final String configured =
+            LLMSettings.getConfig(LLMSettings.LOCAL_PROVIDER_ID).getDefaultModel();
+        for(final ContactsPanel.Contact contact : theAvailable) {
+            if(contact.getProviderId().equals(LLMSettings.LOCAL_PROVIDER_ID)
+                && contact.getModel().equals(configured)) {
+                preferred = contact;
+                break;
+            }
         }
-        setStatus(theModels.size() + " модель(ей) доступно");
+        if(preferred == null) {
+            preferred = theAvailable.get(0);
+        }
+        ourDefaultContactCache = preferred;
+        if(ourTabFolder.getSelection() == null) {
+            openContact(preferred);
+        }
         maybeRunSelfTest();
+    }
+
+    private void showNoContactsNotice() {
+        if(ourTabFolder.getItemCount() > 0) {
+            return;
+        }
+        final CTabItem notice = new CTabItem(ourTabFolder, SWT.NONE);
+        notice.setText("Нет доступных моделей");
+        final Composite body = new Composite(ourTabFolder, SWT.NONE);
+        body.setLayout(new FillLayout());
+        final org.eclipse.swt.widgets.Label hint = new org.eclipse.swt.widgets.Label(body, SWT.WRAP);
+        hint.setText(
+            "Ни один LLM-провайдер недоступен.\nЛокальный рантайм: "
+                + LLMSettings.LOCAL_RUNTIME_URL + "\nПроверьте его запуск и нажмите «Обновить» "
+                + "в панели контактов.");
+        notice.setControl(body);
+        ourTabFolder.setSelection(notice);
+    }
+
+    private ChatPanel openContact(final ContactsPanel.Contact theContact) {
+        if(ourTabFolder.isDisposed()) {
+            return null;
+        }
+        for(final CTabItem item : ourTabFolder.getItems()) {
+            if(theContact.getModel().equals(item.getText())
+                && item.getData() instanceof ChatPanel) {
+                ourTabFolder.setSelection(item);
+                return (ChatPanel)item.getData();
+            }
+        }
+        final ChatSession session = ourSessions.computeIfAbsent(theContact.getKey(), key ->
+            new ChatSession(
+                LLMProviderFactory.create(LLMSettings.getConfig(theContact.getProviderId())),
+                SYSTEM_PROMPT));
+        final CTabItem tab = new CTabItem(ourTabFolder, SWT.CLOSE);
+        tab.setText(theContact.getModel());
+        final Composite body = new Composite(ourTabFolder, SWT.NONE);
+        body.setLayout(new FillLayout());
+        final ChatPanel panel = new ChatPanel(body, session, theContact.getModel());
+        tab.setControl(body);
+        tab.setData(panel);
+        panel.setAnswerListener(answer -> {
+            ourLastAnswer = answer;
+            ourLastAnsweredPanel = panel;
+            if(ourSelfTestPending) {
+                ourSelfTestPending = false;
+                System.err.println("[colleague] UI selftest answer: ["
+                    + answer.replace('\n', ' ') + "]");
+            }
+        });
+        ourTabFolder.setSelection(tab);
+        return panel;
     }
 
     private void maybeRunSelfTest() {
         if(!Boolean.getBoolean("colleague.ui.selftest") || ourSelfTestDone) {
             return;
         }
+        final ContactsPanel.Contact preferred = ourDefaultContactCache;
+        if(preferred == null) {
+            return;
+        }
         ourSelfTestDone = true;
         ourSelfTestPending = true;
-        ourAttachedContext = "File: demo/Demo.bsl\nContent:\n&НаКлиенте\n"
-            + "Процедура ДемонстрацияКонтекста() КонецПроцедуры";
-        ourQuestion.setText("Какая процедура описана в приложенном контексте? Ответь одним словом.");
+        final ChatPanel panel = openContact(preferred);
+        if(panel == null) {
+            return;
+        }
+        panel.attachContext("File: demo/Demo.bsl\nContent:\n&НаКлиенте\n"
+            + "Процедура ДемонстрацияКонтекста() КонецПроцедуры");
+        panel.fillQuestion("Какая процедура описана в приложенном контексте? Ответь одним словом.");
         System.err.println("[colleague] UI selftest: sending question with context");
-        sendQuestion();
-    }
-
-    private void sendQuestion() {
-        final String question = ourQuestion.getText().trim();
-        if(question.isEmpty() || ourBusy) {
-            return;
-        }
-        final String model = ourModelCombo.getText().trim();
-        final String context = ourAttachedContext;
-        ourAttachedContext = "";
-        if(!context.isEmpty()) {
-            appendLine("Вы: " + question + "  [к вопросу приложен контекст проекта, "
-                + context.length() + " символов]");
-        } else {
-            appendLine("Вы: " + question);
-        }
-        ourQuestion.setText("");
-        ourBusy = true;
-        ourAskButton.setEnabled(false);
-        setStatus("Думаю...");
-
-        Job.create("Colleague: question", (monitor) -> {
-            try {
-                final String answer =
-                    ourSession.ask(model.isEmpty() ? null : model, context, question);
-                final int split = answer.lastIndexOf("\n--- ");
-                final String body = split > 0 ? answer.substring(0, split).strip() : answer;
-                final String stats = split > 0 ? answer.substring(split + 1).strip() : "";
-                ourLastAnswer = body;
-                Display.getDefault().asyncExec(() -> appendLine("Colleague: " + body));
-                setStatus(stats);
-                if(ourSelfTestPending) {
-                    ourSelfTestPending = false;
-                    System.err.println("[colleague] UI selftest answer: ["
-                        + body.replace('\n', ' ') + "]");
-                }
-                return Status.OK_STATUS;
-            } catch (final Exception ex) {
-                Display.getDefault().asyncExec(() -> appendLine("Ошибка: " + ex.getMessage()));
-                return new Status(IStatus.ERROR, ColleagueUIPlugin.PLUGIN_ID,
-                    "assistant call failed", ex);
-            } finally {
-                ourBusy = false;
-                Display.getDefault().asyncExec(() -> {
-                    if(!ourAskButton.isDisposed()) {
-                        ourAskButton.setEnabled(true);
-                    }
-                });
-            }
-        }).schedule();
-    }
-
-    private void resetConversation() {
-        if(ourSession != null) {
-            ourSession.reset();
-        }
-        ourConversation.setText("");
-        ourLastAnswer = "";
-        setStatus("Диалог сброшен");
-    }
-
-    private void appendLine(final String theText) {
-        if(ourConversation.isDisposed()) {
-            return;
-        }
-        if(ourConversation.getCharCount() > 0) {
-            ourConversation.append("\n\n");
-        }
-        ourConversation.append(theText);
-    }
-
-    private void setStatus(final String theText) {
-        if(ourStatusLabel == null || ourStatusLabel.isDisposed()) {
-            return;
-        }
-        if(Display.getDefault().getThread() == Thread.currentThread()) {
-            ourStatusLabel.setText(theText);
-        } else {
-            Display.getDefault().asyncExec(() -> {
-                if(!ourStatusLabel.isDisposed()) {
-                    ourStatusLabel.setText(theText);
-                }
-            });
-        }
+        panel.send();
     }
 
     /**
