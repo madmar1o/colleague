@@ -1,0 +1,155 @@
+package com.mad.edt.colleague.context.vector;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
+/**
+ * Text-to-vector client for the local embedding runtime. Talks to the native
+ * {@code /api/embed} endpoint which accepts a batch of texts and returns one
+ * vector per text in the same order. Instances are thread safe: the backing
+ * HTTP client is shared and every call is a self-contained request.
+ */
+public final class EmbeddingClient {
+
+    private static final int MAX_ERROR_BODY_CHARS = 300;
+
+    private final String baseUrl;
+    private final String model;
+    private final HttpClient client;
+    private final int readTimeoutMs;
+
+    /**
+     * @param theBaseUrl runtime root, e.g. {@code http://127.0.0.1:11435}
+     * @param theModel embedding model name, e.g. {@code bge-m3}
+     * @param theReadTimeoutMs timeout for one embedding batch
+     */
+    public EmbeddingClient(final String theBaseUrl, final String theModel,
+        final int theReadTimeoutMs) {
+        baseUrl = theBaseUrl.endsWith("/")
+            ? theBaseUrl.substring(0, theBaseUrl.length() - 1) : theBaseUrl;
+        model = theModel;
+        readTimeoutMs = theReadTimeoutMs;
+        client = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .build();
+    }
+
+    /**
+     * @return configured embedding model name
+     */
+    public String getModel() {
+        return model;
+    }
+
+    /**
+     * Embeds a batch of texts in one request.
+     *
+     * @param theTexts texts to embed, non-empty
+     * @return one vector per input text, same order
+     * @throws EmbeddingException when the runtime is unreachable, rejects the
+     *             request or returns an unexpected body
+     */
+    public List<float[]> embed(final List<String> theTexts) throws EmbeddingException {
+        if(theTexts.isEmpty()) {
+            throw new IllegalArgumentException("no texts to embed");
+        }
+        final JsonObject body = new JsonObject();
+        body.addProperty("model", model);
+        final JsonArray input = new JsonArray();
+        for(final String text : theTexts) {
+            input.add(text);
+        }
+        body.add("input", input);
+
+        final HttpRequest request = HttpRequest
+            .newBuilder(URI.create(baseUrl + "/api/embed"))
+            .timeout(Duration.ofMillis(readTimeoutMs))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
+            .build();
+        final String responseBody;
+        try {
+            final HttpResponse<String> response =
+                client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if(response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new EmbeddingException("embedding runtime returned HTTP "
+                    + response.statusCode() + ": " + excerpt(response.body()));
+            }
+            responseBody = response.body();
+        } catch (final IOException ex) {
+            throw new EmbeddingException("cannot reach embedding runtime " + baseUrl
+                + ": " + ex.getMessage(), ex);
+        } catch (final InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new EmbeddingException("embedding call interrupted", ex);
+        }
+
+        final JsonArray vectors;
+        try {
+            final JsonObject json = JsonParser.parseString(responseBody).getAsJsonObject();
+            vectors = json.getAsJsonArray("embeddings");
+        } catch (final RuntimeException ex) {
+            throw new EmbeddingException("unexpected embedding response: "
+                + excerpt(responseBody), ex);
+        }
+        if(vectors == null || vectors.size() != theTexts.size()) {
+            throw new EmbeddingException("embedding response has "
+                + (vectors == null ? "no" : String.valueOf(vectors.size()))
+                + " vectors for " + theTexts.size() + " texts");
+        }
+        final List<float[]> result = new ArrayList<>(vectors.size());
+        for(int i = 0; i < vectors.size(); i++) {
+            final JsonArray vector = vectors.get(i).getAsJsonArray();
+            final float[] values = new float[vector.size()];
+            for(int j = 0; j < vector.size(); j++) {
+                values[j] = vector.get(j).getAsFloat();
+            }
+            result.add(values);
+        }
+        return result;
+    }
+
+    private static String excerpt(final String theBody) {
+        if(theBody == null) {
+            return "";
+        }
+        final String flat = theBody.replace('\n', ' ').strip();
+        return flat.length() <= MAX_ERROR_BODY_CHARS
+            ? flat : flat.substring(0, MAX_ERROR_BODY_CHARS) + "...";
+    }
+
+    /**
+     * Failure of one embedding batch: transport problem, rejected request or
+     * malformed response body.
+     */
+    public static final class EmbeddingException extends Exception {
+
+        private static final long serialVersionUID = 1L;
+
+        /**
+         * @param theMessage failure description
+         */
+        public EmbeddingException(final String theMessage) {
+            super(theMessage);
+        }
+
+        /**
+         * @param theMessage failure description
+         * @param theCause transport failure, may be {@code null}
+         */
+        public EmbeddingException(final String theMessage, final Throwable theCause) {
+            super(theMessage, theCause);
+        }
+    }
+}
