@@ -81,34 +81,8 @@ public final class ContactsPanel {
     private Color ourPageBackground;
 
     private Tree ourTree;
-    private Button ourModeButton;
     private Runnable ourOnAddProvider;
-    private Runnable ourOnModeToggle;
-    private String ourModeLabel = "Мобильный";
     private boolean ourLoading;
-
-    /**
-     * @param theOnModeToggle invoked when the layout mode button is pressed
-     */
-    public void setOnModeToggle(final Runnable theOnModeToggle) {
-        ourOnModeToggle = theOnModeToggle;
-    }
-
-    /**
-     * @param theLabel caption of the mode toggle button
-     */
-    public void setModeLabel(final String theLabel) {
-        ourModeLabel = theLabel == null ? "Мобильный" : theLabel;
-        if(ourBridge != null && ourBridge.isReady()) {
-            final JsonObject payload = new JsonObject();
-            payload.addProperty("text", ourModeLabel);
-            ourBridge.push("modeLabel", payload);
-            return;
-        }
-        if(ourModeButton != null && !ourModeButton.isDisposed()) {
-            ourModeButton.setText(ourModeLabel);
-        }
-    }
 
     /**
      * @param theOnAddProvider invoked when the connect button is pressed in
@@ -223,7 +197,6 @@ public final class ContactsPanel {
             final JsonObject ready = ThemeSupport.pagePalette(ourRoot);
             ourLastPalette = ready.toString();
             applyNativePalette(ready);
-            ready.addProperty("modeLabel", ourModeLabel);
             ourBridge.push("ready", ready);
             watchTheme();
             return;
@@ -264,11 +237,6 @@ public final class ContactsPanel {
                 ourOnContactSelected.accept(new Contact(
                     BridgeBrowser.optString(theArguments, "provider"),
                     BridgeBrowser.optString(theArguments, "model")));
-                return;
-            case "toggleMode":
-                if(ourOnModeToggle != null) {
-                    ourOnModeToggle.run();
-                }
                 return;
             case "loadSettings":
                 pushSettings();
@@ -457,7 +425,7 @@ public final class ContactsPanel {
     private void createFallback(final Composite theParent) {
         final Composite header = new Composite(ourRoot, SWT.NONE);
         header.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
-        final GridLayout headerLayout = new GridLayout(3, false);
+        final GridLayout headerLayout = new GridLayout(2, false);
         headerLayout.marginWidth = 0;
         headerLayout.marginHeight = 2;
         header.setLayout(headerLayout);
@@ -465,13 +433,6 @@ public final class ContactsPanel {
         final Button refreshButton = new Button(header, SWT.PUSH);
         refreshButton.setText("Обновить");
         refreshButton.addListener(SWT.Selection, event -> reload());
-        ourModeButton = new Button(header, SWT.PUSH);
-        ourModeButton.setText(ourModeLabel);
-        ourModeButton.addListener(SWT.Selection, event -> {
-            if(ourOnModeToggle != null) {
-                ourOnModeToggle.run();
-            }
-        });
 
         ourTree = new Tree(ourRoot, SWT.SINGLE | SWT.BORDER | SWT.HIDE_SELECTION);
         final GridData treeData = new GridData(SWT.FILL, SWT.FILL, true, true);

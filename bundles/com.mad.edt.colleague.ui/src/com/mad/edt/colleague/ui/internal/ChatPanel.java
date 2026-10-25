@@ -85,6 +85,7 @@ public final class ChatPanel {
     private boolean ourBusy;
     private boolean ourPageProofDone;
     private Consumer<String> ourAnswerListener;
+    private Runnable ourOnBack;
     private Supplier<List<IToolExecutor>> ourToolSupplier;
     private Function<String, String> ourAutoContextSupplier;
     private long ourLastEscapeAt;
@@ -170,6 +171,14 @@ public final class ChatPanel {
      */
     public void setAnswerListener(final Consumer<String> theListener) {
         ourAnswerListener = theListener;
+    }
+
+    /**
+     * @param theOnBack invoked on the UI thread when the page back arrow is
+     *            pressed; the view switches to the contacts page
+     */
+    public void setOnBack(final Runnable theOnBack) {
+        ourOnBack = theOnBack;
     }
 
     /**
@@ -312,6 +321,11 @@ public final class ChatPanel {
                 return;
             case "attachFile":
                 setStatus("Файлы пока не прикрепляются — используйте контекст проекта из поиска");
+                return;
+            case "back":
+                if(ourOnBack != null) {
+                    ourOnBack.run();
+                }
                 return;
             default:
                 return;

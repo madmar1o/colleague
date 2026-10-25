@@ -10,16 +10,13 @@ import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.CTabFolder;
 import org.eclipse.swt.custom.CTabItem;
-import org.eclipse.swt.custom.SashForm;
 import org.eclipse.swt.layout.FillLayout;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.custom.StackLayout;
-import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
-import org.eclipse.swt.custom.SashForm;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.part.ViewPart;
 import org.osgi.framework.Bundle;
@@ -63,15 +60,10 @@ public class ColleagueView extends ViewPart {
     private final Map<String, ChatPanel> ourPanels = new HashMap<>();
 
     private Composite ourRoot;
-    private SashForm ourSash;
     private Composite ourContactsArea;
     private Composite ourTabsArea;
-    private Composite ourMobileHolder;
     private Composite ourMobileStack;
-    private StackLayout ourRootStack;
     private StackLayout ourMobileStackLayout;
-    private Button ourBackButton;
-    private boolean ourModeMobile;
     private ContactsPanel ourContacts;
     private CTabFolder ourTabFolder;
     private CodeSearch ourCodeSearch;
@@ -119,45 +111,29 @@ public class ColleagueView extends ViewPart {
     @Override
     public void createPartControl(final Composite theParent) {
         ourRoot = new Composite(theParent, SWT.NONE);
-        final Composite root = ourRoot;
-        ourRootStack = new StackLayout();
-        root.setLayout(ourRootStack);
-        ourSash = new SashForm(root, SWT.HORIZONTAL);
+        final GridLayout rootLayout = new GridLayout(1, false);
+        rootLayout.marginWidth = 0;
+        rootLayout.marginHeight = 0;
+        ourRoot.setLayout(rootLayout);
 
-        // both areas must fill the view when they become the top control of the
-        // mobile StackLayout: without layout data the stack keeps their old
-        // sash sizes and the mobile pages render cut to a third of the view
-        ourContactsArea = new Composite(ourSash, SWT.NONE);
+        // a two-page stack: contacts and chat, exactly one visible at any
+        // moment; the back arrow lives inside the chat page header itself
+        ourMobileStack = new Composite(ourRoot, SWT.NONE);
+        ourMobileStack.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
+        ourMobileStackLayout = new StackLayout();
+        ourMobileStack.setLayout(ourMobileStackLayout);
+
+        ourContactsArea = new Composite(ourMobileStack, SWT.NONE);
         ourContactsArea.setLayout(new FillLayout());
-        ourContactsArea.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
         ourContacts = new ContactsPanel(ourContactsArea, this::openContact, this::onContactsLoaded);
         ourContacts.setOnAddProvider(this::addProviderWizard);
-        ourContacts.setOnModeToggle(this::toggleMode);
 
-        ourTabsArea = new Composite(ourSash, SWT.NONE);
+        ourTabsArea = new Composite(ourMobileStack, SWT.NONE);
         ourTabsArea.setLayout(new FillLayout());
-        ourTabsArea.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
         ourTabFolder = new CTabFolder(ourTabsArea, SWT.TOP | SWT.FLAT);
         ourTabFolder.setTabHeight(24);
 
-        ourSash.setWeights(1, 2);
-
-        ourMobileHolder = new Composite(root, SWT.NONE);
-        final GridLayout mobileLayout = new GridLayout(1, false);
-        mobileLayout.marginWidth = 0;
-        mobileLayout.marginHeight = 0;
-        ourMobileHolder.setLayout(mobileLayout);
-        ourBackButton = new Button(ourMobileHolder, SWT.PUSH);
-        ourBackButton.setText("← Контакты");
-        ourBackButton.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
-        ourBackButton.addListener(SWT.Selection, event -> showMobilePage(ourContactsArea));
-        ourBackButton.setVisible(false);
-        final Composite contentRow = new Composite(ourMobileHolder, SWT.NONE);
-        contentRow.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
-        contentRow.setLayout(new FillLayout());
-        ourMobileStack = new Composite(contentRow, SWT.NONE);
-        ourMobileStackLayout = new StackLayout();
-        ourMobileStack.setLayout(ourMobileStackLayout);
+        ourMobileStackLayout.topControl = ourContactsArea;
 
         ourCodeSearch = new CodeSearch();
         ourOverview = new ConfigurationOverview();
@@ -178,103 +154,18 @@ public class ColleagueView extends ViewPart {
             return Status.OK_STATUS;
         }).schedule();
 
-        ourRootStack.topControl = ourSash;
-        ourModeMobile = modePreference();
-        if(ourModeMobile) {
-            applyMode(true);
-        }
         com.mad.edt.colleague.llm.ProviderStore.loadIntoSettings();
         ourContacts.reload();
     }
 
-    private static boolean modePreference() {
-        return org.eclipse.core.runtime.preferences.InstanceScope.INSTANCE
-            .getNode("com.mad.edt.colleague.ui").getBoolean("ui.mobile", false);
-    }
-
-    private static void saveModePreference(final boolean theMobile) {
-        final org.osgi.service.prefs.Preferences node =
-            org.eclipse.core.runtime.preferences.InstanceScope.INSTANCE
-                .getNode("com.mad.edt.colleague.ui");
-        node.putBoolean("ui.mobile", theMobile);
-        try {
-            node.flush();
-        } catch (final org.osgi.service.prefs.BackingStoreException ex) {
-            // in-memory value is enough for this session
-        }
-    }
-
-    private void toggleMode() {
-        ourModeMobile = !ourModeMobile;
-        saveModePreference(ourModeMobile);
-        applyMode(ourModeMobile);
-    }
-
-    /** Re-parents the shared panels between the desktop sash and mobile stack. */
-    private void applyMode(final boolean theMobile) {
-        if(ourTabFolder.isDisposed()) {
-            return;
-        }
-        if(theMobile) {
-            ourContactsArea.setParent(ourMobileStack);
-            ourTabsArea.setParent(ourMobileStack);
-            ourRootStack.topControl = ourMobileHolder;
-            ourMobileStackLayout.topControl = ourContactsArea;
-            ourBackButton.setVisible(false);
-            showMobilePage(ourContactsArea);
-        } else {
-            ourContactsArea.setParent(ourSash);
-            ourTabsArea.setParent(ourSash);
-            ourSash.setWeights(1, 2);
-            ourRootStack.topControl = ourSash;
-            ourBackButton.setVisible(false);
-        }
-        ourSash.layout(true);
-        ourMobileHolder.layout(true);
-        // the root composite owns the StackLayout: changing topControl only
-        // takes effect once its own layout has been re-run
-        ourRoot.layout(true);
-        if(ourContacts != null) {
-            ourContacts.setModeLabel(ourModeMobile ? "Десктоп" : "Мобильный");
-        }
-    }
-
     private void showMobilePage(final Composite thePage) {
-        if(ourModeMobile && !thePage.isDisposed()) {
+        if(!thePage.isDisposed()) {
             ourMobileStackLayout.topControl = thePage;
-            ourBackButton.setVisible(thePage == ourTabsArea);
             ourMobileStack.layout(true);
-            ourBackButton.getParent().layout(true);
-            final StringBuilder detail = new StringBuilder();
-            for(final Control child : thePage.getChildren()) {
-                detail.append(' ').append(child.getClass().getSimpleName())
-                    .append(child.getSize()).append("/vis=").append(child.getVisible());
-                if(child == ourTabFolder) {
-                    final CTabItem selection = ourTabFolder.getSelection();
-                    if(selection == null) {
-                        detail.append(" sel=none");
-                    } else {
-                        detail.append(" sel=").append(selection.getText());
-                        final Control tabBody = selection.getControl();
-                        if(tabBody == null) {
-                            detail.append(" body=none");
-                        } else {
-                            detail.append(" body=").append(tabBody.getSize());
-                            for(final Control deep
-                                : ((Composite) tabBody).getChildren()) {
-                                detail.append(' ').append(
-                                    deep.getClass().getSimpleName())
-                                    .append(deep.getSize())
-                                    .append("/vis=").append(deep.getVisible());
-                            }
-                        }
-                    }
-                }
-            }
+            ourRoot.layout(true);
             System.err.println("[colleague] mobile page -> "
                 + (thePage == ourTabsArea ? "chat tabs" : "contacts")
-                + " stack=" + ourMobileStack.getSize() + " page=" + thePage.getSize()
-                + detail);
+                + " stack=" + ourMobileStack.getSize() + " page=" + thePage.getSize());
         }
     }
 
@@ -422,9 +313,7 @@ public class ColleagueView extends ViewPart {
             if(theContact.getModel().equals(item.getText())
                 && item.getData() instanceof ChatPanel) {
                 ourTabFolder.setSelection(item);
-                if(ourModeMobile) {
-                    showMobilePage(ourTabsArea);
-                }
+                showMobilePage(ourTabsArea);
                 return (ChatPanel)item.getData();
             }
         }
@@ -436,10 +325,8 @@ public class ColleagueView extends ViewPart {
         tab.setText(theContact.getModel());
         // switch the page over before the browser is created: at cold start the
         // preferred contact opens automatically, and a browser created in a
-        // hidden zero-sized area loads but paints nothing
-        if(ourModeMobile) {
-            showMobilePage(ourTabsArea);
-        }
+        // hidden zero-sized page paints nothing
+        showMobilePage(ourTabsArea);
         final Composite body = new Composite(ourTabFolder, SWT.NONE);
         body.setLayout(new FillLayout());
         final ChatPanel panel = new ChatPanel(body, session, theContact.getModel());
@@ -448,6 +335,7 @@ public class ColleagueView extends ViewPart {
             ? WorkspaceTools.withWrite(ourCodeSearch, ourOverview)
             : WorkspaceTools.readOnly(ourCodeSearch, ourOverview));
         panel.setAutoContextSupplier(this::collectAutoContext);
+        panel.setOnBack(() -> showMobilePage(ourContactsArea));
         tab.setControl(body);
         tab.setData(panel);
         panel.setAnswerListener(answer -> {

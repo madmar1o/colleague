@@ -95,7 +95,6 @@ td.act { white-space: nowrap; }
   <div class="title">Контакты</div>
   <button id="btnrefresh" title="Перечитать провайдеры">⟳</button>
   <button id="btnsettings" title="Провайдеры">⚙ провайдеры</button>
-  <button id="btnmode">Мобильный</button>
 </header>
 <main id="list"></main>
 <div class="statusline" id="status">Загружаю провайдеров…</div>
@@ -314,7 +313,6 @@ function clearForm() {
 document.getElementById("btnrefresh").onclick = function () {
   setStatus("Загружаю провайдеров…"); apiCall("refresh", {});
 };
-document.getElementById("btnmode").onclick = function () { apiCall("toggleMode", {}); };
 document.getElementById("btnsettings").onclick = function () {
   overlay.classList.add("shown"); clearForm(); apiCall("loadSettings", {});
 };
@@ -352,7 +350,6 @@ window.colleaguePush = function (kind, payload) {
       window.__bridgeReady = true;
       clearTimeout(__warmTimer);
       if (data.palette) { applyPalette(data.palette); }
-      if (data.modeLabel) { document.getElementById("btnmode").textContent = data.modeLabel; }
       break;
     case "readyPalette": applyPalette(data); break;
     case "contactsData": renderContacts(data); break;
@@ -371,7 +368,6 @@ window.colleaguePush = function (kind, payload) {
         thint.className = "hintline bad";
       }
       break;
-    case "modeLabel": document.getElementById("btnmode").textContent = data.text || "Мобильный"; break;
     case "saved":
       thint.textContent = data.ok ? "сохранено" : "не сохранено: " + (data.error || "");
       thint.className = data.ok ? "hintline ok" : "hintline bad";
