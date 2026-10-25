@@ -434,6 +434,12 @@ public class ColleagueView extends ViewPart {
                 SYSTEM_PROMPT));
         final CTabItem tab = new CTabItem(ourTabFolder, SWT.CLOSE);
         tab.setText(theContact.getModel());
+        // switch the page over before the browser is created: at cold start the
+        // preferred contact opens automatically, and a browser created in a
+        // hidden zero-sized area loads but paints nothing
+        if(ourModeMobile) {
+            showMobilePage(ourTabsArea);
+        }
         final Composite body = new Composite(ourTabFolder, SWT.NONE);
         body.setLayout(new FillLayout());
         final ChatPanel panel = new ChatPanel(body, session, theContact.getModel());
@@ -460,9 +466,6 @@ public class ColleagueView extends ViewPart {
             }
         });
         ourTabFolder.setSelection(tab);
-        if(ourModeMobile) {
-            showMobilePage(ourTabsArea);
-        }
         return panel;
     }
 
