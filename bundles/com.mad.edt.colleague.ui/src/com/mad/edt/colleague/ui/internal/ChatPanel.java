@@ -38,6 +38,7 @@ import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
 import com.mad.edt.colleague.chat.EscapeSequence;
 import com.mad.edt.colleague.chat.StreamBatcher;
+import com.mad.edt.colleague.chat.TurnController;
 import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.CancellationFlag;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
@@ -95,10 +96,7 @@ public final class ChatPanel {
     private String ourCachedQuestion = "";
     private boolean ourBusy;
     private boolean ourPageProofDone;
-    private volatile boolean ourAborted;
-    private volatile long ourAbortAtMs;
-    private volatile CancellationFlag ourTurnCancellation;
-    private volatile Thread ourTurnThread;
+    private final TurnController ourTurns = new TurnController();
     private Job ourQuestionJob;
     private Listener ourEscFilter;
     private Consumer<String> ourAnswerListener;
@@ -381,22 +379,10 @@ public final class ChatPanel {
             case "abort":
                 if(ourBusy && ourQuestionJob != null
                     && ourQuestionJob.getState() != Job.NONE) {
-                    ourAborted = true;
-                    ourAbortAtMs = System.currentTimeMillis();
-                    final CancellationFlag turn = ourTurnCancellation;
-                    if(turn != null) {
-                        // the real stop: providers poll this latch between
-                        // streamed frames and abandon the response stream,
-                        // so generation ends within a frame or two
-                        turn.cancel();
-                    }
-                    final Thread worker = ourTurnThread;
-                    if(worker != null) {
-                        // interrupting the worker also cuts the wait for
-                        // response headers, which is the slowest phase when
-                        // the endpoint loads the model before answering
-                        worker.interrupt();
-                    }
+                    // one object owns the stop: it fires the latch the providers
+                    // poll between streamed frames and interrupts the worker out
+                    // of blocking waits such as the response-header phase
+                    ourTurns.abortTurn();
                     ourQuestionJob.cancel();
                     setStatus("Генерация остановлена");
                     if(ourBridge != null && ourBridge.isReady()) {
@@ -734,9 +720,7 @@ public final class ChatPanel {
             }
         }
         ourBusy = true;
-        ourAborted = false;
-        final CancellationFlag turnCancellation = new CancellationFlag();
-        ourTurnCancellation = turnCancellation;
+        final TurnController.Turn turn = ourTurns.startTurn();
         if(ourAskButton != null && !ourAskButton.isDisposed()) {
             ourAskButton.setEnabled(false);
         }
@@ -749,14 +733,14 @@ public final class ChatPanel {
 
         final IJobFunction questionBody = (final IProgressMonitor monitor) -> {
             try {
-                ourTurnThread = Thread.currentThread();
+                ourTurns.attachWorker(turn, Thread.currentThread());
                 final String effectiveContext = context.isEmpty() && ourAutoContextSupplier != null
                     ? applyOrEmpty(ourAutoContextSupplier, question) : context;
                 System.err.println("[colleague] autocontext: " + effectiveContext.length()
                     + " chars for question [" + question.replace('\n', ' ') + "]");
                 final String answer;
                 if(editMode) {
-                    answer = runAgent(question, effectiveContext, turnCancellation);
+                    answer = runAgent(question, effectiveContext, turn.cancellation());
                 } else {
                     answer = ourSession.ask(ourModel, effectiveContext, question,
                         browser ? chunk -> feedDelta(chunk, deltaBatcher)
@@ -764,18 +748,18 @@ public final class ChatPanel {
                         browser ? chunk -> feedDelta(chunk, thinkingBatcher,
                             "thinking")
                             : chunk -> { },
-                        turnCancellation);
+                        turn.cancellation());
                 }
                 final int split = answer.lastIndexOf("\n--- ");
                 final String body = split > 0 ? answer.substring(0, split).strip() : answer;
                 final String stats = split > 0 ? answer.substring(split + 1).strip() : "";
                 ourLastAnswer = body;
-                if(turnCancellation.isCancelled()) {
+                if(turn.cancellation().isCancelled()) {
                     System.out.println("[colleague] cancelled turn observed: partial "
                         + body.length() + " chars, stop->unwind latency "
-                        + (System.currentTimeMillis() - ourAbortAtMs) + " ms");
+                        + ourTurns.stopLatencyMs() + " ms");
                 }
-                if(!body.isEmpty() && ourTurnCancellation == turnCancellation) {
+                if(!body.isEmpty() && ourTurns.isCurrent(turn)) {
                     Display.getDefault().asyncExec(() -> {
                         if(browser) {
                             final JsonObject payload = new JsonObject();
@@ -793,13 +777,13 @@ public final class ChatPanel {
                 setStatus(stats);
                 return Status.OK_STATUS;
             } catch (final Exception ex) {
-                final boolean aborted = ourAborted;
+                final boolean aborted = ourTurns.isAborted();
                 if(aborted) {
                     System.out.println("[colleague] cancelled turn unwound with error: "
                         + ex.getMessage() + ", stop->unwind latency "
-                        + (System.currentTimeMillis() - ourAbortAtMs) + " ms");
+                        + ourTurns.stopLatencyMs() + " ms");
                 }
-                if(!aborted && ourTurnCancellation == turnCancellation) {
+                if(!aborted && ourTurns.isCurrent(turn)) {
                     Display.getDefault().asyncExec(() -> {
                         if(browser) {
                             final JsonObject payload = new JsonObject();
@@ -815,7 +799,6 @@ public final class ChatPanel {
                 }
                 return Status.OK_STATUS;
             } finally {
-                ourTurnThread = null;
                 if(Thread.currentThread().isInterrupted()) {
                     // the stop interrupt belongs to this turn only: clear its
                     // status so it cannot leak into the next pooled worker run
@@ -854,7 +837,7 @@ public final class ChatPanel {
      */
     private void feedDelta(final String theChunk, final StreamBatcher theBatcher,
         final String theKind) {
-        if(ourBridge == null || ourRoot.isDisposed() || ourAborted) {
+        if(ourBridge == null || ourRoot.isDisposed() || ourTurns.isAborted()) {
             // after a stop request no more streamed text goes to the page:
             // the partial text already flushed stays where it is
             return;
