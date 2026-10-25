@@ -37,6 +37,7 @@ import com.mad.edt.colleague.agent.AgentLoop;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
 import com.mad.edt.colleague.chat.EscapeSequence;
+import com.mad.edt.colleague.chat.PageCommandHandler;
 import com.mad.edt.colleague.chat.StreamBatcher;
 import com.mad.edt.colleague.chat.TurnController;
 import com.mad.edt.colleague.llm.ChatMessage;
@@ -107,6 +108,8 @@ public final class ChatPanel {
         new EscapeSequence(ESC_WINDOW_MS, ESC_DEDUP_MS);
     private String ourLastPalette = "";
     private String ourLastPageState = "";
+    private final PageCommandHandler ourPageCommands =
+        new PageCommandHandler(new BridgeActions());
 
     /**
      * @param theParent the tab body composite, laid out by the caller
@@ -328,83 +331,109 @@ public final class ChatPanel {
     }
 
     private void handleBridge(final String theMethod, final JsonObject theArguments) {
-        switch(theMethod) {
-            case "bridgeReady":
-                pushHistory();
-                setStatus(AgentMode.isOn()
-                    ? "Режим правки ВКЛЮЧЁН — агент с инструментами проекта"
-                    : "Готов к работе");
-                schedulePageSendProof();
-                return;
-            case "sync": {
-                final String state = BridgeBrowser.optString(theArguments, "ae")
-                    + " hf=" + BridgeBrowser.optString(theArguments, "hf")
-                    + " kd=" + BridgeBrowser.optString(theArguments, "kd")
-                    + " qvlen=" + BridgeBrowser.optString(theArguments, "qvlen")
-                    + " ch=" + BridgeBrowser.optString(theArguments, "ch")
-                    + " clicked=" + BridgeBrowser.optString(theArguments, "clicked");
-                if(!state.equals(ourLastPageState)) {
-                    ourLastPageState = state;
-                    System.out.println("[colleague] page focus state: " + state);
-                }
-                return;
+        // the routing table itself lives in the tested PageCommandHandler;
+        // here the call only becomes readable: page name-value pairs become
+        // plain strings for the handler
+        ourPageCommands.handle(theMethod, name -> bridgeArgument(theArguments, name));
+    }
+
+    private static String bridgeArgument(final JsonObject theArguments, final String theName) {
+        return theArguments == null ? "" : BridgeBrowser.optString(theArguments, theName);
+    }
+
+    /**
+     * Panel-side effects behind the page bridge: status line, SWT clipboard,
+     * the question job and the escape filter. Routing which method triggers
+     * which effect is pinned by the PageCommandHandler tests.
+     */
+    private final class BridgeActions implements PageCommandHandler.Actions {
+
+        @Override
+        public void bridgeReady() {
+            pushHistory();
+            setStatus(AgentMode.isOn()
+                ? "Режим правки ВКЛЮЧЁН — агент с инструментами проекта"
+                : "Готов к работе");
+            schedulePageSendProof();
+        }
+
+        @Override
+        public void pageStateChanged(final String theState) {
+            if(!theState.equals(ourLastPageState)) {
+                ourLastPageState = theState;
+                System.out.println("[colleague] page focus state: " + theState);
             }
-            case "send":
-                if(Boolean.getBoolean("colleague.browser.selftest")) {
-                    System.out.println("[colleague] bridge: page reached the panel's "
-                        + "input handler");
+        }
+
+        @Override
+        public void send(final String theText) {
+            if(Boolean.getBoolean("colleague.browser.selftest")) {
+                System.out.println("[colleague] bridge: page reached the panel's "
+                    + "input handler");
+            }
+            sendQuestion(theText);
+        }
+
+        @Override
+        public void newChat() {
+            reset();
+        }
+
+        @Override
+        public void toggleEdit() {
+            ChatPanel.this.toggleEdit();
+        }
+
+        @Override
+        public void copy(final String theText) {
+            ViewBridge.copyToClipboard(ourRoot, theText);
+        }
+
+        @Override
+        public void attachFile() {
+            setStatus("Файлы пока не прикрепляются — используйте контекст проекта из поиска");
+        }
+
+        @Override
+        public void back() {
+            if(ourOnBack != null) {
+                ourOnBack.run();
+            }
+        }
+
+        @Override
+        public void escape() {
+            registerEscape();
+        }
+
+        @Override
+        public void abort() {
+            if(ourBusy && ourQuestionJob != null
+                && ourQuestionJob.getState() != Job.NONE) {
+                // one object owns the stop: it fires the latch the providers
+                // poll between streamed frames and interrupts the worker out
+                // of blocking waits such as the response-header phase
+                ourTurns.abortTurn();
+                ourQuestionJob.cancel();
+                setStatus("Генерация остановлена");
+                if(ourBridge != null && ourBridge.isReady()) {
+                    // the page unlocks right away: the transcript already
+                    // shows what was produced, and the worker unwinds in
+                    // the background without further visible effects
+                    final JsonObject busy = new JsonObject();
+                    busy.addProperty("busy", Boolean.FALSE);
+                    ourBridge.push("busy", busy);
                 }
-                sendQuestion(BridgeBrowser.optString(theArguments, "text"));
-                return;
-            case "newChat":
-                reset();
-                return;
-            case "toggleEdit":
-                toggleEdit();
-                return;
-            case "copy":
-                ViewBridge.copyToClipboard(ourRoot, BridgeBrowser.optString(theArguments, "text"));
-                return;
-            case "attachFile":
-                setStatus("Файлы пока не прикрепляются — используйте контекст проекта из поиска");
-                return;
-            case "back":
-                if(ourOnBack != null) {
-                    ourOnBack.run();
-                }
-                return;
-            case "esc":
-                registerEscape();
-                return;
-            case "abort":
-                if(ourBusy && ourQuestionJob != null
-                    && ourQuestionJob.getState() != Job.NONE) {
-                    // one object owns the stop: it fires the latch the providers
-                    // poll between streamed frames and interrupts the worker out
-                    // of blocking waits such as the response-header phase
-                    ourTurns.abortTurn();
-                    ourQuestionJob.cancel();
-                    setStatus("Генерация остановлена");
-                    if(ourBridge != null && ourBridge.isReady()) {
-                        // the page unlocks right away: the transcript already
-                        // shows what was produced, and the worker unwinds in
-                        // the background without further visible effects
-                        final JsonObject busy = new JsonObject();
-                        busy.addProperty("busy", Boolean.FALSE);
-                        ourBridge.push("busy", busy);
-                    }
-                }
-                return;
-            case "diag":
-                // page-side measurements for layout regression proofs; only the
-                // selftest scripts ever call this, keep the noise out of normal runs
-                if(Boolean.getBoolean("colleague.browser.selftest")) {
-                    System.out.println("[colleague] page diag: "
-                        + BridgeBrowser.optString(theArguments, "txt"));
-                }
-                return;
-            default:
-                return;
+            }
+        }
+
+        @Override
+        public void diagnose(final String theText) {
+            // page-side measurements for layout regression proofs; only the
+            // selftest scripts ever call this, keep the noise out of normal runs
+            if(Boolean.getBoolean("colleague.browser.selftest")) {
+                System.out.println("[colleague] page diag: " + theText);
+            }
         }
     }
 
