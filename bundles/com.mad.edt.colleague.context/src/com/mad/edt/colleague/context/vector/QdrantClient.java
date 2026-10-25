@@ -223,10 +223,12 @@ public final class QdrantClient {
      */
     public void deleteByField(final String theCollection, final String theField,
         final String theValue) throws QdrantException {
+        // the store's filter condition carries the field key next to the
+        // match object; nesting the key inside "match" is rejected there
         final JsonObject match = new JsonObject();
-        match.addProperty("key", theField);
         match.addProperty("value", theValue);
         final JsonObject condition = new JsonObject();
+        condition.addProperty("key", theField);
         condition.add("match", match);
         final JsonArray must = new JsonArray();
         must.add(condition);

@@ -164,7 +164,7 @@ public class ColleagueView extends ViewPart {
             System.err.println("[colleague] context index ready: " + files + " files");
             if(ourSemantic != null) {
                 System.err.println("[colleague] semantic "
-                    + ourSemantic.refreshAndLog(ourCodeSearch::forEachSourceFile)
+                    + ourSemantic.refreshAndLog(cappedSourceFiles())
                     + " | " + ourSemantic.getStatus());
             }
             ourOverview.rebuild();
@@ -435,6 +435,31 @@ public class ColleagueView extends ViewPart {
         return ourSemantic == null
             ? keyword.gather(theQuestion)
             : ourSemantic.withKeyword(keyword).gather(theQuestion);
+    }
+
+    /**
+     * Searchable files for one semantic refresh pass. A live check can cap
+     * the pass with {@code -Dcolleague.semantic.max-files=N} so a huge
+     * workspace indexes a representative subset instead of every file; file
+     * fingerprints only live inside one session, so a capped pass never
+     * purges what earlier sessions stored.
+     *
+     * @return file source for {@link SemanticIndex#refreshAndLog}
+     */
+    private SemanticIndex.FileSource cappedSourceFiles() {
+        final int cap = Integer.getInteger("colleague.semantic.max-files", 0).intValue();
+        if(cap <= 0) {
+            return ourCodeSearch::forEachSourceFile;
+        }
+        return acceptor -> {
+            final int[] accepted = new int[1];
+            ourCodeSearch.forEachSourceFile((path, displayPath) -> {
+                if(accepted[0] < cap) {
+                    accepted[0]++;
+                    acceptor.accept(path, displayPath);
+                }
+            });
+        };
     }
 
     private void maybeRunSelfTest() {

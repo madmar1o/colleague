@@ -55,10 +55,13 @@ class QdrantPointsContractTest {
         Assertions.assertEquals("POST", call.getMethod());
         Assertions.assertEquals("http://store.test/collections/" + COLLECTION
             + "/points/delete?wait=true", call.getUrl());
+        // the store filter condition carries the file key at the condition
+        // level, only the value is nested under "match"; this shape was
+        // verified against a live server, the other one is rejected there
         Assertions.assertEquals(
             JsonParser.parseString(
-                "{\"filter\":{\"must\":[{\"match\":{\"key\":\"file\","
-                    + "\"value\":\"src/a b.txt\"}}]}}").getAsJsonObject(),
+                "{\"filter\":{\"must\":[{\"key\":\"file\","
+                    + "\"match\":{\"value\":\"src/a b.txt\"}}]}}").getAsJsonObject(),
             JsonParser.parseString(call.getJsonBody()).getAsJsonObject());
     }
 
