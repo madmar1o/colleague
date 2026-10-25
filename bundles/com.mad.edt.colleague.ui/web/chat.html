@@ -97,7 +97,7 @@ a { color: var(--accent); }
 .statusline { color: var(--muted); font-size: 11px; padding: 2px 14px; flex: none;
   min-height: 16px; }
 form.composer {
-  flex: none; display: flex; gap: 8px; padding: 8px 12px 10px; align-items: flex-end;
+  flex: none; display: flex; gap: 8px; padding: 8px 12px 10px; align-items: stretch;
   border-top: 1px solid var(--line); background: var(--panel);
 }
 textarea#q {
@@ -107,10 +107,12 @@ textarea#q {
 }
 textarea#q:focus { border-color: var(--accent); }
 button.send {
-  flex: none; background: var(--accent); color: #fff; border: none;
-  border-radius: 12px; padding: 10px 18px; font-size: 13px; cursor: pointer;
+  flex: none; min-width: 110px; background: var(--accent); color: #fff;
+  border: none; border-radius: 12px; padding: 10px 18px; font-size: 13px;
+  font-weight: 600; cursor: pointer;
 }
 button.send:disabled { background: var(--panel2); color: var(--muted); }
+button.send.stop { background: var(--error); }
 .hint { color: var(--muted); font-size: 11px; padding: 0 12px 6px; flex: none;
   background: var(--panel); }
 .welcome {
@@ -131,6 +133,30 @@ button.send:disabled { background: var(--panel2); color: var(--muted); }
 .typing i:nth-child(2) { animation-delay: .2s; }
 .typing i:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+.bubble.stream::after {
+  content: "\258D"; color: var(--accent); margin-left: 2px;
+  animation: blink 1s infinite;
+}
+button.scrollbottom {
+  position: fixed; right: 16px; bottom: 96px; width: 34px; height: 34px;
+  border-radius: 50%; border: 1px solid var(--line); background: var(--panel2);
+  color: var(--text); font-size: 15px; line-height: 1; cursor: pointer;
+  display: none; box-shadow: 0 2px 8px rgba(0,0,0,.3); z-index: 5;
+}
+button.scrollbottom:hover { border-color: var(--accent); }
+.thought {
+  align-self: flex-start; max-width: 78%; background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 12px; padding: 6px 12px;
+  color: var(--muted); font-size: 12px; user-select: none;
+}
+.thought .thead { cursor: pointer; display: flex; gap: 6px; align-items: center; }
+.thought .tarrow { transition: transform .15s; }
+.thought.open .tarrow { transform: rotate(90deg); }
+.thought .tbody {
+  display: none; white-space: pre-wrap; margin-top: 6px; color: var(--muted);
+  max-height: 320px; overflow-y: auto; user-select: text; line-height: 1.45;
+}
+.thought.open .tbody { display: block; }
 </style>
 </head>
 <body>
@@ -152,6 +178,7 @@ button.send:disabled { background: var(--panel2); color: var(--muted); }
     правки — тогда он сможет ещё и менять файлы по вашему указанию.
   </div>
 </main>
+<button class="scrollbottom" id="btnbottom" title="К концу переписки">&#8595;</button>
 <div class="statusline" id="status"></div>
 <form class="composer" id="composer">
   <textarea id="q" placeholder="Спросите о проекте… (Ctrl+Enter — отправить)"></textarea>
@@ -279,6 +306,18 @@ function now() {
   return h + ":" + m;
 }
 function scrollDown() { msgs.scrollTop = msgs.scrollHeight; }
+/* Stick-to-bottom feed: the view follows new text only while the user was
+   already near the bottom; scrolling up releases the grip and the down-arrow
+   button appears to jump back. */
+function nearBottom() {
+  return msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 60;
+}
+var btnBottom = document.getElementById("btnbottom");
+msgs.addEventListener("scroll", function () {
+  btnBottom.style.display = nearBottom() ? "none" : "block";
+});
+btnBottom.addEventListener("click", function () { scrollDown(); });
+function followScroll(stick) { if (stick) { scrollDown(); } }
 function hideWelcome() {
   var w = document.getElementById("welcome");
   if (w) { w.remove(); }
@@ -309,6 +348,7 @@ function hideTyping() {
 }
 
 function addIncoming(kind, text, time) {
+  var stick = nearBottom();
   hideTyping();
   var row = document.createElement("div"); row.className = "row in";
   var av = document.createElement("div"); av.className = "smallavatar"; av.textContent = "C";
@@ -317,7 +357,7 @@ function addIncoming(kind, text, time) {
   b.innerHTML = (kind === "error" ? esc(text) : mdToHtml(text)) +
     '<span class="meta">' + esc(time || now()) +
     ' <span class="copylink" onclick="copyBubble(this)">копир.</span></span>';
-  row.appendChild(av); row.appendChild(b); msgs.appendChild(row); scrollDown();
+  row.appendChild(av); row.appendChild(b); msgs.appendChild(row); followScroll(stick);
   return b;
 }
 function addOutgoing(text, time) {
@@ -329,6 +369,72 @@ function addOutgoing(text, time) {
   meta.innerHTML = esc(time || now()) + ' <span class="ticks">&#10003;&#10003;</span>';
   b.appendChild(meta);
   row.appendChild(b); msgs.appendChild(row); scrollDown();
+}
+/* Streaming answer bubble: grows with every delta batch from Java and is
+   replaced by the final rendered bubble on "answer". */
+var streamRow = null, streamText = null;
+var pageBusy = false;
+/* Reasoning pass goes to its own collapsed block, like separate "reasoning
+   parts" of terminal chat UIs: the user sees the header and can expand it,
+   while only the final answer renders as a normal bubble. */
+var thoughtEl = null, thoughtBody = null, thoughtCount = 0;
+function thinkingDelta(text) {
+  if (!thoughtBody) {
+    hideWelcome();
+    thoughtEl = document.createElement("div"); thoughtEl.className = "thought";
+    var head = document.createElement("div"); head.className = "thead";
+    head.innerHTML = '&#128161; размышления <span class="tarrow">&#9656;</span> ' +
+      '<span class="tlive">печатает…</span>';
+    /* the click handler must close over THIS block's own element: the
+       module-level thoughtEl is reset when the reasoning pass ends, and a
+       stale reference made every later click throw and do nothing */
+    var block = thoughtEl;
+    head.onclick = function () { block.classList.toggle("open"); };
+    thoughtBody = document.createElement("div"); thoughtBody.className = "tbody";
+    thoughtEl.appendChild(head); thoughtEl.appendChild(thoughtBody);
+    msgs.appendChild(thoughtEl); scrollDown();
+  }
+  var stick = nearBottom();
+  thoughtBody.textContent += text;
+  thoughtCount += text.length;
+  followScroll(stick);
+}
+function endThinking() {
+  if (thoughtEl) {
+    var live = thoughtEl.querySelector(".tlive");
+    if (live) { live.textContent = thoughtCount + " симв., клик — показать"; }
+  }
+  thoughtEl = null; thoughtBody = null; thoughtCount = 0;
+}
+function streamDelta(text) {
+  if (!streamText) {
+    hideTyping(); hideWelcome();
+    streamRow = document.createElement("div"); streamRow.className = "row in";
+    var av = document.createElement("div"); av.className = "smallavatar"; av.textContent = "C";
+    var b = document.createElement("div"); b.className = "bubble stream";
+    streamText = document.createElement("span");
+    b.appendChild(streamText);
+    streamRow.appendChild(av); streamRow.appendChild(b);
+    msgs.appendChild(streamRow); scrollDown();
+  }
+  var stick = nearBottom();
+  streamText.textContent += text;
+  followScroll(stick);
+}
+function endStream(keepPartial) {
+  /* On a stopped turn the half-written text stays in the transcript as a
+     normal bubble, like messengers keep drafted outgoing messages. */
+  var keep = keepPartial && streamText != null
+    && streamText.textContent.trim() !== "";
+  if (streamRow) {
+    if (keep) {
+      var b = streamRow.querySelector(".bubble.stream");
+      if (b) { b.classList.remove("stream"); }
+    } else {
+      streamRow.remove();
+    }
+  }
+  streamRow = null; streamText = null;
 }
 function copyBubble(node) {
   var b = node.closest(".bubble");
@@ -366,6 +472,7 @@ function setMode(on) {
   modeEl.innerHTML = "&#9881; правка: " + (on ? "вкл" : "выкл");
 }
 function sendNow() {
+  if (pageBusy) { apiCall("abort", {}); return; }
   var text = qEl.value.trim();
   if (!text || sendEl.disabled) { return; }
   qEl.value = "";
@@ -375,8 +482,7 @@ document.getElementById("composer").addEventListener("submit", function (e) {
   e.preventDefault(); sendNow();
 });
 qEl.addEventListener("keydown", function (e) {
-  if (e.ctrlKey && (e.key === "Enter")) { e.preventDefault(); sendNow(); return; }
-  if (e.key === "Escape") { doubleEsc(e); }
+  if (e.ctrlKey && (e.key === "Enter")) { e.preventDefault(); sendNow(); }
 });
 /* If a workbench focus change ever takes the caret out of the composer,
    the next typed character brings it back instead of going nowhere. */
@@ -386,14 +492,8 @@ document.addEventListener("keydown", function (e) {
     qEl.focus();
   }
 }, true);
-var lastEsc = 0;
-function doubleEsc(e) {
-  var t = Date.now();
-  if (lastEsc && t - lastEsc < 1000) { lastEsc = 0; apiCall("toggleEdit", {}); }
-  else { lastEsc = t; }
-}
 document.addEventListener("keydown", function (e) {
-  if (e.key === "Escape" && document.activeElement !== qEl) { doubleEsc(e); }
+  if (e.key === "Escape") { apiCall("esc", {}); }
 });
 modeEl.addEventListener("click", function () { apiCall("toggleEdit", {}); });
 document.getElementById("btnnew").addEventListener("click", function () {
@@ -437,6 +537,8 @@ window.colleaguePush = function (kind, payload) {
       break;
     case "readyPalette": applyPalette(data); break;
     case "history":
+      endStream();
+      endThinking();
       msgs.textContent = "";
       if (!(data.items || []).length) { restoreWelcome(); }
       (data.items || []).forEach(function (m) {
@@ -445,15 +547,19 @@ window.colleaguePush = function (kind, payload) {
       });
       break;
     case "user": addOutgoing(data.text || "", data.time); break;
-    case "answer": setTools(data.tools || []); addIncoming("answer", data.text || "", data.time); break;
-    case "error": addIncoming("error", data.text || "", data.time); break;
+    case "delta": streamDelta(data.text || ""); break;
+    case "thinking": thinkingDelta(data.text || ""); break;
+    case "answer": endStream(); endThinking(); setTools(data.tools || []); addIncoming("answer", data.text || "", data.time); break;
+    case "error": endStream(); addIncoming("error", data.text || "", data.time); break;
     case "tool": addTool(data); break;
     case "status": setStatus(data.text || ""); break;
     case "mode": setMode(!!data.on); setStatus(data.text || ""); break;
     case "busy":
-      sendEl.disabled = !!data.busy;
+      pageBusy = !!data.busy;
+      sendEl.textContent = pageBusy ? "Стоп" : "Спросить";
+      sendEl.classList.toggle("stop", pageBusy);
       setStatus(data.text || "");
-      if (data.busy) { showTyping(); } else { hideTyping(); }
+      if (data.busy) { showTyping(); } else { hideTyping(); endStream(true); endThinking(); }
       break;
     case "input": qEl.value = data.text || ""; qEl.focus(); break;
   }

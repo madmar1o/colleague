@@ -1,7 +1,7 @@
 package com.mad.edt.colleague.llm;
 
-import org.eclipse.core.runtime.preferences.InstanceScope;
-import org.osgi.service.prefs.BackingStoreException;import org.osgi.service.prefs.Preferences;
+import org.osgi.service.prefs.BackingStoreException;
+import org.osgi.service.prefs.Preferences;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;

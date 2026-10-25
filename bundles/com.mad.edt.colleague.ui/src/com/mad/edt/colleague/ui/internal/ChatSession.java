@@ -42,6 +42,60 @@ public final class ChatSession {
      */
     public String ask(final String theModel, final String theContext, final String theQuestion)
         throws LLMException {
+        return ask(theModel, theContext, theQuestion, chunk -> { });
+    }
+
+    /**
+     * Asks the model with a live feed of generated text chunks.
+     *
+     * @param theModel model name, {@code null} for the provider default
+     * @param theContext project/resource description, may be {@code null}
+     * @param theQuestion question text
+     * @param theOnDelta receives answer chunks as they are generated
+     * @return formatted reply (answer plus usage statistics)
+     * @throws LLMException when the endpoint fails
+     */
+    public String ask(final String theModel, final String theContext, final String theQuestion,
+        final java.util.function.Consumer<String> theOnDelta) throws LLMException {
+        return ask(theModel, theContext, theQuestion, theOnDelta, chunk -> { });
+    }
+
+    /**
+     * Asks the model with a live feed of generated text, keeping the model's
+     * reasoning pass on a separate channel so the caller can present it apart
+     * from the final answer.
+     *
+     * @param theModel model name, {@code null} for the provider default
+     * @param theContext project/resource description, may be {@code null}
+     * @param theQuestion question text
+     * @param theOnDelta receives answer chunks as they are generated
+     * @param theOnThinking receives reasoning chunks as they are generated
+     * @return formatted reply (answer plus usage statistics)
+     * @throws LLMException when the endpoint fails
+     */
+    public String ask(final String theModel, final String theContext, final String theQuestion,
+        final java.util.function.Consumer<String> theOnDelta,
+        final java.util.function.Consumer<String> theOnThinking) throws LLMException {
+        return ask(theModel, theContext, theQuestion, theOnDelta, theOnThinking, null);
+    }
+
+    /**
+     * Asks the model with the cancellation latch of the caller's turn wired
+     * into the request: stopping the turn stops the streamed read loop.
+     *
+     * @param theModel model name, {@code null} for the provider default
+     * @param theContext project/resource description, may be {@code null}
+     * @param theQuestion question text
+     * @param theOnDelta receives answer chunks as they are generated
+     * @param theOnThinking receives reasoning chunks as they are generated
+     * @param theCancellation shared stop flag, {@code null} for none
+     * @return formatted reply (answer plus usage statistics)
+     * @throws LLMException when the endpoint fails
+     */
+    public String ask(final String theModel, final String theContext, final String theQuestion,
+        final java.util.function.Consumer<String> theOnDelta,
+        final java.util.function.Consumer<String> theOnThinking,
+        final com.mad.edt.colleague.llm.CancellationFlag theCancellation) throws LLMException {
         final ChatRequest.Builder request = ChatRequest
             .builder(theModel != null ? theModel : provider.getConfig().getDefaultModel());
         if(systemPrompt != null && !systemPrompt.isEmpty()) {
@@ -56,10 +110,13 @@ public final class ChatSession {
             request.addMessage(contextMessage);
         }
         request.addMessage(ChatMessage.user(theQuestion));
-        request.think(usesReasoningTemplate(theModel));
+        request.think(Boolean.valueOf(wantsVisibleReasoning(theModel)));
+        if(theCancellation != null) {
+            request.cancellation(theCancellation);
+        }
 
         final long startedAt = System.nanoTime();
-        final ChatResult result = provider.chat(request.build());
+        final ChatResult result = provider.chatStream(request.build(), theOnDelta, theOnThinking);
         final long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
 
         if(contextMessage != null) {
@@ -116,16 +173,17 @@ public final class ChatSession {
     }
 
     /**
-     * Reasoning-capable models stream their chain of thought into a separate
-     * field and can exhaust the answer budget there, so the direct answer is
-     * requested for known templates.
+     * Reasoning-capable models produce their chain of thought in a separate
+     * stream field; the assistant history keeps only the final answer, so the
+     * reasoning pass is requested and shown to the user collapsed apart from
+     * the answer.
      *
      * @param theModel model name, may be {@code null}
-     * @return {@code false} when the reasoning pass must be suppressed
+     * @return {@code true} when the reasoning pass must be requested
      */
-    private boolean usesReasoningTemplate(final String theModel) {
+    private boolean wantsVisibleReasoning(final String theModel) {
         final String name = theModel == null ? provider.getConfig().getDefaultModel() : theModel;
-        return name != null && !name.contains("qwen3");
+        return name != null && name.contains("qwen3");
     }
 
     private void trimHistory() {

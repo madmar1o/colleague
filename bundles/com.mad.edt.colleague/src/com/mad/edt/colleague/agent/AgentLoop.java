@@ -8,6 +8,7 @@ import java.util.Map;
 import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.ChatRequest;
 import com.mad.edt.colleague.llm.ChatResult;
+import com.mad.edt.colleague.llm.CancellationFlag;
 import com.mad.edt.colleague.llm.ILLMProvider;
 import com.mad.edt.colleague.llm.LLMException;
 import com.mad.edt.colleague.llm.ToolCall;
@@ -27,6 +28,7 @@ public final class AgentLoop {
     private final Map<String, IToolExecutor> executors;
     private final String model;
     private final int maxSteps;
+    private final CancellationFlag cancellation;
 
     /**
      * @param theProvider model endpoint
@@ -36,6 +38,19 @@ public final class AgentLoop {
      */
     public AgentLoop(final ILLMProvider theProvider, final List<IToolExecutor> theTools,
         final String theModel, final int theMaxSteps) {
+        this(theProvider, theTools, theModel, theMaxSteps, new CancellationFlag());
+    }
+
+    /**
+     * @param theProvider model endpoint
+     * @param theTools callable tools, name-collisions keep the last one
+     * @param theModel model to use, {@code null} for the provider default
+     * @param theMaxSteps budget of model round-trips, {@code <= 0} for the default
+     * @param theCancellation shared stop flag: the loop aborts between steps
+     *            and every model round-trip carries it
+     */
+    public AgentLoop(final ILLMProvider theProvider, final List<IToolExecutor> theTools,
+        final String theModel, final int theMaxSteps, final CancellationFlag theCancellation) {
         provider = theProvider;
         executors = new LinkedHashMap<>();
         for(final IToolExecutor executor : theTools) {
@@ -43,6 +58,7 @@ public final class AgentLoop {
         }
         model = theModel;
         maxSteps = theMaxSteps > 0 ? theMaxSteps : DEFAULT_MAX_STEPS;
+        cancellation = theCancellation == null ? new CancellationFlag() : theCancellation;
     }
 
     /**
@@ -69,12 +85,16 @@ public final class AgentLoop {
         int executed = 0;
         while(steps < maxSteps) {
             steps++;
+            if(cancellation.isCancelled()) {
+                return new AgentAnswer("", steps, executed, false);
+            }
             final ChatRequest.Builder request = ChatRequest.builder(
                 model != null ? model : defaultModel());
             for(final ChatMessage message : messages) {
                 request.addMessage(message);
             }
             request.tools(specs);
+            request.cancellation(cancellation);
 
             final ChatResult result = provider.chat(request.build());
             if(!result.wantsToolCall()) {

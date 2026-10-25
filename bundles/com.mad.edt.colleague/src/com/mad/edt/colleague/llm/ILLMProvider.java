@@ -1,6 +1,7 @@
 package com.mad.edt.colleague.llm;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Contract for a callable language model endpoint. Implementations are
@@ -27,6 +28,50 @@ public interface ILLMProvider {
      *         returns an unexpected body
      */
     ChatResult chat(ChatRequest theRequest) throws LLMException;
+
+    /**
+     * Runs one streaming chat completion: every generated text chunk is
+     * handed to the delta consumer as soon as it arrives, the consumer runs
+     * on the calling thread. The default implementation has no streaming
+     * transport and delivers the whole answer as a single delta.
+     *
+     * @param theRequest the request
+     * @param theOnDelta receives text chunks in generation order
+     * @return the generated answer, identical to {@link #chat}
+     * @throws LLMException when the endpoint is unreachable, rejects or
+     *         returns an unexpected body
+     */
+    default ChatResult chatStream(final ChatRequest theRequest, final Consumer<String> theOnDelta)
+        throws LLMException {
+        return chatStream(theRequest, theOnDelta, chunk -> { });
+    }
+
+    /**
+     * Runs one streaming chat completion separating the model's reasoning
+     * pass from the final answer: reasoning chunks go to the thinking
+     * consumer, answer chunks to the content consumer. Both run on the
+     * calling thread. The default implementation has no streaming transport
+     * and delivers the whole answer as a single content delta.
+     *
+     * @param theRequest the request
+     * @param theOnContent receives answer text chunks in generation order
+     * @param theOnThinking receives reasoning text chunks, ignored when the
+     *            endpoint does not separate reasoning
+     * @return the generated answer, identical to {@link #chat}
+     * @throws LLMException when the endpoint is unreachable, rejects or
+     *         returns an unexpected body
+     */
+    default ChatResult chatStream(final ChatRequest theRequest, final Consumer<String> theOnContent,
+        final Consumer<String> theOnThinking) throws LLMException {
+        final ChatResult result = chat(theRequest);
+        if(!result.getContent().isEmpty()) {
+            theOnContent.accept(result.getContent());
+        }
+        if(result.getThinking() != null && !result.getThinking().isEmpty()) {
+            theOnThinking.accept(result.getThinking());
+        }
+        return result;
+    }
 
     /**
      * @return model names available at the endpoint

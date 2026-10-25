@@ -2,6 +2,7 @@ package com.mad.edt.colleague.llm;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -26,9 +27,110 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
 
     @Override
     public ChatResult chat(final ChatRequest theRequest) throws LLMException {
+        if(theRequest.getCancellation().isCancelled()) {
+            throw new LLMException("generation turn cancelled");
+        }
+        final JsonObject response =
+            postJson("/chat/completions", buildBody(theRequest, false),
+                getConfig().getReadTimeoutMs());
+        return parseResult(response);
+    }
+
+    @Override
+    public ChatResult chatStream(final ChatRequest theRequest, final Consumer<String> theOnContent,
+        final Consumer<String> theOnThinking) throws LLMException {
+        final StringBuilder content = new StringBuilder();
+        final StringBuilder thinking = new StringBuilder();
+        final String[] modelName = new String[1];
+        final String[] finishReason = new String[1];
+        final int[] promptTokens = new int[1];
+        final int[] completionTokens = new int[1];
+        final java.util.Map<Integer, String[]> callParts = new java.util.TreeMap<>();
+        final java.util.Map<Integer, StringBuilder> callArguments = new java.util.TreeMap<>();
+
+        try {
+            postJsonStream("/chat/completions", buildBody(theRequest, true),
+                getConfig().getReadTimeoutMs(), theRequest.getCancellation(), chunk -> {
+                if(chunk.has("model")) {
+                    modelName[0] = textOrNull(chunk, "model");
+                }
+                final JsonObject usage = chunk.getAsJsonObject("usage");
+                if(usage != null) {
+                    promptTokens[0] = intOrZero(usage, "prompt_tokens");
+                    completionTokens[0] = intOrZero(usage, "completion_tokens");
+                }
+                final JsonArray choices = chunk.getAsJsonArray("choices");
+                if(choices == null || choices.isEmpty()) {
+                    return;
+                }
+                choiceLoop: for(final JsonElement element : choices) {
+                    final JsonObject choice = element.getAsJsonObject();
+                    if(choice.has("finish_reason") && !choice.get("finish_reason").isJsonNull()) {
+                        finishReason[0] = textOrNull(choice, "finish_reason");
+                    }
+                    final JsonObject delta = choice.getAsJsonObject("delta");
+                    if(delta == null) {
+                        continue choiceLoop;
+                    }
+                    final String piece = textOrNull(delta, "content");
+                    if(piece != null && !piece.isEmpty()) {
+                        content.append(piece);
+                        theOnContent.accept(piece);
+                    }
+                    final String thought = textOrNull(delta, "reasoning_content");
+                    if(thought != null && !thought.isEmpty()) {
+                        thinking.append(thought);
+                        theOnThinking.accept(thought);
+                    }
+                    final JsonArray calls = delta.getAsJsonArray("tool_calls");
+                    if(calls == null) {
+                        continue choiceLoop;
+                    }
+                    for(final JsonElement callElement : calls) {
+                        final JsonObject call = callElement.getAsJsonObject();
+                        final int position = call.has("index")
+                            ? call.get("index").getAsInt() : Integer.valueOf(callParts.size());
+                        final JsonObject function = call.getAsJsonObject("function");
+                        final String[] parts = callParts.computeIfAbsent(
+                            Integer.valueOf(position), key -> new String[2]);
+                        if(call.has("id") && !call.get("id").isJsonNull()) {
+                            parts[0] = textOrNull(call, "id");
+                        }
+                        if(function != null) {
+                            if(textOrNull(function, "name") != null) {
+                                parts[1] = textOrNull(function, "name");
+                            }
+                            final String argumentPiece = textOrNull(function, "arguments");
+                            if(argumentPiece != null) {
+                                callArguments.computeIfAbsent(Integer.valueOf(position),
+                                    key -> new StringBuilder()).append(argumentPiece);
+                            }
+                        }
+                    }
+                }
+            });
+        } catch (final TurnCancelledException ex) {
+            // the user stopped this turn: the partial text produced so far is
+            // kept, and the caller recognizes the stop via its own flag
+        }
+
+        final List<ToolCall> calls = new ArrayList<>();
+        for(final java.util.Map.Entry<Integer, String[]> entry : callParts.entrySet()) {
+            final StringBuilder arguments = callArguments.get(entry.getKey());
+            calls.add(new ToolCall(entry.getValue()[0], entry.getValue()[1],
+                arguments == null || arguments.length() == 0 ? "{}" : arguments.toString()));
+        }
+        return new ChatResult(content.toString(),
+            thinking.length() == 0 ? null : thinking.toString(),
+            modelName[0], finishReason[0],
+            promptTokens[0], completionTokens[0], calls);
+    }
+
+    private JsonObject buildBody(final ChatRequest theRequest, final boolean theStreaming)
+        throws LLMException {
         final JsonObject body = new JsonObject();
         body.addProperty("model", resolveModel(theRequest.getModel()));
-        body.addProperty("stream", false);
+        body.addProperty("stream", Boolean.valueOf(theStreaming));
         if(theRequest.getTemperature() != null) {
             body.addProperty("temperature", theRequest.getTemperature().doubleValue());
         }
@@ -72,14 +174,14 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
             messages.add(entry);
         }
         body.add("messages", messages);
+        return body;
+    }
 
-        final JsonObject response =
-            postJson("/chat/completions", body, getConfig().getReadTimeoutMs());
-
+    private ChatResult parseResult(final JsonObject theResponse) {
         String content = "";
         String finishReason = null;
         List<ToolCall> calls = List.of();
-        final JsonArray choices = response.getAsJsonArray("choices");
+        final JsonArray choices = theResponse.getAsJsonArray("choices");
         if(choices != null && !choices.isEmpty()) {
             final JsonObject choice = choices.get(0).getAsJsonObject();
             finishReason = textOrNull(choice, "finish_reason");
@@ -95,13 +197,13 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
 
         int promptTokens = 0;
         int completionTokens = 0;
-        final JsonObject usage = response.getAsJsonObject("usage");
+        final JsonObject usage = theResponse.getAsJsonObject("usage");
         if(usage != null) {
             promptTokens = intOrZero(usage, "prompt_tokens");
             completionTokens = intOrZero(usage, "completion_tokens");
         }
 
-        return new ChatResult(content, textOrNull(response, "model"), finishReason,
+        return new ChatResult(content, textOrNull(theResponse, "model"), finishReason,
             promptTokens, completionTokens, calls);
     }
 

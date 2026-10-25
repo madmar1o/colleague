@@ -7,6 +7,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.function.Consumer;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -76,6 +77,102 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
             .header("Accept", "application/json")
             .GET();
         return send(request);
+    }
+
+    /**
+     * POSTs a JSON body and consumes the response as a stream of JSON
+     * events, one per line. Blank lines and unparseable lines are skipped;
+     * SSE {@code data:} prefixes are stripped so both line-delimited JSON
+     * (local runtimes) and event streams (gateway-style endpoints) work.
+     *
+     * @param thePath path appended to the base URL, starting with a slash
+     * @param theBody request JSON
+     * @param theTimeoutMs timeout until response headers arrive
+     * @param theOnEvent called for every parsed event object
+     * @throws LLMException on transport failure or non-2xx status
+     */
+    protected void postJsonStream(final String thePath, final JsonObject theBody,
+        final int theTimeoutMs, final Consumer<JsonObject> theOnEvent) throws LLMException {
+        postJsonStream(thePath, theBody, theTimeoutMs, new CancellationFlag(), theOnEvent);
+    }
+
+    /**
+     * Same call with the cancellation latch of the owning turn: every streamed
+     * frame re-checks the flag, and when it is set the read loop unwinds
+     * through {@link TurnCancelledException}, closing the connection.
+     *
+     * @param thePath endpoint path
+     * @param theBody request body
+     * @param theTimeoutMs timeout until response headers arrive
+     * @param theCancellation turn cancellation latch
+     * @param theOnEvent called for every parsed event object
+     * @throws LLMException on transport failure or non-2xx status
+     */
+    protected void postJsonStream(final String thePath, final JsonObject theBody,
+        final int theTimeoutMs, final CancellationFlag theCancellation,
+        final Consumer<JsonObject> theOnEvent) throws LLMException {
+        final HttpRequest.Builder request = HttpRequest
+            .newBuilder(URI.create(config.getBaseUrl() + thePath))
+            .timeout(Duration.ofMillis(theTimeoutMs))
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(theBody.toString(), StandardCharsets.UTF_8));
+        if(config.getApiKey() != null && !config.getApiKey().isEmpty()) {
+            request.header("Authorization", "Bearer " + config.getApiKey());
+        }
+        final HttpResponse<java.util.stream.Stream<String>> response;
+        try {
+            final long startedAt = System.currentTimeMillis();
+            response = client.send(request.build(), HttpResponse.BodyHandlers.ofLines());
+            System.err.println("[colleague] stream headers after "
+                + (System.currentTimeMillis() - startedAt) + " ms from "
+                + config.getBaseUrl() + thePath);
+        } catch (final IOException ex) {
+            throw new LLMException("Cannot reach endpoint " + config.getBaseUrl()
+                + ": " + ex.getMessage(), ex);
+        } catch (final InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new LLMException("Call to " + config.getBaseUrl() + " interrupted", ex);
+        }
+        if(theCancellation.isCancelled()) {
+            // the wait for headers is the slowest phase (endpoints may load
+            // the model first): observing the latch here closes the stream
+            // right after headers arrive instead of waiting for any frame
+            response.body().close();
+            throw new TurnCancelledException();
+        }
+        if(response.statusCode() < 200 || response.statusCode() >= 300) {
+            final StringBuilder excerpt = new StringBuilder();
+            response.body().limit(4).forEach(line -> excerpt.append(line));
+            throw new LLMException("Endpoint " + config.getBaseUrl() + " returned HTTP "
+                + response.statusCode() + ": " + excerpt, response.statusCode(), null);
+        }
+        try (java.util.stream.Stream<String> lines = response.body()) {
+            lines.forEach(line -> {
+                if(theCancellation.isCancelled()) {
+                    throw new TurnCancelledException();
+                }
+                final String trimmed = line.strip();
+                if(trimmed.isEmpty()) {
+                    return;
+                }
+                String payload = trimmed;
+                if(payload.startsWith("data:")) {
+                    payload = payload.substring(5).strip();
+                }
+                if(payload.isEmpty() || "[DONE]".equals(payload)) {
+                    return;
+                }
+                try {
+                    theOnEvent.accept(JsonParser.parseString(payload).getAsJsonObject());
+                } catch (final TurnCancelledException ex) {
+                    // a consumer that observed cancellation: unwinds the loop
+                    throw ex;
+                } catch (final RuntimeException ex) {
+                    // unparsable stream frame, ignore it and keep reading
+                }
+            });
+        }
     }
 
     /**

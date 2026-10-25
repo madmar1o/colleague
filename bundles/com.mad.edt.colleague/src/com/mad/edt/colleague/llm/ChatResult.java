@@ -10,6 +10,7 @@ import java.util.List;
 public final class ChatResult {
 
     private final String content;
+    private final String thinking;
     private final String model;
     private final String finishReason;
     private final int promptTokens;
@@ -38,7 +39,24 @@ public final class ChatResult {
      */
     public ChatResult(final String theContent, final String theModel, final String theFinishReason,
         final int thePromptTokens, final int theCompletionTokens, final List<ToolCall> theToolCalls) {
+        this(theContent, null, theModel, theFinishReason, thePromptTokens, theCompletionTokens,
+            theToolCalls);
+    }
+
+    /**
+     * @param theContent generated answer text
+     * @param theThinking separate reasoning pass of the model, may be {@code null}
+     * @param theModel model that produced the text, may be {@code null}
+     * @param theFinishReason why generation stopped, may be {@code null}
+     * @param thePromptTokens tokens consumed by the prompt, {@code 0} if unknown
+     * @param theCompletionTokens tokens generated, {@code 0} if unknown
+     * @param theToolCalls tool calls requested by the model, may be {@code null}
+     */
+    public ChatResult(final String theContent, final String theThinking, final String theModel,
+        final String theFinishReason, final int thePromptTokens, final int theCompletionTokens,
+        final List<ToolCall> theToolCalls) {
         content = theContent == null ? "" : theContent;
+        thinking = theThinking;
         model = theModel;
         finishReason = theFinishReason;
         promptTokens = thePromptTokens;
@@ -53,6 +71,14 @@ public final class ChatResult {
      */
     public String getContent() {
         return content;
+    }
+
+    /**
+     * @return the model's intermediate reasoning pass, {@code null} when the
+     *         model produced none or the transport does not separate it
+     */
+    public String getThinking() {
+        return thinking;
     }
 
     /**

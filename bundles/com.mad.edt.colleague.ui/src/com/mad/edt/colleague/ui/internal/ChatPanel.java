@@ -8,8 +8,10 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.IJobFunction;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.StyleRange;
@@ -25,6 +27,7 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Label;
+import org.eclipse.swt.widgets.Listener;
 import org.eclipse.swt.widgets.Text;
 
 import com.google.gson.JsonArray;
@@ -34,6 +37,7 @@ import com.mad.edt.colleague.agent.AgentLoop;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
 import com.mad.edt.colleague.llm.ChatMessage;
+import com.mad.edt.colleague.llm.CancellationFlag;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 
 /**
@@ -54,7 +58,7 @@ public final class ChatPanel {
     private static final int AGENT_MAX_STEPS = 8;
 
     /** Max gap between two ESC presses that toggles the edit mode. */
-    private static final long ESC_WINDOW_MS = 1_000L;
+    private static final long ESC_WINDOW_MS = 2_000L;
 
     /** Live panels, kept in sync when the process-wide edit mode changes. */
     private static final List<ChatPanel> OUR_PANELS =
@@ -84,11 +88,18 @@ public final class ChatPanel {
     private String ourCachedQuestion = "";
     private boolean ourBusy;
     private boolean ourPageProofDone;
+    private volatile boolean ourAborted;
+    private volatile long ourAbortAtMs;
+    private volatile CancellationFlag ourTurnCancellation;
+    private volatile Thread ourTurnThread;
+    private Job ourQuestionJob;
+    private Listener ourEscFilter;
     private Consumer<String> ourAnswerListener;
     private Runnable ourOnBack;
     private Supplier<List<IToolExecutor>> ourToolSupplier;
     private Function<String, String> ourAutoContextSupplier;
     private long ourLastEscapeAt;
+    private long ourLastEscapeSignalAt;
     private String ourLastPalette = "";
     private String ourLastPageState = "";
 
@@ -237,6 +248,7 @@ public final class ChatPanel {
             push("ready", null);
             watchTheme();
             traceGeometry();
+            installEscapeFilter();
             return true;
         } catch (final RuntimeException | LinkageError | org.eclipse.swt.SWTError ex) {
             System.err.println("colleague: embedded browser unavailable, plain fallback: "
@@ -278,6 +290,35 @@ public final class ChatPanel {
                 + " locInParent=" + abs.x + "," + abs.y
                 + " size=" + control.getSize().x + "x" + control.getSize().y
                 + " visible=" + control.isVisible() + " focused=" + control.isFocusControl());
+        });
+    }
+
+    /**
+     * Catches ESC on the SWT level: whenever the workbench focus sits anywhere
+     * inside this panel (including the embedded browser and its DOM elements),
+     * the double-ESC edit-mode gesture works even if the keystroke never
+     * reaches the page's own script.
+     */
+    private void installEscapeFilter() {
+        final Display display = ourRoot.getDisplay();
+        ourEscFilter = (theEvent) -> {
+            if(theEvent.keyCode != SWT.ESC || ourRoot.isDisposed()) {
+                return;
+            }
+            Control widget = theEvent.widget instanceof Control ? (Control)theEvent.widget : null;
+            while(widget != null && widget != ourRoot) {
+                widget = widget.getParent();
+            }
+            if(widget == ourRoot) {
+                registerEscape();
+            }
+        };
+        display.addFilter(SWT.KeyDown, ourEscFilter);
+        ourRoot.addListener(SWT.Dispose, event -> {
+            if(ourEscFilter != null) {
+                display.removeFilter(SWT.KeyDown, ourEscFilter);
+                ourEscFilter = null;
+            }
         });
     }
 
@@ -327,6 +368,40 @@ public final class ChatPanel {
                     ourOnBack.run();
                 }
                 return;
+            case "esc":
+                registerEscape();
+                return;
+            case "abort":
+                if(ourBusy && ourQuestionJob != null
+                    && ourQuestionJob.getState() != Job.NONE) {
+                    ourAborted = true;
+                    ourAbortAtMs = System.currentTimeMillis();
+                    final CancellationFlag turn = ourTurnCancellation;
+                    if(turn != null) {
+                        // the real stop: providers poll this latch between
+                        // streamed frames and abandon the response stream,
+                        // so generation ends within a frame or two
+                        turn.cancel();
+                    }
+                    final Thread worker = ourTurnThread;
+                    if(worker != null) {
+                        // interrupting the worker also cuts the wait for
+                        // response headers, which is the slowest phase when
+                        // the endpoint loads the model before answering
+                        worker.interrupt();
+                    }
+                    ourQuestionJob.cancel();
+                    setStatus("Генерация остановлена");
+                    if(ourBridge != null && ourBridge.isReady()) {
+                        // the page unlocks right away: the transcript already
+                        // shows what was produced, and the worker unwinds in
+                        // the background without further visible effects
+                        final JsonObject busy = new JsonObject();
+                        busy.addProperty("busy", Boolean.FALSE);
+                        ourBridge.push("busy", busy);
+                    }
+                }
+                return;
             default:
                 return;
         }
@@ -349,19 +424,81 @@ public final class ChatPanel {
             return;
         }
         ourPageProofDone = true;
+        final boolean abortProof = Boolean.getBoolean("colleague.browser.abortproof");
         Display.getDefault().timerExec(12000, () -> {
             if(ourRoot.isDisposed()) {
                 return;
             }
+            final String question = abortProof
+                ? "proof: write a very long detailed essay about typical configuration"
+                    + " architecture problems, at least two thousand words"
+                : "proof: please answer with one word";
             final String script =
                 "var q=document.getElementById('q');"
-                + "if(q && !q.value){q.value='proof: please answer with one word';"
+                + "if(q && !q.value){q.value='" + question + "';"
                 + "q.dispatchEvent(new Event('input'));"
                 + "var f=document.getElementById('composer');"
                 + "if(f.requestSubmit){f.requestSubmit();}else{"
                 + "f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}}";
             ourBridge.executeScript(script);
             System.out.println("[colleague] bridge: page-side gesture injected");
+            if(abortProof) {
+                // autonomous proof of the stop path: six seconds into a long
+                // generation the panel dispatches the very stop request the
+                // page button would send, then measures how quickly the
+                // provider loop notices it
+                Display.getDefault().timerExec(6000, () -> {
+                    if(ourRoot.isDisposed()) {
+                        return;
+                    }
+                    System.out.println("[colleague] abort proof: dispatching stop");
+                    handleBridge("abort", new JsonObject());
+                });
+                Display.getDefault().timerExec(8000, () -> {
+                    if(ourRoot.isDisposed()) {
+                        return;
+                    }
+                    // ESC twice while the turn is still wrapping up: the page
+                    // must route both presses and the panel must flip mode
+                    System.out.println("[colleague] abort proof: injecting ESC pair");
+                    ourBridge.executeScript(
+                        "document.dispatchEvent(new KeyboardEvent('keydown',"
+                        + "{key:'Escape',bubbles:true}));");
+                });
+                Display.getDefault().timerExec(8600, () -> {
+                    if(ourRoot.isDisposed()) {
+                        return;
+                    }
+                    ourBridge.executeScript(
+                        "document.dispatchEvent(new KeyboardEvent('keydown',"
+                        + "{key:'Escape',bubbles:true}));");
+                });
+                Display.getDefault().timerExec(9500, () -> {
+                    if(ourRoot.isDisposed()) {
+                        return;
+                    }
+                    // second question through the page composer while the workbench
+                    // is still busy: proves the input is not locked after a stop
+                    System.out.println("[colleague] abort proof: injecting second question");
+                    ourBridge.executeScript(
+                        "var q=document.getElementById('q');"
+                        + "q.value='proof2: answer with one word';"
+                        + "q.dispatchEvent(new Event('input'));"
+                        + "var f=document.getElementById('composer');"
+                        + "if(f.requestSubmit){f.requestSubmit();}else{"
+                        + "f.dispatchEvent(new Event('submit',{cancelable:true,"
+                        + "bubbles:true}));}");
+                });
+                Display.getDefault().timerExec(15000, () -> {
+                    if(ourRoot.isDisposed()) {
+                        return;
+                    }
+                    // stop the second turn too: it runs through the agent loop,
+                    // so this exercises cancellation between agent steps
+                    System.out.println("[colleague] abort proof: stopping second turn");
+                    handleBridge("abort", new JsonObject());
+                });
+            }
         });
     }
 
@@ -552,52 +689,93 @@ public final class ChatPanel {
             }
         }
         ourBusy = true;
+        ourAborted = false;
+        final CancellationFlag turnCancellation = new CancellationFlag();
+        ourTurnCancellation = turnCancellation;
         if(ourAskButton != null && !ourAskButton.isDisposed()) {
             ourAskButton.setEnabled(false);
         }
         setStatus(editMode ? "Агент: ищу по проекту и исполняю инструменты..." : "Думаю...");
 
-        Job.create("Colleague: question", (monitor) -> {
+        final StringBuilder deltaBuffer = new StringBuilder();
+        final StringBuilder thinkingBuffer = new StringBuilder();
+        final long[] lastFlushAt = new long[1];
+        final long[] lastThinkingFlushAt = new long[1];
+
+        final IJobFunction questionBody = (final IProgressMonitor monitor) -> {
             try {
+                ourTurnThread = Thread.currentThread();
                 final String effectiveContext = context.isEmpty() && ourAutoContextSupplier != null
                     ? applyOrEmpty(ourAutoContextSupplier, question) : context;
                 System.err.println("[colleague] autocontext: " + effectiveContext.length()
                     + " chars for question [" + question.replace('\n', ' ') + "]");
-                final String answer = editMode
-                    ? runAgent(question, effectiveContext)
-                    : ourSession.ask(ourModel, effectiveContext, question);
+                final String answer;
+                if(editMode) {
+                    answer = runAgent(question, effectiveContext, turnCancellation);
+                } else {
+                    answer = ourSession.ask(ourModel, effectiveContext, question,
+                        browser ? chunk -> feedDelta(chunk, deltaBuffer, lastFlushAt)
+                            : chunk -> { },
+                        browser ? chunk -> feedDelta(chunk, thinkingBuffer, lastThinkingFlushAt,
+                            "thinking")
+                            : chunk -> { },
+                        turnCancellation);
+                }
                 final int split = answer.lastIndexOf("\n--- ");
                 final String body = split > 0 ? answer.substring(0, split).strip() : answer;
                 final String stats = split > 0 ? answer.substring(split + 1).strip() : "";
                 ourLastAnswer = body;
-                Display.getDefault().asyncExec(() -> {
-                    if(browser) {
-                        final JsonObject payload = new JsonObject();
-                        payload.addProperty("text", body);
-                        payload.addProperty("time", timeLabel());
-                        ourBridge.push("answer", payload);
-                    } else {
-                        appendLine("Colleague: " + body);
-                    }
-                    if(ourAnswerListener != null) {
-                        ourAnswerListener.accept(body);
-                    }
-                });
+                if(turnCancellation.isCancelled()) {
+                    System.out.println("[colleague] cancelled turn observed: partial "
+                        + body.length() + " chars, stop->unwind latency "
+                        + (System.currentTimeMillis() - ourAbortAtMs) + " ms");
+                }
+                if(!body.isEmpty() && ourTurnCancellation == turnCancellation) {
+                    Display.getDefault().asyncExec(() -> {
+                        if(browser) {
+                            final JsonObject payload = new JsonObject();
+                            payload.addProperty("text", body);
+                            payload.addProperty("time", timeLabel());
+                            ourBridge.push("answer", payload);
+                        } else {
+                            appendLine("Colleague: " + body);
+                        }
+                        if(ourAnswerListener != null) {
+                            ourAnswerListener.accept(body);
+                        }
+                    });
+                }
                 setStatus(stats);
                 return Status.OK_STATUS;
             } catch (final Exception ex) {
-                Display.getDefault().asyncExec(() -> {
-                    if(browser) {
-                        final JsonObject payload = new JsonObject();
-                        payload.addProperty("text", String.valueOf(ex.getMessage()));
-                        payload.addProperty("time", timeLabel());
-                        ourBridge.push("error", payload);
-                    } else {
-                        appendLine("Ошибка: " + ex.getMessage());
-                    }
-                });
-                return new Status(IStatus.ERROR, ColleagueUIPlugin.PLUGIN_ID, "assistant call failed", ex);
+                final boolean aborted = ourAborted;
+                if(aborted) {
+                    System.out.println("[colleague] cancelled turn unwound with error: "
+                        + ex.getMessage() + ", stop->unwind latency "
+                        + (System.currentTimeMillis() - ourAbortAtMs) + " ms");
+                }
+                if(!aborted && ourTurnCancellation == turnCancellation) {
+                    Display.getDefault().asyncExec(() -> {
+                        if(browser) {
+                            final JsonObject payload = new JsonObject();
+                            payload.addProperty("text", String.valueOf(ex.getMessage()));
+                            payload.addProperty("time", timeLabel());
+                            ourBridge.push("error", payload);
+                        } else {
+                            appendLine("Ошибка: " + ex.getMessage());
+                        }
+                    });
+                    return new Status(IStatus.ERROR, ColleagueUIPlugin.PLUGIN_ID,
+                        "assistant call failed", ex);
+                }
+                return Status.OK_STATUS;
             } finally {
+                ourTurnThread = null;
+                if(Thread.currentThread().isInterrupted()) {
+                    // the stop interrupt belongs to this turn only: clear its
+                    // status so it cannot leak into the next pooled worker run
+                    Thread.interrupted();
+                }
                 ourBusy = false;
                 Display.getDefault().asyncExec(() -> {
                     if(ourAskButton != null && !ourAskButton.isDisposed()) {
@@ -610,7 +788,59 @@ public final class ChatPanel {
                     }
                 });
             }
-        }).schedule();
+        };
+        ourQuestionJob = Job.create("Colleague: question", questionBody);
+        ourQuestionJob.schedule();
+    }
+
+    /**
+     * Queues one streamed answer chunk and forwards a batch to the chat page
+     * at most a few times per second, so token-level deltas never flood the
+     * bridge. Runs on the provider call thread.
+     */
+    private void feedDelta(final String theChunk, final StringBuilder theBuffer,
+        final long[] theLastFlushAt) {
+        feedDelta(theChunk, theBuffer, theLastFlushAt, "delta");
+    }
+
+    /**
+     * Same batching under an explicit event kind, used to keep the model's
+     * reasoning stream apart from the answer stream.
+     */
+    private void feedDelta(final String theChunk, final StringBuilder theBuffer,
+        final long[] theLastFlushAt, final String theKind) {
+        if(ourBridge == null || ourRoot.isDisposed() || ourAborted) {
+            // after a stop request no more streamed text goes to the page:
+            // the partial text already flushed stays where it is
+            return;
+        }
+        final boolean flush;
+        synchronized(theBuffer) {
+            theBuffer.append(theChunk);
+            final long now = System.currentTimeMillis();
+            flush = theBuffer.length() >= 200 || now - theLastFlushAt[0] >= 150L;
+            if(flush) {
+                theLastFlushAt[0] = now;
+            }
+        }
+        if(!flush) {
+            return;
+        }
+        final String batch;
+        synchronized(theBuffer) {
+            batch = theBuffer.toString();
+            theBuffer.setLength(0);
+        }
+        if(batch.isEmpty()) {
+            return;
+        }
+        Display.getDefault().asyncExec(() -> {
+            if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
+                final JsonObject payload = new JsonObject();
+                payload.addProperty("text", batch);
+                ourBridge.push(theKind, payload);
+            }
+        });
     }
 
     /**
@@ -618,10 +848,11 @@ public final class ChatPanel {
      * confirmed by the user) before it answers; the exchange is remembered in
      * the session history like a plain question.
      */
-    private String runAgent(final String theQuestion, final String theContext)
+    private String runAgent(final String theQuestion, final String theContext,
+        final CancellationFlag theCancellation)
         throws com.mad.edt.colleague.llm.LLMException {
         final AgentLoop loop = new AgentLoop(ourSession.getProvider(),
-            ourToolSupplier.get(), ourModel, AGENT_MAX_STEPS);
+            ourToolSupplier.get(), ourModel, AGENT_MAX_STEPS, theCancellation);
         final StringBuilder system = new StringBuilder();
         if(ourSession.getSystemPrompt() != null && !ourSession.getSystemPrompt().isEmpty()) {
             system.append(ourSession.getSystemPrompt()).append(' ');
@@ -639,7 +870,9 @@ public final class ChatPanel {
         }
         final long startedAt = System.nanoTime();
         final AgentAnswer answer = loop.run(system.toString(), task);
-        ourSession.noteExchange(theQuestion, answer.getText());
+        if(!answer.getText().isEmpty()) {
+            ourSession.noteExchange(theQuestion, answer.getText());
+        }
         final long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
         return answer.getText() + String.format(
             "%n--- режим правки: %d шагов, %d вызовов инструментов, %d мс",
@@ -649,8 +882,16 @@ public final class ChatPanel {
 
     private void registerEscape() {
         final long now = System.currentTimeMillis();
+        if(now - ourLastEscapeSignalAt < 300L) {
+            // the same physical ESC can arrive twice: once through the SWT
+            // key filter and once as a bridge call forwarded by the page
+            return;
+        }
+        ourLastEscapeSignalAt = now;
         if(ourLastEscapeAt > 0L && now - ourLastEscapeAt < ESC_WINDOW_MS) {
             ourLastEscapeAt = 0L;
+            System.out.println("[colleague] escape pair observed within window:"
+                + " toggling edit mode");
             toggleEdit();
         } else {
             ourLastEscapeAt = now;

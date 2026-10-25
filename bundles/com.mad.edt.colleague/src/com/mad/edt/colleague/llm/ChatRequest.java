@@ -16,6 +16,7 @@ public final class ChatRequest {
     private final Double temperature;
     private final Integer maxTokens;
     private final Boolean think;
+    private final CancellationFlag cancellation;
 
     private ChatRequest(final Builder theBuilder) {
         if(theBuilder.model == null || theBuilder.model.isEmpty()) {
@@ -30,6 +31,8 @@ public final class ChatRequest {
         temperature = theBuilder.temperature;
         maxTokens = theBuilder.maxTokens;
         think = theBuilder.think;
+        cancellation = theBuilder.cancellation == null
+            ? new CancellationFlag() : theBuilder.cancellation;
     }
 
     /**
@@ -76,6 +79,14 @@ public final class ChatRequest {
     }
 
     /**
+     * @return the cancellation latch of this request; providers poll it and
+     *         stop producing as soon as the owner of the turn gives up
+     */
+    public CancellationFlag getCancellation() {
+        return cancellation;
+    }
+
+    /**
      * @param theModel model identifier
      * @return a new builder seeded with the model
      */
@@ -94,6 +105,7 @@ public final class ChatRequest {
         private Double temperature;
         private Integer maxTokens;
         private Boolean think;
+        private CancellationFlag cancellation;
 
         private Builder(final String theModel) {
             model = theModel;
@@ -152,6 +164,18 @@ public final class ChatRequest {
          */
         public Builder think(final boolean theThink) {
             think = Boolean.valueOf(theThink);
+            return this;
+        }
+
+        /**
+         * Attaches the cancellation latch of the turn this request belongs to.
+         *
+         * @param theCancellation shared flag, {@code null} for a private
+         *            never-cancelled one
+         * @return this builder
+         */
+        public Builder cancellation(final CancellationFlag theCancellation) {
+            cancellation = theCancellation;
             return this;
         }
 
