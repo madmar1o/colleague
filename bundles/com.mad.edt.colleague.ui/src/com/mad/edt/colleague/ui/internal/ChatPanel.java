@@ -36,6 +36,7 @@ import com.mad.edt.colleague.agent.AgentAnswer;
 import com.mad.edt.colleague.agent.AgentLoop;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
+import com.mad.edt.colleague.chat.EscapeSequence;
 import com.mad.edt.colleague.chat.StreamBatcher;
 import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.CancellationFlag;
@@ -63,6 +64,8 @@ public final class ChatPanel {
 
     /** Max gap between two ESC presses that toggles the edit mode. */
     private static final long ESC_WINDOW_MS = 2_000L;
+    /** Same physical ESC seen through both channels counts once inside this pause. */
+    private static final long ESC_DEDUP_MS = 300L;
 
     /** Live panels, kept in sync when the process-wide edit mode changes. */
     private static final List<ChatPanel> OUR_PANELS =
@@ -102,8 +105,8 @@ public final class ChatPanel {
     private Runnable ourOnBack;
     private Supplier<List<IToolExecutor>> ourToolSupplier;
     private Function<String, String> ourAutoContextSupplier;
-    private long ourLastEscapeAt;
-    private long ourLastEscapeSignalAt;
+    private final EscapeSequence ourEscGesture =
+        new EscapeSequence(ESC_WINDOW_MS, ESC_DEDUP_MS);
     private String ourLastPalette = "";
     private String ourLastPageState = "";
 
@@ -907,21 +910,18 @@ public final class ChatPanel {
     }
 
     private void registerEscape() {
-        final long now = System.currentTimeMillis();
-        if(now - ourLastEscapeSignalAt < 300L) {
-            // the same physical ESC can arrive twice: once through the SWT
-            // key filter and once as a bridge call forwarded by the page
-            return;
-        }
-        ourLastEscapeSignalAt = now;
-        if(ourLastEscapeAt > 0L && now - ourLastEscapeAt < ESC_WINDOW_MS) {
-            ourLastEscapeAt = 0L;
-            System.out.println("[colleague] escape pair observed within window:"
-                + " toggling edit mode");
-            toggleEdit();
-        } else {
-            ourLastEscapeAt = now;
-            setStatus("Ещё раз ESC — переключить режим правки");
+        switch(ourEscGesture.press()) {
+            case IGNORED:
+                // the same physical ESC can arrive twice: once through the SWT
+                // key filter and once as a bridge call forwarded by the page
+                return;
+            case TOGGLED:
+                System.out.println("[colleague] escape pair observed within window:"
+                    + " toggling edit mode");
+                toggleEdit();
+                return;
+            default:
+                setStatus("Ещё раз ESC — переключить режим правки");
         }
     }
 
