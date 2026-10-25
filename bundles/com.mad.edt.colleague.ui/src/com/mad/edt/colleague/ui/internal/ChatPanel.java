@@ -402,6 +402,14 @@ public final class ChatPanel {
                     }
                 }
                 return;
+            case "diag":
+                // page-side measurements for layout regression proofs; only the
+                // selftest scripts ever call this, keep the noise out of normal runs
+                if(Boolean.getBoolean("colleague.browser.selftest")) {
+                    System.out.println("[colleague] page diag: "
+                        + BridgeBrowser.optString(theArguments, "txt"));
+                }
+                return;
             default:
                 return;
         }
@@ -442,6 +450,36 @@ public final class ChatPanel {
                 + "f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}}";
             ourBridge.executeScript(script);
             System.out.println("[colleague] bridge: page-side gesture injected");
+            if(!abortProof) {
+                // layout regression probe: the question above produces a one-word
+                // answer, i.e. exactly the narrow bubble where the absolutely
+                // positioned time line used to hang out of the bubble and cover
+                // the avatar; measure every incoming bubble and report through
+                // the bridge so the log shows the geometry numbers
+                Display.getDefault().timerExec(35000, () -> {
+                    if(ourRoot.isDisposed() || ourBridge == null) {
+                        return;
+                    }
+                    System.out.println("[colleague] layout probe: measuring bubbles");
+                    ourBridge.executeScript(
+                        "var out=[];"
+                        + "document.querySelectorAll('.row.in .bubble')"
+                        + ".forEach(function(b){"
+                        + "var m=b.querySelector('.meta');"
+                        + "var av=b.parentNode.querySelector('.smallavatar');"
+                        + "if(!m||!av){return;}"
+                        + "var mr=m.getBoundingClientRect(),"
+                        + "br=b.getBoundingClientRect(),"
+                        + "ar=av.getBoundingClientRect();"
+                        + "out.push('bw='+Math.round(br.width)"
+                        + "+' metaLeft='+Math.round(mr.left)"
+                        + "+' bubbleLeft='+Math.round(br.left)"
+                        + "+' avatarRight='+Math.round(ar.right)"
+                        + "+' avatarOverlapsMeta='"
+                        + "+String(ar.right>mr.left));});"
+                        + "apiCall('diag',{txt:out.join(' | ')});");
+                });
+            }
             if(abortProof) {
                 // autonomous proof of the stop path: six seconds into a long
                 // generation the panel dispatches the very stop request the

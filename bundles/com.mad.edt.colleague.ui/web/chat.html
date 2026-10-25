@@ -64,6 +64,12 @@ main {
 .row.out .bubble { background: var(--user); border-color: transparent;
   border-bottom-right-radius: 4px; }
 .row.in .bubble { border-bottom-left-radius: 4px; }
+/* The time-and-copy line is absolutely positioned in the bubble's bottom
+   right corner. On a one-word answer the bubble shrinks narrower than that
+   line, and the meta hangs out of the bubble to the left - right on top of
+   the avatar. A minimum content width keeps the meta fully inside; the same
+   width also keeps the streaming bubble from jumping wider at the end. */
+.row.in .bubble { min-width: 96px; }
 .bubble.error { background: var(--error); }
 .meta {
   position: absolute; right: 10px; bottom: 3px; font-size: 10px;
