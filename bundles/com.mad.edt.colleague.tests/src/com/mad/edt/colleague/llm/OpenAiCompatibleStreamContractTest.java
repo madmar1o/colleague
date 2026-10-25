@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mad.edt.colleague.http.HttpCallResult;
 import com.mad.edt.colleague.http.HttpCallSpec;
 
 /**
@@ -57,6 +58,46 @@ class OpenAiCompatibleStreamContractTest {
         Assertions.assertEquals(2, result.getPromptTokens());
         Assertions.assertEquals(3, result.getCompletionTokens());
         Assertions.assertTrue(transport.isStreamClosed());
+    }
+
+    @Test
+    @DisplayName("a gateway that spells reasoning plainly still feeds the thinking stream")
+    void plainReasoningKeyIsAccepted() throws LLMException {
+        // real gateways use "reasoning" in the delta where others use
+        // "reasoning_content"; both spellings must feed the thinking callback
+        final RecordingHttpTransport transport = RecordingHttpTransport.streaming(200,
+            "data: {\"choices\":[{\"delta\":{\"reasoning\":\"think \"}}]}",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}",
+            "this gateway line is not JSON at all",
+            "data: {\"choices\":[{\"delta\":{\"reasoning\":\"more\"}}]}",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}",
+            "data: [DONE]");
+        final List<String> thinkingFrames = new ArrayList<>();
+        final OpenAiCompatibleLLMProvider provider =
+            new OpenAiCompatibleLLMProvider(config(), transport);
+        final ChatResult result = provider.chatStream(
+            ChatRequest.builder("gw-model").addMessage(ChatMessage.user("hi")).build(),
+            piece -> { }, thinkingFrames::add);
+
+        Assertions.assertEquals(List.of("think ", "more"), thinkingFrames);
+        Assertions.assertEquals("think more", result.getThinking());
+    }
+
+    @Test
+    @DisplayName("a buffered answer keeps the plain reasoning field as thinking")
+    void bufferedPlainReasoning() throws LLMException {
+        final RecordingHttpTransport transport = RecordingHttpTransport.answering(
+            HttpCallResult.ofBody(200, "{\"model\":\"gw-x\",\"choices\":[{\"message\":"
+                + "{\"role\":\"assistant\",\"content\":\"yes\",\"reasoning\":\"because\"},"
+                + "\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,"
+                + "\"completion_tokens\":2}}"));
+        final OpenAiCompatibleLLMProvider provider =
+            new OpenAiCompatibleLLMProvider(config(), transport);
+        final ChatResult result = provider.chat(
+            ChatRequest.builder("gw-model").addMessage(ChatMessage.user("q")).build());
+
+        Assertions.assertEquals("yes", result.getContent());
+        Assertions.assertEquals("because", result.getThinking());
     }
 
     @Test

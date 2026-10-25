@@ -87,7 +87,11 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
                         content.append(piece);
                         theOnContent.accept(piece);
                     }
-                    final String thought = textOrNull(delta, "reasoning_content");
+                    String thought = textOrNull(delta, "reasoning_content");
+                    if(thought == null) {
+                        // some gateways spell the reasoning delta plainly
+                        thought = textOrNull(delta, "reasoning");
+                    }
                     if(thought != null && !thought.isEmpty()) {
                         thinking.append(thought);
                         theOnThinking.accept(thought);
@@ -189,6 +193,7 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
 
     private ChatResult parseResult(final JsonObject theResponse) {
         String content = "";
+        String thinking = null;
         String finishReason = null;
         List<ToolCall> calls = List.of();
         final JsonArray choices = theResponse.getAsJsonArray("choices");
@@ -200,6 +205,10 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
                 content = textOrNull(message, "content");
                 if(content == null) {
                     content = "";
+                }
+                thinking = textOrNull(message, "reasoning_content");
+                if(thinking == null) {
+                    thinking = textOrNull(message, "reasoning");
                 }
                 calls = parseToolCalls(message.getAsJsonArray("tool_calls"));
             }
@@ -213,8 +222,8 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
             completionTokens = intOrZero(usage, "completion_tokens");
         }
 
-        return new ChatResult(content, textOrNull(theResponse, "model"), finishReason,
-            promptTokens, completionTokens, calls);
+        return new ChatResult(content, thinking, textOrNull(theResponse, "model"),
+            finishReason, promptTokens, completionTokens, calls);
     }
 
     @Override
