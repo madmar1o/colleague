@@ -17,6 +17,7 @@ import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.custom.StackLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
+import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.custom.SashForm;
 import org.eclipse.ui.PartInitException;
@@ -244,9 +245,36 @@ public class ColleagueView extends ViewPart {
             ourBackButton.setVisible(thePage == ourTabsArea);
             ourMobileStack.layout(true);
             ourBackButton.getParent().layout(true);
+            final StringBuilder detail = new StringBuilder();
+            for(final Control child : thePage.getChildren()) {
+                detail.append(' ').append(child.getClass().getSimpleName())
+                    .append(child.getSize()).append("/vis=").append(child.getVisible());
+                if(child == ourTabFolder) {
+                    final CTabItem selection = ourTabFolder.getSelection();
+                    if(selection == null) {
+                        detail.append(" sel=none");
+                    } else {
+                        detail.append(" sel=").append(selection.getText());
+                        final Control tabBody = selection.getControl();
+                        if(tabBody == null) {
+                            detail.append(" body=none");
+                        } else {
+                            detail.append(" body=").append(tabBody.getSize());
+                            for(final Control deep
+                                : ((Composite) tabBody).getChildren()) {
+                                detail.append(' ').append(
+                                    deep.getClass().getSimpleName())
+                                    .append(deep.getSize())
+                                    .append("/vis=").append(deep.getVisible());
+                            }
+                        }
+                    }
+                }
+            }
             System.err.println("[colleague] mobile page -> "
                 + (thePage == ourTabsArea ? "chat tabs" : "contacts")
-                + " stack=" + ourMobileStack.getSize() + " page=" + thePage.getSize());
+                + " stack=" + ourMobileStack.getSize() + " page=" + thePage.getSize()
+                + detail);
         }
     }
 
