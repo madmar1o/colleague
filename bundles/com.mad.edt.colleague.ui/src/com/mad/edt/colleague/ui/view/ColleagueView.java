@@ -25,6 +25,10 @@ import org.osgi.framework.FrameworkUtil;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
+import com.mad.edt.colleague.context.ContextSource;
+import com.mad.edt.colleague.context.KeywordContextSource;
+import com.mad.edt.colleague.context.SemanticIndex;
+import com.mad.edt.colleague.context.SemanticSettings;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
 import com.mad.edt.colleague.llm.LLMSettings;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
@@ -68,6 +72,7 @@ public class ColleagueView extends ViewPart {
     private CTabFolder ourTabFolder;
     private CodeSearch ourCodeSearch;
     private ConfigurationOverview ourOverview;
+    private SemanticIndex ourSemantic;
     private volatile boolean ourOverviewStale;
 
     private String ourLastAnswer = "";
@@ -137,9 +142,31 @@ public class ColleagueView extends ViewPart {
 
         ourCodeSearch = new CodeSearch();
         ourOverview = new ConfigurationOverview();
+        // semantic layer defaults stay off for ordinary users; system
+        // properties seed it for live checks without a settings UI
+        SemanticSettings.loadOnce();
+        if(!SemanticSettings.isConfigured()) {
+            final String store = System.getProperty("colleague.semantic.store", "");
+            final String model = System.getProperty("colleague.semantic.model", "");
+            if(!store.isEmpty() && !model.isEmpty()) {
+                SemanticSettings.configure(store,
+                    System.getProperty("colleague.semantic.embed", ""), model);
+            }
+        }
+        ourSemantic = SemanticIndex.tryCreate();
+        if(ourSemantic != null) {
+            System.err.println("[colleague] semantic layer on: store "
+                + SemanticSettings.getStoreUrl() + ", model "
+                + SemanticSettings.getModel());
+        }
         Job.create("Colleague: project index", (monitor) -> {
             final int files = ourCodeSearch.reindex(monitor);
             System.err.println("[colleague] context index ready: " + files + " files");
+            if(ourSemantic != null) {
+                System.err.println("[colleague] semantic "
+                    + ourSemantic.refreshAndLog(ourCodeSearch::forEachSourceFile)
+                    + " | " + ourSemantic.getStatus());
+            }
             ourOverview.rebuild();
             System.err.println("[colleague] configuration overview ready: "
                 + ourOverview.get().length() + " chars");
@@ -150,6 +177,15 @@ public class ColleagueView extends ViewPart {
                 System.err.println("[colleague] search selftest: " + found.length()
                     + " chars in " + elapsedMs + " ms, first line: "
                     + found.lines().findFirst().orElse("<none>"));
+                if(ourSemantic != null) {
+                    final ContextSource hybrid =
+                        ourSemantic.withKeyword(new KeywordContextSource(ourCodeSearch));
+                    final long hybridStartedAt = System.nanoTime();
+                    final String merged = hybrid.gather("модуль объекта справочник проводка");
+                    System.err.println("[colleague] semantic selftest: " + merged.length()
+                        + " chars in " + (System.nanoTime() - hybridStartedAt) / 1_000_000L
+                        + " ms, " + ourSemantic.getStatus());
+                }
             }
             return Status.OK_STATUS;
         }).schedule();
@@ -366,8 +402,7 @@ public class ColleagueView extends ViewPart {
      * scheduled for the following question. Runs on a background job thread.
      */
     private String collectAutoContext(final String theQuestion) {
-        final String snippets =
-            ourCodeSearch == null ? "" : ourCodeSearch.search(theQuestion);
+        final String snippets = collectCodeSnippets(theQuestion);
         String overview = ourOverview == null ? "" : ourOverview.get();
         if(overview.isEmpty() && ourOverview != null && !ourOverviewStale) {
             ourOverviewStale = true;
@@ -381,6 +416,25 @@ public class ColleagueView extends ViewPart {
             return snippets;
         }
         return snippets + "\n\nOpen 1C configuration in this workspace:\n" + overview;
+    }
+
+    /**
+     * Code snippets for one question: keyword search on its own, or the
+     * hybrid keyword-plus-semantic merge once a vector store is configured.
+     * The semantic section stays silent whenever the index is unprepared or
+     * an endpoint fails, so a question never waits on the vector layer.
+     *
+     * @param theQuestion question text
+     * @return snippet blocks for the model, empty when nothing matched
+     */
+    private String collectCodeSnippets(final String theQuestion) {
+        if(ourCodeSearch == null) {
+            return "";
+        }
+        final ContextSource keyword = new KeywordContextSource(ourCodeSearch);
+        return ourSemantic == null
+            ? keyword.gather(theQuestion)
+            : ourSemantic.withKeyword(keyword).gather(theQuestion);
     }
 
     private void maybeRunSelfTest() {

@@ -1,5 +1,8 @@
 package com.mad.edt.colleague.context;
 
+import java.nio.file.Path;
+import java.util.function.BiConsumer;
+
 import org.eclipse.core.runtime.IProgressMonitor;
 
 import com.mad.edt.colleague.context.search.SearchEngine;
@@ -44,6 +47,20 @@ public final class CodeSearch {
      */
     public int size() {
         return ourIndex.size();
+    }
+
+    /**
+     * Hands every indexed file to the consumer: absolute location and the
+     * project-relative display path. Snapshot-stable, so the vector layer can
+     * collect the same files the keyword index holds without seeing the
+     * internal entry type.
+     *
+     * @param theConsumer receives {@code (location, displayPath)} per file
+     */
+    public void forEachSourceFile(final BiConsumer<Path, String> theConsumer) {
+        for(final SourceIndex.Entry entry : ourIndex.snapshot()) {
+            theConsumer.accept(entry.location(), entry.displayPath());
+        }
     }
 
     /**

@@ -14,7 +14,7 @@ import com.mad.edt.colleague.http.HttpTransport;
  * order while recording what each call carried. Any call beyond the script is
  * an assertion failure, which pins exact call sequences.
  */
-final class ScriptedHttpTransport implements HttpTransport {
+public final class ScriptedHttpTransport implements HttpTransport {
 
     private final Deque<HttpCallResult> script = new ArrayDeque<>();
     private final List<HttpCallSpec> calls = new ArrayList<>();
@@ -24,7 +24,7 @@ final class ScriptedHttpTransport implements HttpTransport {
      * @param theBodyText buffered answer body
      * @return this transport with one more answer queued
      */
-    ScriptedHttpTransport answer(final int theStatus, final String theBodyText) {
+    public ScriptedHttpTransport answer(final int theStatus, final String theBodyText) {
         script.add(HttpCallResult.ofBody(theStatus, theBodyText));
         return this;
     }
@@ -43,7 +43,7 @@ final class ScriptedHttpTransport implements HttpTransport {
     /**
      * @return every call seen, in order
      */
-    List<HttpCallSpec> getCalls() {
+    public List<HttpCallSpec> getCalls() {
         return calls;
     }
 
@@ -51,7 +51,7 @@ final class ScriptedHttpTransport implements HttpTransport {
      * @param theIndex zero-based call number
      * @return that call
      */
-    HttpCallSpec callAt(final int theIndex) {
+    public HttpCallSpec callAt(final int theIndex) {
         if(theIndex >= calls.size()) {
             throw new AssertionError("expected at least " + (theIndex + 1)
                 + " calls, got " + calls.size());
@@ -62,7 +62,7 @@ final class ScriptedHttpTransport implements HttpTransport {
     /**
      * @return number of calls made
      */
-    int getCallCount() {
+    public int getCallCount() {
         return calls.size();
     }
 }
