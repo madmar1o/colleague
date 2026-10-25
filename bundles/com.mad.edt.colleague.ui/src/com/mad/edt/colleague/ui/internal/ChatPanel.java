@@ -36,6 +36,7 @@ import com.mad.edt.colleague.agent.AgentAnswer;
 import com.mad.edt.colleague.agent.AgentLoop;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
+import com.mad.edt.colleague.chat.StreamBatcher;
 import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.CancellationFlag;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
@@ -56,6 +57,9 @@ public final class ChatPanel {
 
     /** Model round-trips allowed for one edit-mode question. */
     private static final int AGENT_MAX_STEPS = 8;
+    /** streaming policy: what one batch may carry and how often they go out */
+    private static final int STREAM_BATCH_CHARS = 200;
+    private static final long STREAM_BATCH_INTERVAL_MS = 150L;
 
     /** Max gap between two ESC presses that toggles the edit mode. */
     private static final long ESC_WINDOW_MS = 2_000L;
@@ -735,10 +739,10 @@ public final class ChatPanel {
         }
         setStatus(editMode ? "Агент: ищу по проекту и исполняю инструменты..." : "Думаю...");
 
-        final StringBuilder deltaBuffer = new StringBuilder();
-        final StringBuilder thinkingBuffer = new StringBuilder();
-        final long[] lastFlushAt = new long[1];
-        final long[] lastThinkingFlushAt = new long[1];
+        final StreamBatcher deltaBatcher = new StreamBatcher(STREAM_BATCH_CHARS,
+            STREAM_BATCH_INTERVAL_MS);
+        final StreamBatcher thinkingBatcher = new StreamBatcher(STREAM_BATCH_CHARS,
+            STREAM_BATCH_INTERVAL_MS);
 
         final IJobFunction questionBody = (final IProgressMonitor monitor) -> {
             try {
@@ -752,9 +756,9 @@ public final class ChatPanel {
                     answer = runAgent(question, effectiveContext, turnCancellation);
                 } else {
                     answer = ourSession.ask(ourModel, effectiveContext, question,
-                        browser ? chunk -> feedDelta(chunk, deltaBuffer, lastFlushAt)
+                        browser ? chunk -> feedDelta(chunk, deltaBatcher)
                             : chunk -> { },
-                        browser ? chunk -> feedDelta(chunk, thinkingBuffer, lastThinkingFlushAt,
+                        browser ? chunk -> feedDelta(chunk, thinkingBatcher,
                             "thinking")
                             : chunk -> { },
                         turnCancellation);
@@ -834,42 +838,26 @@ public final class ChatPanel {
     /**
      * Queues one streamed answer chunk and forwards a batch to the chat page
      * at most a few times per second, so token-level deltas never flood the
-     * bridge. Runs on the provider call thread.
+     * bridge. Runs on the provider call thread; all grouping policy lives in
+     * {@link StreamBatcher}, which the tests pin down directly.
      */
-    private void feedDelta(final String theChunk, final StringBuilder theBuffer,
-        final long[] theLastFlushAt) {
-        feedDelta(theChunk, theBuffer, theLastFlushAt, "delta");
+    private void feedDelta(final String theChunk, final StreamBatcher theBatcher) {
+        feedDelta(theChunk, theBatcher, "delta");
     }
 
     /**
      * Same batching under an explicit event kind, used to keep the model's
      * reasoning stream apart from the answer stream.
      */
-    private void feedDelta(final String theChunk, final StringBuilder theBuffer,
-        final long[] theLastFlushAt, final String theKind) {
+    private void feedDelta(final String theChunk, final StreamBatcher theBatcher,
+        final String theKind) {
         if(ourBridge == null || ourRoot.isDisposed() || ourAborted) {
             // after a stop request no more streamed text goes to the page:
             // the partial text already flushed stays where it is
             return;
         }
-        final boolean flush;
-        synchronized(theBuffer) {
-            theBuffer.append(theChunk);
-            final long now = System.currentTimeMillis();
-            flush = theBuffer.length() >= 200 || now - theLastFlushAt[0] >= 150L;
-            if(flush) {
-                theLastFlushAt[0] = now;
-            }
-        }
-        if(!flush) {
-            return;
-        }
-        final String batch;
-        synchronized(theBuffer) {
-            batch = theBuffer.toString();
-            theBuffer.setLength(0);
-        }
-        if(batch.isEmpty()) {
+        final String batch = theBatcher.accept(theChunk);
+        if(batch == null) {
             return;
         }
         Display.getDefault().asyncExec(() -> {
