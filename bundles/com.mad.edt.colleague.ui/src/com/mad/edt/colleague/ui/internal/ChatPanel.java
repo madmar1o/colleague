@@ -547,6 +547,8 @@ public final class ChatPanel {
             try {
                 final String effectiveContext = context.isEmpty() && ourAutoContextSupplier != null
                     ? applyOrEmpty(ourAutoContextSupplier, question) : context;
+                System.err.println("[colleague] autocontext: " + effectiveContext.length()
+                    + " chars for question [" + question.replace('\n', ' ') + "]");
                 final String answer = editMode
                     ? runAgent(question, effectiveContext)
                     : ourSession.ask(ourModel, effectiveContext, question);
@@ -611,9 +613,11 @@ public final class ChatPanel {
             system.append(ourSession.getSystemPrompt()).append(' ');
         }
         system.append("You can call the provided workspace tools (search_code, list_files,")
-            .append(" read_file, write_file). Search the project before answering code")
-            .append(" questions; quote paths and line numbers. Every write is confirmed by")
-            .append(" the user, so propose exact complete file contents. Answer in the")
+            .append(" read_file, describe_configuration, write_file). For any question about")
+            .append(" the configuration itself - its name, version, what objects it has -")
+            .append(" call describe_configuration first. Search the project before answering")
+            .append(" code questions; quote paths and line numbers. Every write is confirmed")
+            .append(" by the user, so propose exact complete file contents. Answer in the")
             .append(" language of the question.");
         String task = theQuestion;
         if(!theContext.isEmpty()) {

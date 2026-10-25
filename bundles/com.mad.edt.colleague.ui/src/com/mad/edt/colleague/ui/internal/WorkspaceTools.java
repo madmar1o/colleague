@@ -23,6 +23,7 @@ import com.google.gson.JsonParser;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
 import com.mad.edt.colleague.context.CodeSearch;
+import com.mad.edt.colleague.context.ConfigurationOverview;
 import com.mad.edt.colleague.llm.ToolSpec;
 
 /**
@@ -42,20 +43,26 @@ public final class WorkspaceTools {
      * Read-only tools, always safe.
      *
      * @param theSearch shared workspace code search
+     * @param theOverview cached configuration picture of the workspace
      * @return tool executors for the agent loop
      */
-    public static List<IToolExecutor> readOnly(final CodeSearch theSearch) {
-        return List.of(new SearchCodeTool(theSearch), new ListFilesTool(), new ReadFileTool());
+    public static List<IToolExecutor> readOnly(final CodeSearch theSearch,
+        final ConfigurationOverview theOverview) {
+        return List.of(new SearchCodeTool(theSearch), new ListFilesTool(),
+            new ReadFileTool(), new DescribeConfigurationTool(theOverview));
     }
 
     /**
-     * Same as {@link #readOnly(CodeSearch)} plus the guarded write tool.
+     * Same as {@link #readOnly(CodeSearch, ConfigurationOverview)} plus the
+     * guarded write tool.
      *
      * @param theSearch shared workspace code search
+     * @param theOverview cached configuration picture of the workspace
      * @return tool executors including code writing
      */
-    public static List<IToolExecutor> withWrite(final CodeSearch theSearch) {
-        final List<IToolExecutor> tools = new ArrayList<>(readOnly(theSearch));
+    public static List<IToolExecutor> withWrite(final CodeSearch theSearch,
+        final ConfigurationOverview theOverview) {
+        final List<IToolExecutor> tools = new ArrayList<>(readOnly(theSearch, theOverview));
         tools.add(new WriteFileTool());
         return tools;
     }
@@ -273,6 +280,38 @@ public final class WorkspaceTools {
                 shell == null ? new Shell(display) : shell,
                 "Edit mode: change confirmation", message)));
             return answer[0] == null ? Boolean.FALSE : answer[0];
+        }
+    }
+
+    /** Describes the open configurations: name, version, object counts. */
+    public static final class DescribeConfigurationTool implements IToolExecutor {
+
+        private final ConfigurationOverview ourOverview;
+
+        DescribeConfigurationTool(final ConfigurationOverview theOverview) {
+            ourOverview = theOverview;
+        }
+
+        @Override
+        public String getName() {
+            return "describe_configuration";
+        }
+
+        @Override
+        public ToolSpec getSpec() {
+            return new ToolSpec("describe_configuration",
+                "Describe the 1C configuration of the open EDT projects: configuration name,"
+                    + " version, and how many metadata objects of each kind the configuration"
+                    + " has with example names. Call this for any question about the shape of"
+                    + " the configuration itself.",
+                schema());
+        }
+
+        @Override
+        public String execute(final String theArgumentsJson) {
+            final String text = ourOverview.get();
+            return text.isEmpty() ? "(the configuration picture is still building, ask again"
+                + " shortly)" : text;
         }
     }
 

@@ -26,6 +26,7 @@ import org.osgi.framework.FrameworkUtil;
 
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.context.CodeSearch;
+import com.mad.edt.colleague.context.ConfigurationOverview;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
 import com.mad.edt.colleague.llm.LLMSettings;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
@@ -73,6 +74,8 @@ public class ColleagueView extends ViewPart {
     private ContactsPanel ourContacts;
     private CTabFolder ourTabFolder;
     private CodeSearch ourCodeSearch;
+    private ConfigurationOverview ourOverview;
+    private volatile boolean ourOverviewStale;
 
     private String ourLastAnswer = "";
     private ChatPanel ourLastAnsweredPanel;
@@ -120,14 +123,19 @@ public class ColleagueView extends ViewPart {
         root.setLayout(ourRootStack);
         ourSash = new SashForm(root, SWT.HORIZONTAL);
 
+        // both areas must fill the view when they become the top control of the
+        // mobile StackLayout: without layout data the stack keeps their old
+        // sash sizes and the mobile pages render cut to a third of the view
         ourContactsArea = new Composite(ourSash, SWT.NONE);
         ourContactsArea.setLayout(new FillLayout());
+        ourContactsArea.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
         ourContacts = new ContactsPanel(ourContactsArea, this::openContact, this::onContactsLoaded);
         ourContacts.setOnAddProvider(this::addProviderWizard);
         ourContacts.setOnModeToggle(this::toggleMode);
 
         ourTabsArea = new Composite(ourSash, SWT.NONE);
         ourTabsArea.setLayout(new FillLayout());
+        ourTabsArea.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
         ourTabFolder = new CTabFolder(ourTabsArea, SWT.TOP | SWT.FLAT);
         ourTabFolder.setTabHeight(24);
 
@@ -151,9 +159,13 @@ public class ColleagueView extends ViewPart {
         ourMobileStack.setLayout(ourMobileStackLayout);
 
         ourCodeSearch = new CodeSearch();
+        ourOverview = new ConfigurationOverview();
         Job.create("Colleague: project index", (monitor) -> {
             final int files = ourCodeSearch.reindex(monitor);
             System.err.println("[colleague] context index ready: " + files + " files");
+            ourOverview.rebuild();
+            System.err.println("[colleague] configuration overview ready: "
+                + ourOverview.get().length() + " chars");
             if(Boolean.getBoolean("colleague.search.selftest")) {
                 final long startedAt = System.nanoTime();
                 final String found = ourCodeSearch.search("модуль объекта справочник проводка");
@@ -396,10 +408,9 @@ public class ColleagueView extends ViewPart {
         final ChatPanel panel = new ChatPanel(body, session, theContact.getModel());
         panel.attachThemeAnchor(ourRoot);
         panel.setToolSupplier(() -> AgentMode.isOn()
-            ? WorkspaceTools.withWrite(ourCodeSearch)
-            : WorkspaceTools.readOnly(ourCodeSearch));
-        panel.setAutoContextSupplier(theQuestion ->
-            ourCodeSearch == null ? "" : ourCodeSearch.search(theQuestion));
+            ? WorkspaceTools.withWrite(ourCodeSearch, ourOverview)
+            : WorkspaceTools.readOnly(ourCodeSearch, ourOverview));
+        panel.setAutoContextSupplier(this::collectAutoContext);
         tab.setControl(body);
         tab.setData(panel);
         panel.setAnswerListener(answer -> {
@@ -422,6 +433,32 @@ public class ColleagueView extends ViewPart {
             showMobilePage(ourTabsArea);
         }
         return panel;
+    }
+
+    /**
+     * Automatic context for a question when none was attached by hand: code
+     * search snippets for the question text, plus the workspace configuration
+     * picture so the model always knows which configuration it is talking
+     * about, not only which lines of code mention the question words. When the
+     * picture is missing (its first build raced the question) a rebuild is
+     * scheduled for the following question. Runs on a background job thread.
+     */
+    private String collectAutoContext(final String theQuestion) {
+        final String snippets =
+            ourCodeSearch == null ? "" : ourCodeSearch.search(theQuestion);
+        String overview = ourOverview == null ? "" : ourOverview.get();
+        if(overview.isEmpty() && ourOverview != null && !ourOverviewStale) {
+            ourOverviewStale = true;
+            Job.create("Colleague: configuration picture", (monitor) -> {
+                ourOverview.rebuild();
+                ourOverviewStale = false;
+                return Status.OK_STATUS;
+            }).schedule();
+        }
+        if(overview.isEmpty()) {
+            return snippets;
+        }
+        return snippets + "\n\nOpen 1C configuration in this workspace:\n" + overview;
     }
 
     private void maybeRunSelfTest() {
