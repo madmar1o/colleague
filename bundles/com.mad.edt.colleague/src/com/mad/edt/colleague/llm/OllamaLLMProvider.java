@@ -7,6 +7,7 @@ import java.util.function.Consumer;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.mad.edt.colleague.http.HttpTransport;
 
 /**
  * Talks to the native local model runtime ({@code /api/chat}, {@code /api/tags}).
@@ -20,7 +21,15 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
      *        server root, e.g. {@code http://127.0.0.1:11435}
      */
     public OllamaLLMProvider(final ProviderConfig theConfig) {
-        super(theConfig);
+        this(theConfig, HttpTransport.createDefault());
+    }
+
+    /**
+     * @param theConfig endpoint configuration
+     * @param theTransport transport seam used for every call
+     */
+    public OllamaLLMProvider(final ProviderConfig theConfig, final HttpTransport theTransport) {
+        super(theConfig, theTransport);
     }
 
     @Override

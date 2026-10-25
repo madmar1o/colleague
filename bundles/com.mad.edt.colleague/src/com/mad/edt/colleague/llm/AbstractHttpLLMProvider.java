@@ -1,37 +1,43 @@
 package com.mad.edt.colleague.llm;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.function.Consumer;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mad.edt.colleague.http.HttpCallResult;
+import com.mad.edt.colleague.http.HttpCallSpec;
+import com.mad.edt.colleague.http.HttpTransport;
+import com.mad.edt.colleague.http.TransportFailure;
 
 /**
- * Base class with shared {@code java.net.http} plumbing: JSON POST/GET with
- * timeouts, authentication header and error wrapping into {@link LLMException}.
+ * Base class with shared transport plumbing: JSON POST/GET with timeouts,
+ * authentication header and error wrapping into {@link LLMException}. Every
+ * call goes through the {@link HttpTransport} seam, so tests can drive the
+ * parsing contracts with an in-memory double.
  */
 abstract class AbstractHttpLLMProvider implements ILLMProvider {
 
     private static final int MAX_ERROR_BODY_CHARS = 300;
 
     private final ProviderConfig config;
-    private final HttpClient client;
+    private final HttpTransport transport;
 
     /**
      * @param theConfig endpoint configuration
      */
     protected AbstractHttpLLMProvider(final ProviderConfig theConfig) {
+        this(theConfig, HttpTransport.createDefault());
+    }
+
+    /**
+     * @param theConfig endpoint configuration
+     * @param theTransport transport seam used for every call
+     */
+    protected AbstractHttpLLMProvider(final ProviderConfig theConfig,
+        final HttpTransport theTransport) {
         config = theConfig;
-        client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofMillis(theConfig.getConnectTimeoutMs()))
-            .build();
+        transport = theTransport;
     }
 
     @Override
@@ -55,12 +61,9 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
      */
     protected JsonObject postJson(final String thePath, final JsonObject theBody, final int theTimeoutMs)
         throws LLMException {
-        final HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(config.getBaseUrl() + thePath))
-            .timeout(Duration.ofMillis(theTimeoutMs))
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(theBody.toString(), StandardCharsets.UTF_8));
-        return send(request);
+        HttpCallSpec call = HttpCallSpec.postJson(config.getBaseUrl() + thePath,
+            theBody.toString(), theTimeoutMs);
+        return send(call);
     }
 
     /**
@@ -72,11 +75,7 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
      * @throws LLMException on transport failure or non-200 status
      */
     protected JsonObject getJson(final String thePath, final int theTimeoutMs) throws LLMException {
-        final HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(config.getBaseUrl() + thePath))
-            .timeout(Duration.ofMillis(theTimeoutMs))
-            .header("Accept", "application/json")
-            .GET();
-        return send(request);
+        return send(HttpCallSpec.getJson(config.getBaseUrl() + thePath, theTimeoutMs));
     }
 
     /**
@@ -111,43 +110,37 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
     protected void postJsonStream(final String thePath, final JsonObject theBody,
         final int theTimeoutMs, final CancellationFlag theCancellation,
         final Consumer<JsonObject> theOnEvent) throws LLMException {
-        final HttpRequest.Builder request = HttpRequest
-            .newBuilder(URI.create(config.getBaseUrl() + thePath))
-            .timeout(Duration.ofMillis(theTimeoutMs))
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(theBody.toString(), StandardCharsets.UTF_8));
+        HttpCallSpec call = HttpCallSpec.postJsonStream(config.getBaseUrl() + thePath,
+            theBody.toString(), theTimeoutMs);
         if(config.getApiKey() != null && !config.getApiKey().isEmpty()) {
-            request.header("Authorization", "Bearer " + config.getApiKey());
+            call = call.withHeader("Authorization", "Bearer " + config.getApiKey());
         }
-        final HttpResponse<java.util.stream.Stream<String>> response;
+        final HttpCallResult response;
         try {
             final long startedAt = System.currentTimeMillis();
-            response = client.send(request.build(), HttpResponse.BodyHandlers.ofLines());
+            response = transport.send(call);
             System.err.println("[colleague] stream headers after "
                 + (System.currentTimeMillis() - startedAt) + " ms from "
                 + config.getBaseUrl() + thePath);
-        } catch (final IOException ex) {
-            throw new LLMException("Cannot reach endpoint " + config.getBaseUrl()
-                + ": " + ex.getMessage(), ex);
-        } catch (final InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw new LLMException("Call to " + config.getBaseUrl() + " interrupted", ex);
+        } catch (final TransportFailure ex) {
+            throw new LLMException(ex.getMessage(), ex);
         }
         if(theCancellation.isCancelled()) {
             // the wait for headers is the slowest phase (endpoints may load
             // the model first): observing the latch here closes the stream
             // right after headers arrive instead of waiting for any frame
-            response.body().close();
+            response.close();
             throw new TurnCancelledException();
         }
-        if(response.statusCode() < 200 || response.statusCode() >= 300) {
+        if(response.getStatus() < 200 || response.getStatus() >= 300) {
             final StringBuilder excerpt = new StringBuilder();
-            response.body().limit(4).forEach(line -> excerpt.append(line));
+            try (java.util.stream.Stream<String> lines = response.lines()) {
+                lines.limit(4).forEach(line -> excerpt.append(line));
+            }
             throw new LLMException("Endpoint " + config.getBaseUrl() + " returned HTTP "
-                + response.statusCode() + ": " + excerpt, response.statusCode(), null);
+                + response.getStatus() + ": " + excerpt, response.getStatus(), null);
         }
-        try (java.util.stream.Stream<String> lines = response.body()) {
+        try (java.util.stream.Stream<String> lines = response.lines()) {
             lines.forEach(line -> {
                 if(theCancellation.isCancelled()) {
                     throw new TurnCancelledException();
@@ -219,28 +212,27 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
         return element.getAsInt();
     }
 
-    private JsonObject send(final HttpRequest.Builder theRequestBuilder) throws LLMException {
+    private JsonObject send(final HttpCallSpec theCall) throws LLMException {
+        HttpCallSpec call = theCall;
         if(config.getApiKey() != null && !config.getApiKey().isEmpty()) {
-            theRequestBuilder.header("Authorization", "Bearer " + config.getApiKey());
+            call = call.withHeader("Authorization", "Bearer " + config.getApiKey());
         }
-        final HttpResponse<String> response;
+        final HttpCallResult response;
         try {
-            response = client.send(theRequestBuilder.build(), HttpResponse.BodyHandlers.ofString());
-        } catch (final IOException ex) {
-            throw new LLMException("Cannot reach endpoint " + config.getBaseUrl() + ": " + ex.getMessage(), ex);
-        } catch (final InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw new LLMException("Call to " + config.getBaseUrl() + " interrupted", ex);
+            response = transport.send(call);
+        } catch (final TransportFailure ex) {
+            throw new LLMException(ex.getMessage(), ex);
         }
-        if(response.statusCode() < 200 || response.statusCode() >= 300) {
+        if(response.getStatus() < 200 || response.getStatus() >= 300) {
             throw new LLMException("Endpoint " + config.getBaseUrl() + " returned HTTP "
-                + response.statusCode() + ": " + excerpt(response.body()), response.statusCode(), null);
+                + response.getStatus() + ": " + excerpt(response.getBodyText()),
+                response.getStatus(), null);
         }
         try {
-            return JsonParser.parseString(response.body()).getAsJsonObject();
+            return JsonParser.parseString(response.getBodyText()).getAsJsonObject();
         } catch (final RuntimeException ex) {
             throw new LLMException("Unexpected non-JSON response from " + config.getBaseUrl()
-                + ": " + excerpt(response.body()), ex);
+                + ": " + excerpt(response.getBodyText()), ex);
         }
     }
 

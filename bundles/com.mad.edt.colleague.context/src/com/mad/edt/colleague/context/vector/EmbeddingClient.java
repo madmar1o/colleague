@@ -1,24 +1,22 @@
 package com.mad.edt.colleague.context.vector;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mad.edt.colleague.http.HttpCallResult;
+import com.mad.edt.colleague.http.HttpCallSpec;
+import com.mad.edt.colleague.http.HttpTransport;
+import com.mad.edt.colleague.http.TransportFailure;
 
 /**
  * Text-to-vector client for the local embedding runtime. Talks to the native
  * {@code /api/embed} endpoint which accepts a batch of texts and returns one
- * vector per text in the same order. Instances are thread safe: the backing
- * HTTP client is shared and every call is a self-contained request.
+ * vector per text in the same order. Every call goes through the
+ * {@link HttpTransport} seam, so tests can pin the batch contract without a
+ * runtime. Instances are thread safe.
  */
 public final class EmbeddingClient {
 
@@ -26,7 +24,7 @@ public final class EmbeddingClient {
 
     private final String baseUrl;
     private final String model;
-    private final HttpClient client;
+    private final HttpTransport transport;
     private final int readTimeoutMs;
 
     /**
@@ -36,13 +34,22 @@ public final class EmbeddingClient {
      */
     public EmbeddingClient(final String theBaseUrl, final String theModel,
         final int theReadTimeoutMs) {
+        this(theBaseUrl, theModel, theReadTimeoutMs, HttpTransport.createDefault());
+    }
+
+    /**
+     * @param theBaseUrl runtime root
+     * @param theModel embedding model name
+     * @param theReadTimeoutMs timeout for one embedding batch
+     * @param theTransport transport seam used for every call
+     */
+    public EmbeddingClient(final String theBaseUrl, final String theModel,
+        final int theReadTimeoutMs, final HttpTransport theTransport) {
         baseUrl = theBaseUrl.endsWith("/")
             ? theBaseUrl.substring(0, theBaseUrl.length() - 1) : theBaseUrl;
         model = theModel;
         readTimeoutMs = theReadTimeoutMs;
-        client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5))
-            .build();
+        transport = theTransport;
     }
 
     /**
@@ -72,27 +79,17 @@ public final class EmbeddingClient {
         }
         body.add("input", input);
 
-        final HttpRequest request = HttpRequest
-            .newBuilder(URI.create(baseUrl + "/api/embed"))
-            .timeout(Duration.ofMillis(readTimeoutMs))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
-            .build();
         final String responseBody;
         try {
-            final HttpResponse<String> response =
-                client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if(response.statusCode() < 200 || response.statusCode() >= 300) {
+            final HttpCallResult response = transport.send(
+                HttpCallSpec.postJson(baseUrl + "/api/embed", body.toString(), readTimeoutMs));
+            if(response.getStatus() < 200 || response.getStatus() >= 300) {
                 throw new EmbeddingException("embedding runtime returned HTTP "
-                    + response.statusCode() + ": " + excerpt(response.body()));
+                    + response.getStatus() + ": " + excerpt(response.getBodyText()));
             }
-            responseBody = response.body();
-        } catch (final IOException ex) {
-            throw new EmbeddingException("cannot reach embedding runtime " + baseUrl
-                + ": " + ex.getMessage(), ex);
-        } catch (final InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw new EmbeddingException("embedding call interrupted", ex);
+            responseBody = response.getBodyText();
+        } catch (final TransportFailure ex) {
+            throw new EmbeddingException(ex.getMessage(), ex);
         }
 
         final JsonArray vectors;

@@ -17,6 +17,7 @@
     <module>com.mad.edt.colleague</module>
     <module>com.mad.edt.colleague.tests</module>
     <module>com.mad.edt.colleague.context</module>
+    <module>com.mad.edt.colleague.context.tests</module>
     <module>com.mad.edt.colleague.ui.common</module>
     <module>com.mad.edt.colleague.ui</module>
   </modules>

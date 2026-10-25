@@ -7,6 +7,7 @@ import java.util.function.Consumer;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.mad.edt.colleague.http.HttpTransport;
 
 /**
  * Talks to any HTTP endpoint implementing the OpenAI-compatible chat
@@ -22,7 +23,16 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
      *        version segment, e.g. {@code https://host/v1}
      */
     public OpenAiCompatibleLLMProvider(final ProviderConfig theConfig) {
-        super(theConfig);
+        this(theConfig, HttpTransport.createDefault());
+    }
+
+    /**
+     * @param theConfig endpoint configuration
+     * @param theTransport transport seam used for every call
+     */
+    public OpenAiCompatibleLLMProvider(final ProviderConfig theConfig,
+        final HttpTransport theTransport) {
+        super(theConfig, theTransport);
     }
 
     @Override

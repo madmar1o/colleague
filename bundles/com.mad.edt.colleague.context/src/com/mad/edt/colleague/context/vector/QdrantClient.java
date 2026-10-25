@@ -1,12 +1,6 @@
 package com.mad.edt.colleague.context.vector;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -15,19 +9,24 @@ import java.util.UUID;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mad.edt.colleague.http.HttpCallResult;
+import com.mad.edt.colleague.http.HttpCallSpec;
+import com.mad.edt.colleague.http.HttpTransport;
+import com.mad.edt.colleague.http.TransportFailure;
 
 /**
  * Minimal vector store client speaking the plain REST/JSON contract of the
  * vector database: collection lifecycle, idempotent point upserts, filtered
- * deletes and similarity search. Only {@code java.net.http} and the JSON
- * library already used by the plugin are involved. Instances are thread safe.
+ * deletes and similarity search. Every call goes through the {@link HttpTransport}
+ * seam, so tests can pin the request bodies without a server. Instances are
+ * thread safe.
  */
 public final class QdrantClient {
 
     private static final int MAX_ERROR_BODY_CHARS = 300;
 
     private final String baseUrl;
-    private final HttpClient client;
+    private final HttpTransport transport;
     private final int readTimeoutMs;
 
     /**
@@ -35,12 +34,20 @@ public final class QdrantClient {
      * @param theReadTimeoutMs timeout for one request
      */
     public QdrantClient(final String theBaseUrl, final int theReadTimeoutMs) {
+        this(theBaseUrl, theReadTimeoutMs, HttpTransport.createDefault());
+    }
+
+    /**
+     * @param theBaseUrl server root
+     * @param theReadTimeoutMs timeout for one request
+     * @param theTransport transport seam used for every call
+     */
+    public QdrantClient(final String theBaseUrl, final int theReadTimeoutMs,
+        final HttpTransport theTransport) {
         baseUrl = theBaseUrl.endsWith("/")
             ? theBaseUrl.substring(0, theBaseUrl.length() - 1) : theBaseUrl;
         readTimeoutMs = theReadTimeoutMs;
-        client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(3))
-            .build();
+        transport = theTransport;
     }
 
     /**
@@ -94,9 +101,9 @@ public final class QdrantClient {
      */
     public void ensureCollection(final String theCollection, final int theVectorSize)
         throws QdrantException {
-        final JsonObject existing =
-            call("GET", "/collections/" + theCollection, null);
-        if(vectorConfigOf(existing) == null) {
+        // an absent collection answers the probe with an error, that is the
+        // normal path into creation, not a failure
+        if(!collectionExists(theCollection)) {
             final JsonObject vectorParams = new JsonObject();
             vectorParams.addProperty("size", Integer.valueOf(theVectorSize));
             vectorParams.addProperty("distance", "Cosine");
@@ -316,48 +323,38 @@ public final class QdrantClient {
 
     private JsonObject call(final String theMethod, final String thePath, final JsonObject theBody)
         throws QdrantException {
-        final HttpRequest.Builder request = HttpRequest
-            .newBuilder(URI.create(baseUrl + thePath))
-            .timeout(Duration.ofMillis(readTimeoutMs))
-            .header("Content-Type", "application/json");
+        HttpCallSpec call;
         if("GET".equals(theMethod)) {
-            request.GET();
+            call = HttpCallSpec.getJson(baseUrl + thePath, readTimeoutMs);
         } else if("DELETE".equals(theMethod)) {
-            request.method("DELETE",
-                theBody == null ? HttpRequest.BodyPublishers.noBody()
-                    : HttpRequest.BodyPublishers.ofString(theBody.toString(),
-                        StandardCharsets.UTF_8));
+            call = HttpCallSpec.json("DELETE", baseUrl + thePath,
+                theBody == null ? null : theBody.toString(), readTimeoutMs);
         } else {
-            request.method(theMethod, HttpRequest.BodyPublishers
-                .ofString(theBody == null ? "{}" : theBody.toString(), StandardCharsets.UTF_8));
+            call = HttpCallSpec.json(theMethod, baseUrl + thePath,
+                theBody == null ? "{}" : theBody.toString(), readTimeoutMs);
         }
-        final HttpResponse<String> response;
+        final HttpCallResult response;
         try {
-            response = client.send(request.build(),
-                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        } catch (final IOException ex) {
-            throw new QdrantException("cannot reach vector store " + baseUrl
-                + ": " + ex.getMessage(), ex);
-        } catch (final InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw new QdrantException("vector store call interrupted", ex);
+            response = transport.send(call);
+        } catch (final TransportFailure ex) {
+            throw new QdrantException(ex.getMessage(), ex);
         }
-        if(response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new QdrantException("vector store returned HTTP " + response.statusCode()
-                + " for " + theMethod + ' ' + thePath + ": " + excerpt(response.body()));
+        if(response.getStatus() < 200 || response.getStatus() >= 300) {
+            throw new QdrantException("vector store returned HTTP " + response.getStatus()
+                + " for " + theMethod + ' ' + thePath + ": " + excerpt(response.getBodyText()));
         }
         try {
-            final JsonObject json = JsonParser.parseString(response.body()).getAsJsonObject();
+            final JsonObject json = JsonParser.parseString(response.getBodyText()).getAsJsonObject();
             if(json.has("status")) {
                 final com.google.gson.JsonElement status = json.get("status");
                 if(status.isJsonObject() && status.getAsJsonObject().has("error")) {
-                    throw new QdrantException("vector store error: " + excerpt(response.body()));
+                    throw new QdrantException("vector store error: " + excerpt(response.getBodyText()));
                 }
             }
             return json;
         } catch (final RuntimeException ex) {
             throw new QdrantException("unexpected vector store response: "
-                + excerpt(response.body()), ex);
+                + excerpt(response.getBodyText()), ex);
         }
     }
 
