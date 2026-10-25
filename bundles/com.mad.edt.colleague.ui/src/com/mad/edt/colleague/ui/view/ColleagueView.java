@@ -244,6 +244,9 @@ public class ColleagueView extends ViewPart {
             ourBackButton.setVisible(thePage == ourTabsArea);
             ourMobileStack.layout(true);
             ourBackButton.getParent().layout(true);
+            System.err.println("[colleague] mobile page -> "
+                + (thePage == ourTabsArea ? "chat tabs" : "contacts")
+                + " stack=" + ourMobileStack.getSize() + " page=" + thePage.getSize());
         }
     }
 
