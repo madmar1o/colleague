@@ -408,23 +408,7 @@ public final class ChatPanel {
 
         @Override
         public void abort() {
-            if(ourBusy && ourQuestionJob != null
-                && ourQuestionJob.getState() != Job.NONE) {
-                // one object owns the stop: it fires the latch the providers
-                // poll between streamed frames and interrupts the worker out
-                // of blocking waits such as the response-header phase
-                ourTurns.abortTurn();
-                ourQuestionJob.cancel();
-                setStatus("Генерация остановлена");
-                if(ourBridge != null && ourBridge.isReady()) {
-                    // the page unlocks right away: the transcript already
-                    // shows what was produced, and the worker unwinds in
-                    // the background without further visible effects
-                    final JsonObject busy = new JsonObject();
-                    busy.addProperty("busy", Boolean.FALSE);
-                    ourBridge.push("busy", busy);
-                }
-            }
+            stopGeneration();
         }
 
         @Override
@@ -921,7 +905,38 @@ public final class ChatPanel {
             Long.valueOf(elapsedMs));
     }
 
+    /**
+     * Single owner of the stop gesture for the in-flight turn: fires the
+     * cancellation latch the providers poll between streamed frames and
+     * interrupts the worker out of blocking waits such as the response
+     * header phase. The page unlocks right away because the transcript
+     * already shows what was produced; the worker unwinds in the
+     * background without further visible effects.
+     */
+    private void stopGeneration() {
+        if(!ourBusy || ourQuestionJob == null || ourQuestionJob.getState() == Job.NONE) {
+            return;
+        }
+        ourTurns.abortTurn();
+        ourQuestionJob.cancel();
+        setStatus("Генерация остановлена");
+        if(ourBridge != null && ourBridge.isReady()) {
+            final JsonObject busy = new JsonObject();
+            busy.addProperty("busy", Boolean.FALSE);
+            ourBridge.push("busy", busy);
+        }
+    }
+
     private void registerEscape() {
+        if(ourBusy) {
+            // mid-generation ESC means "stop the answer", never the edit
+            // pair: arming write tools under a user who is trying to halt
+            // generation is the one thing this gesture must not do
+            System.out.println("[colleague] escape during generation: stopping"
+                + " turn, edit mode untouched");
+            stopGeneration();
+            return;
+        }
         switch(ourEscGesture.press()) {
             case IGNORED:
                 // the same physical ESC can arrive twice: once through the SWT

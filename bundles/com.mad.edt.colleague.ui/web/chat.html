@@ -499,7 +499,10 @@ document.addEventListener("keydown", function (e) {
   }
 }, true);
 document.addEventListener("keydown", function (e) {
-  if (e.key === "Escape") { apiCall("esc", {}); }
+  if (e.key !== "Escape") { return; }
+  /* while an answer streams, Esc is the stop key: it must never count
+     toward the double-ESC edit-mode gesture */
+  if (pageBusy) { apiCall("abort", {}); } else { apiCall("esc", {}); }
 });
 modeEl.addEventListener("click", function () { apiCall("toggleEdit", {}); });
 document.getElementById("btnnew").addEventListener("click", function () {
