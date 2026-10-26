@@ -2,6 +2,7 @@ package com.mad.edt.colleague.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -35,6 +36,8 @@ class ConversationTest {
         private final ProviderConfig myConfig;
         private final List<ChatRequest> myRequests = new ArrayList<>();
         private ChatResult myNext = new ChatResult("a", "model", "stop", 7, 12);
+        private List<String> myStreamChunks = List.of();
+        private LLMException myStreamFailure;
 
         ScriptedProvider(final String theDefaultModel) {
             myConfig = ProviderConfig.builder("test", LLMProviderType.OLLAMA)
@@ -45,6 +48,19 @@ class ConversationTest {
 
         void script(final ChatResult theResult) {
             myNext = theResult;
+        }
+
+        /**
+         * Makes the next streamed call hand over these answer chunks and
+         * then die with the given error, the way an endpoint that drops the
+         * connection in mid-answer does.
+         *
+         * @param theChunks chunks handed to the content consumer in order
+         * @param theFailure error thrown after the chunks, {@code null} for none
+         */
+        void scriptStream(final List<String> theChunks, final LLMException theFailure) {
+            myStreamChunks = theChunks;
+            myStreamFailure = theFailure;
         }
 
         List<ChatRequest> requests() {
@@ -69,8 +85,21 @@ class ConversationTest {
 
         @Override
         public ChatResult chatStream(final ChatRequest theRequest,
-            final Consumer<String> theOnContent, final Consumer<String> theOnThinking) {
+            final Consumer<String> theOnContent, final Consumer<String> theOnThinking)
+            throws LLMException {
             myRequests.add(theRequest);
+            if(!myStreamChunks.isEmpty() || myStreamFailure != null) {
+                // the scripted break happens exactly once: the next call
+                // behaves like a healthy endpoint again
+                final List<String> chunks = myStreamChunks;
+                final LLMException failure = myStreamFailure;
+                myStreamChunks = List.of();
+                myStreamFailure = null;
+                chunks.forEach(theOnContent);
+                if(failure != null) {
+                    throw failure;
+                }
+            }
             if(!myNext.getContent().isEmpty()) {
                 theOnContent.accept(myNext.getContent());
             }
@@ -92,8 +121,16 @@ class ConversationTest {
     }
 
     private static List<String> rolesAndContent(final ChatRequest theRequest) {
+        return rolesAndContent(theRequest.getMessages());
+    }
+
+    private static List<String> contents(final List<ChatMessage> theMessages) {
+        return rolesAndContent(theMessages);
+    }
+
+    private static List<String> rolesAndContent(final List<ChatMessage> theMessages) {
         final List<String> rendered = new ArrayList<>();
-        for(final ChatMessage message : theRequest.getMessages()) {
+        for(final ChatMessage message : theMessages) {
             rendered.add(message.getRole() + '|' + message.getContent());
         }
         return rendered;
@@ -252,5 +289,55 @@ class ConversationTest {
         conversation.ask("plain-model", null, "q", content::append, thinking::append);
         assertEquals("body", content.toString());
         assertEquals("thinking-text", thinking.toString());
+    }
+
+    @Test
+    void droppedAnswerKeepsTheQuestionAndItsTextInMemory() {
+        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        provider.scriptStream(List.of("first half", ", second half"),
+            new LLMException("stream ended too early"));
+        final Conversation conversation = new Conversation(provider, null);
+        assertThrows(LLMException.class, () -> conversation.ask("plain-model", null, "q1"));
+        // the half an answer already reached the user through the delta feed,
+        // so the memory must carry the question and the same text: losing
+        // them makes the next turn forget what was already shown
+        assertEquals(List.of("user|q1", "assistant|first half, second half\n"
+            + "[the answer was cut short: stream ended too early]"),
+            contents(conversation.snapshotHistory()));
+    }
+
+    @Test
+    void droppedAnswerContextJoinsTheMemoryOfTheNextTurn() throws LLMException {
+        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        provider.scriptStream(List.of("partial"), new LLMException("connection reset"));
+        final Conversation conversation = new Conversation(provider, null);
+        assertThrows(LLMException.class, () -> conversation.ask("plain-model", "file B", "q1"));
+        conversation.ask("plain-model", "new context", "q2");
+        // just like a successful turn, its workspace context message enters
+        // the memory and is replayed before the recovered exchange
+        assertEquals(List.of(
+            "system|Workspace context:\nfile B",
+            "user|q1",
+            "assistant|partial\n[the answer was cut short: connection reset]",
+            "system|Workspace context:\nnew context",
+            "user|q2"),
+            rolesAndContent(provider.requests().get(1)));
+    }
+
+    @Test
+    void endpointThatNeverAnsweredLeavesNoTraceInTheMemory() throws LLMException {
+        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        provider.scriptStream(List.of(), new LLMException("cannot reach the runtime"));
+        final Conversation conversation = new Conversation(provider, null);
+        assertThrows(LLMException.class, () -> conversation.ask("plain-model", "ctx", "q1"));
+        // nothing was produced for the user, so the next request replays an
+        // empty memory: pretending a half-empty exchange happened would
+        // steer the model through a question it never answered
+        assertTrue(conversation.snapshotHistory().isEmpty());
+        conversation.ask("plain-model", "new context", "q2");
+        assertEquals(List.of(
+            "system|Workspace context:\nnew context",
+            "user|q2"),
+            rolesAndContent(provider.requests().get(1)));
     }
 }

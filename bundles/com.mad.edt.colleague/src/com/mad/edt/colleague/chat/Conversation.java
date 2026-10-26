@@ -87,6 +87,9 @@ public final class Conversation {
     /**
      * Asks the model with the cancellation latch of the caller's turn wired
      * into the request: stopping the turn stops the streamed read loop.
+     * When the endpoint dies in the middle of an answer, the question and
+     * the text that reached the delta feed stay in the history, noted as cut
+     * short; an endpoint that never produced anything leaves no trace.
      *
      * @param theModel model name, {@code null} for the provider default
      * @param theContext project/resource description, may be {@code null}
@@ -120,19 +123,50 @@ public final class Conversation {
         }
 
         final long startedAt = System.nanoTime();
-        final ChatResult result = provider.chatStream(request.build(), theOnDelta, theOnThinking);
+        final StringBuilder streamedAnswer = new StringBuilder();
+        final ChatResult result;
+        try {
+            result = provider.chatStream(request.build(), chunk -> {
+                streamedAnswer.append(chunk);
+                theOnDelta.accept(chunk);
+            }, theOnThinking);
+        } catch (final LLMException ex) {
+            // an endpoint that dies mid-answer leaves the text already shown
+            // to the user through the delta feed: the memory keeps the
+            // question and that same text with a note, so the next turn
+            // still knows what was said; an endpoint that produced nothing
+            // leaves no trace: there is no half-said thing to remember
+            if(streamedAnswer.length() > 0) {
+                rememberExchange(contextMessage, theQuestion, streamedAnswer
+                    + "\n[the answer was cut short: " + ex.getMessage() + "]");
+            }
+            throw ex;
+        }
         final long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
 
-        if(contextMessage != null) {
-            history.add(contextMessage);
-        }
-        history.add(ChatMessage.user(theQuestion));
-        history.add(ChatMessage.assistant(result.getContent()));
-        trimHistory();
+        rememberExchange(contextMessage, theQuestion, result.getContent());
 
         return result.getContent()
             + String.format("%n--- %d/%d tokens, %d ms", Integer.valueOf(result.getPromptTokens()),
                 Integer.valueOf(result.getCompletionTokens()), Long.valueOf(elapsedMs));
+    }
+
+    /**
+     * Puts one finished exchange - context message, question and answer -
+     * into the memory and trims it, the way every completed turn does.
+     *
+     * @param theContextMessage turn's workspace context message, may be {@code null}
+     * @param theQuestion user side of the exchange
+     * @param theAnswer assistant side of the exchange
+     */
+    private void rememberExchange(final ChatMessage theContextMessage, final String theQuestion,
+        final String theAnswer) {
+        if(theContextMessage != null) {
+            history.add(theContextMessage);
+        }
+        history.add(ChatMessage.user(theQuestion));
+        history.add(ChatMessage.assistant(theAnswer));
+        trimHistory();
     }
 
     /**
