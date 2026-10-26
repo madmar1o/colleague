@@ -16,6 +16,9 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
 
     private static final int PING_TIMEOUT_MS = 5_000;
 
+    /** Budget for one warm-up call: loading a model into memory is slow. */
+    private static final int WARM_TIMEOUT_MS = 120_000;
+
     /**
      * @param theConfig endpoint configuration; base URL must point at the
      *        server root, e.g. {@code http://127.0.0.1:11435}
@@ -110,11 +113,37 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
             promptTokens[0], completionTokens[0], parseToolCalls(lastToolCalls));
     }
 
+    @Override
+    public void warmModel(final String theModel) throws LLMException {
+        final JsonObject body = new JsonObject();
+        body.addProperty("model", resolveModel(theModel));
+        // buffered answer, one JSON document: the point is the load itself,
+        // not the generation, so the request carries no prompt at all
+        body.addProperty("stream", Boolean.FALSE);
+        appendKeepAlive(body);
+        postJson("/api/generate", body, WARM_TIMEOUT_MS);
+    }
+
+    /**
+     * Claims model residence for {@link ProviderConfig#getKeepAlive()} after
+     * this call, so the endpoint keeps the weights loaded and the next
+     * question does not pay the cold load.
+     *
+     * @param theBody request body to extend
+     */
+    private void appendKeepAlive(final JsonObject theBody) {
+        final String keepAlive = getConfig().getKeepAlive();
+        if(keepAlive != null && !keepAlive.isEmpty()) {
+            theBody.addProperty("keep_alive", keepAlive);
+        }
+    }
+
     private JsonObject buildBody(final ChatRequest theRequest, final boolean theStreaming)
         throws LLMException {
         final JsonObject body = new JsonObject();
         body.addProperty("model", resolveModel(theRequest.getModel()));
         body.addProperty("stream", Boolean.valueOf(theStreaming));
+        appendKeepAlive(body);
         if(theRequest.getThink() != null) {
             body.addProperty("think", theRequest.getThink().booleanValue());
         }

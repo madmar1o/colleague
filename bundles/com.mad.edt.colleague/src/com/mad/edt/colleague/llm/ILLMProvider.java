@@ -85,4 +85,16 @@ public interface ILLMProvider {
      * @return {@code true} when the endpoint answers
      */
     boolean isAvailable();
+
+    /**
+     * Asks the endpoint to bring the model into memory without generating a
+     * single token, so the next real question starts warm. Endpoints that
+     * never evict models (gateway-style) treat this as a no-op.
+     *
+     * @param theModel model name, {@code null} for the provider default
+     * @throws LLMException when the endpoint is reachable but refuses the call
+     */
+    default void warmModel(final String theModel) throws LLMException {
+        // remote endpoints are always warm
+    }
 }

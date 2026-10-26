@@ -32,7 +32,8 @@ class EmbeddingBatchContractTest {
         Assertions.assertEquals("POST", call.getMethod());
         Assertions.assertEquals("http://runtime.test/api/embed", call.getUrl());
         Assertions.assertEquals(
-            JsonParser.parseString("{\"model\":\"emb-model\",\"input\":[\"first\",\"second\"]}")
+            JsonParser.parseString("{\"model\":\"emb-model\",\"keep_alive\":\"30m\","
+                + "\"input\":[\"first\",\"second\"]}")
                 .getAsJsonObject(),
             JsonParser.parseString(call.getJsonBody()).getAsJsonObject());
 

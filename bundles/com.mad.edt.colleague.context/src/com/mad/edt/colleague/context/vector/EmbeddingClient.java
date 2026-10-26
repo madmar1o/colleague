@@ -22,6 +22,13 @@ public final class EmbeddingClient {
 
     private static final int MAX_ERROR_BODY_CHARS = 300;
 
+    /**
+     * Residence lifetime requested with every batch: the embedding runtime
+     * keeps the model loaded between hybrid searches and index batches, so
+     * neither a user question nor a refresh pays the cold model load.
+     */
+    static final String RUNTIME_KEEP_ALIVE = "30m";
+
     private final String baseUrl;
     private final String model;
     private final HttpTransport transport;
@@ -73,6 +80,7 @@ public final class EmbeddingClient {
         }
         final JsonObject body = new JsonObject();
         body.addProperty("model", model);
+        body.addProperty("keep_alive", RUNTIME_KEEP_ALIVE);
         final JsonArray input = new JsonArray();
         for(final String text : theTexts) {
             input.add(text);

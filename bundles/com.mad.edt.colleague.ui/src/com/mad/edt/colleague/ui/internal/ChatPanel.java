@@ -42,6 +42,7 @@ import com.mad.edt.colleague.chat.StreamBatcher;
 import com.mad.edt.colleague.chat.TurnController;
 import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.CancellationFlag;
+import com.mad.edt.colleague.llm.ILLMProvider;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 
 /**
@@ -99,6 +100,8 @@ public final class ChatPanel {
     private boolean ourPageProofDone;
     private final TurnController ourTurns = new TurnController();
     private Job ourQuestionJob;
+    /** one-shot warm-up cycle runner, rescheduled while the panel lives */
+    private volatile Job ourWarmthJob;
     private Listener ourEscFilter;
     private Consumer<String> ourAnswerListener;
     private Runnable ourOnBack;
@@ -121,6 +124,7 @@ public final class ChatPanel {
         ourModel = theModel;
         createControls(theParent);
         OUR_PANELS.add(this);
+        startRuntimeWarmth();
     }
 
     /**
@@ -233,11 +237,60 @@ public final class ChatPanel {
         setStatus("Диалог сброшен");
     }
 
+    /**
+     * Keeps a local runtime warm while this panel is open: the first pass
+     * loads the model, later passes renew its residence claim before the
+     * claim can lapse, so even the first question after a long pause starts
+     * warm instead of paying the model load. Endpoints that never evict
+     * models (gateway-style) report no claim and skip the whole cycle.
+     */
+    private void startRuntimeWarmth() {
+        final ILLMProvider provider = ourSession.getProvider();
+        final long renewalMs = provider.getConfig().warmRenewalDelayMs();
+        if(renewalMs <= 0) {
+            return;
+        }
+        scheduleWarmth(provider, renewalMs, 0L);
+    }
+
+    /**
+     * Runs one warm-up pass in the background, then queues the next one to
+     * go out before the residence claim of the previous call expires.
+     *
+     * @param theProvider endpoint to warm
+     * @param theRenewalMs pause between two passes
+     * @param theDelayMs when the pass must start
+     */
+    private void scheduleWarmth(final ILLMProvider theProvider, final long theRenewalMs,
+        final long theDelayMs) {
+        final IJobFunction warmthBody = (final IProgressMonitor monitor) -> {
+            try {
+                theProvider.warmModel(ourModel);
+            } catch (final Exception ex) {
+                System.err.println("[colleague] model warm-up failed: " + ex.getMessage());
+            }
+            if(!ourRoot.isDisposed()) {
+                scheduleWarmth(theProvider, theRenewalMs, theRenewalMs);
+            }
+            return Status.OK_STATUS;
+        };
+        final Job warmth = Job.create("Colleague: model warm-up", warmthBody);
+        warmth.setSystem(true);
+        ourWarmthJob = warmth;
+        warmth.schedule(theDelayMs);
+    }
+
     private void createControls(final Composite theParent) {
         ourRoot = new Composite(theParent, SWT.NONE);
         ourRoot.setLayout(new GridLayout(1, false));
         ourRoot.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
-        ourRoot.addListener(SWT.Dispose, event -> OUR_PANELS.remove(ChatPanel.this));
+        ourRoot.addListener(SWT.Dispose, event -> {
+            OUR_PANELS.remove(ChatPanel.this);
+            final Job warmth = ourWarmthJob;
+            if(warmth != null) {
+                warmth.cancel();
+            }
+        });
         if(createBrowser()) {
             return;
         }
