@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
@@ -47,6 +48,15 @@ public class ColleagueView extends ViewPart {
 
     /** View identifier used in extension declarations and handlers. */
     public static final String ID = "com.mad.edt.colleague.ui.view.ColleagueView";
+
+    /** Pause before a retry semantic pass over the files the last one lost. */
+    private static final long SEMANTIC_RETRY_DELAY_MS = 30_000L;
+
+    /** Shortest wait while a chat turn holds the model runtime busy. */
+    private static final long SEMANTIC_CHAT_WAIT_MS = 2_000L;
+
+    /** Cap on semantic passes so dead endpoints cannot keep the loop alive forever. */
+    private static final int SEMANTIC_MAX_PASSES = 4;
 
     private static final String SYSTEM_PROMPT =
         "You are a helpful assistant embedded in an IDE for the 1C:Enterprise platform."
@@ -164,9 +174,7 @@ public class ColleagueView extends ViewPart {
             final int files = ourCodeSearch.reindex(monitor);
             System.err.println("[colleague] context index ready: " + files + " files");
             if(ourSemantic != null) {
-                System.err.println("[colleague] semantic "
-                    + ourSemantic.refreshAndLog(cappedSourceFiles())
-                    + " | " + ourSemantic.getStatus());
+                refreshSemanticUntilQuiet(monitor);
             }
             ourOverview.rebuild();
             System.err.println("[colleague] configuration overview ready: "
@@ -193,6 +201,65 @@ public class ColleagueView extends ViewPart {
 
         com.mad.edt.colleague.llm.ProviderStore.loadIntoSettings();
         ourContacts.reload();
+    }
+
+    /**
+     * Runs the semantic refresh pass and repeats it while trouble remains:
+     * files that failed their own update stay untracked, so a retry pass
+     * re-embeds exactly those and nothing else. Every pass waits out any
+     * busy chat turn, so indexing never competes with an answer over the
+     * model runtime, and a short pause separates the passes. After the
+     * first pass fails to quiet down the endpoints are taken as genuinely
+     * unavailable and the loop stops; the layer keeps serving what it has.
+     *
+     * @param theMonitor monitor of the owning index job
+     */
+    private void refreshSemanticUntilQuiet(final IProgressMonitor theMonitor) {
+        for(int pass = 1; pass <= SEMANTIC_MAX_PASSES && !theMonitor.isCanceled(); pass++) {
+            awaitQuietChat(theMonitor);
+            final String outcome = ourSemantic.refreshAndLog(cappedSourceFiles());
+            System.err.println("[colleague] semantic " + outcome
+                + " | " + ourSemantic.getStatus());
+            if(!passHasTrouble(outcome) || theMonitor.isCanceled()) {
+                return;
+            }
+            if(pass < SEMANTIC_MAX_PASSES) {
+                sleepQuietly(SEMANTIC_RETRY_DELAY_MS, theMonitor);
+            }
+        }
+    }
+
+    /**
+     * @param theOutcome one-line pass description of {@link SemanticIndex#refreshAndLog}
+     * @return whether the pass lost files of its own or never completed
+     */
+    private static boolean passHasTrouble(final String theOutcome) {
+        if(theOutcome.startsWith("refresh failed")) {
+            return true;
+        }
+        final String marker = ", failed ";
+        final int mark = theOutcome.lastIndexOf(marker);
+        return mark >= 0 && !"0".equals(theOutcome.substring(mark + marker.length()).trim());
+    }
+
+    /**
+     * Holds a refresh pass back while any open panel is answering a question.
+     *
+     * @param theMonitor job monitor, the wait ends with a cancel too
+     */
+    private static void awaitQuietChat(final IProgressMonitor theMonitor) {
+        while(ChatPanel.anyBusy() && !theMonitor.isCanceled()) {
+            sleepQuietly(SEMANTIC_CHAT_WAIT_MS, theMonitor);
+        }
+    }
+
+    private static void sleepQuietly(final long theMillis, final IProgressMonitor theMonitor) {
+        try {
+            Thread.sleep(theMillis);
+        } catch (final InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            theMonitor.setCanceled(true);
+        }
     }
 
     private void showMobilePage(final Composite thePage) {
