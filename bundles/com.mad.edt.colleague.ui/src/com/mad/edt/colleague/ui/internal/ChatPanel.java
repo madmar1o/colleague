@@ -936,7 +936,9 @@ public final class ChatPanel {
             system.append(ourSession.getSystemPrompt()).append(' ');
         }
         system.append("You can call the provided workspace tools (search_code, list_files,")
-            .append(" read_file, describe_configuration, write_file, edit_file). For any")
+            .append(" read_file, describe_configuration, write_file, edit_file). Call a tool")
+            .append(" only through the tool-call interface: never write a tool command or an")
+            .append(" example of one inside the answer text. For any")
             .append(" question about the configuration itself - its name, version, what")
             .append(" objects it has - call describe_configuration first. To change an")
             .append(" existing file use edit_file: read it first, then copy fragments")

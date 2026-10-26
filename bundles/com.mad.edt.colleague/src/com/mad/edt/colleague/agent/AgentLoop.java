@@ -24,6 +24,16 @@ public final class AgentLoop {
     private static final int DEFAULT_MAX_STEPS = 8;
     private static final int MAX_TOOL_RESULT_CHARS = 4_000;
 
+    /**
+     * Generation budget one round-trip gets: reasoning-capable local models
+     * first "think" through the task and only then emit the tool call, so a
+     * runtime default small enough to stop mid-reasoning loses the call in
+     * silence and the loop mistakes the truncated turn for a plain answer.
+     * The budget is a ceiling, not a target: a model that stops early pays
+     * nothing for the unused part of it.
+     */
+    private static final int ROUND_TRIP_OUTPUT_TOKENS = 4_096;
+
     private final ILLMProvider provider;
     private final Map<String, IToolExecutor> executors;
     private final String model;
@@ -94,11 +104,16 @@ public final class AgentLoop {
                 request.addMessage(message);
             }
             request.tools(specs);
+            // the reasoning pass is where the tool-call syntax of local
+            // reasoning models reliably appears; suppressing it on these
+            // models makes them describe calls in prose instead of making them
+            request.think(true);
+            request.maxTokens(ROUND_TRIP_OUTPUT_TOKENS);
             request.cancellation(cancellation);
 
             final ChatResult result = provider.chat(request.build());
             if(!result.wantsToolCall()) {
-                return new AgentAnswer(result.getContent(), steps, executed, true);
+                return new AgentAnswer(finalText(result), steps, executed, true);
             }
 
             messages.add(ChatMessage.assistantToolCalls(result.getContent(), result.getToolCalls()));
@@ -123,6 +138,25 @@ public final class AgentLoop {
             final String message = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
             return "ERROR: " + message;
         }
+    }
+
+    /**
+     * Final answer text of a round-trip the model ended without a tool call.
+     * A turn that produced neither text nor a call is the signature of a
+     * reasoning pass cut off by the budget: hand the user a visible notice so
+     * the failure is never mistaken for an intentionally brief answer.
+     *
+     * @param theResult the round-trip result
+     * @return non-empty answer text
+     */
+    private static String finalText(final ChatResult theResult) {
+        final String content = theResult.getContent();
+        if(content != null && !content.trim().isEmpty()) {
+            return content;
+        }
+        return "The model ended the round without an answer text or a tool call -"
+            + " its reasoning pass was most likely cut off by the generation budget."
+            + " Re-ask the question or narrow the task.";
     }
 
     private String defaultModel() {
