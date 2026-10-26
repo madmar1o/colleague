@@ -14,16 +14,26 @@ import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IPath;
+import org.eclipse.jface.dialogs.Dialog;
 import org.eclipse.jface.dialogs.MessageDialog;
+import org.eclipse.jface.layout.GridDataFactory;
+import org.eclipse.swt.SWT;
+import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
+import org.eclipse.swt.widgets.Text;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
+import com.mad.edt.colleague.edit.EditScript;
+import com.mad.edt.colleague.edit.FileDiff;
+import com.mad.edt.colleague.edit.TextEditEngine;
 import com.mad.edt.colleague.llm.ToolSpec;
 
 /**
@@ -54,16 +64,17 @@ public final class WorkspaceTools {
 
     /**
      * Same as {@link #readOnly(CodeSearch, ConfigurationOverview)} plus the
-     * guarded write tool.
+     * guarded write and edit tools.
      *
      * @param theSearch shared workspace code search
      * @param theOverview cached configuration picture of the workspace
-     * @return tool executors including code writing
+     * @return tool executors including code writing and diff-based editing
      */
     public static List<IToolExecutor> withWrite(final CodeSearch theSearch,
         final ConfigurationOverview theOverview) {
         final List<IToolExecutor> tools = new ArrayList<>(readOnly(theSearch, theOverview));
         tools.add(new WriteFileTool());
+        tools.add(new EditFileTool());
         return tools;
     }
 
@@ -205,7 +216,7 @@ public final class WorkspaceTools {
         }
     }
 
-    /** Writes a workspace file after a modal confirmation; edit mode only. */
+    /** Creates a new workspace file after a modal confirmation; edit mode only. */
     public static final class WriteFileTool implements IToolExecutor {
 
         @Override
@@ -216,9 +227,9 @@ public final class WorkspaceTools {
         @Override
         public ToolSpec getSpec() {
             return new ToolSpec("write_file",
-                "Replace the full content of a workspace file. Only available in edit mode;"
-                    + " the user confirms every write in a dialog. Use read_file first and"
-                    + " submit the complete new content, not a patch.",
+                "Create a new workspace file with the given content. Only available in edit"
+                    + " mode; the user confirms every creation in a dialog. For changing an"
+                    + " existing file use edit_file instead.",
                 schema("path", "workspace-relative file path", "content",
                     "complete new file content"));
         }
@@ -235,51 +246,180 @@ public final class WorkspaceTools {
             }
             final IPath workspacePath = new org.eclipse.core.runtime.Path(path);
             final IFile file = ResourcesPlugin.getWorkspace().getRoot().getFile(workspacePath);
+            if(file.exists()) {
+                return "ERROR: the file already exists, use edit_file to change it instead";
+            }
             final byte[] newBytes = content.getBytes(StandardCharsets.UTF_8);
-            final boolean exists = file.exists() && file.getLocation() != null;
-            final String oldDigest = describeOld(file);
 
-            final Boolean confirmed = confirmOnUiThread(file, workspacePath, exists,
-                newBytes.length, oldDigest);
+            final Boolean confirmed = confirmOnUiThread(workspacePath, newBytes.length);
             if(confirmed == null || !confirmed.booleanValue()) {
                 return "The user declined the change, nothing was written";
             }
-            if(exists) {
-                Files.write(file.getLocation().toFile().toPath(), newBytes);
-            } else {
-                final Path location = file.getLocation().toFile().toPath();
-                Files.createDirectories(location.getParent());
-                Files.write(location, newBytes);
-            }
+            final Path location = file.getLocation().toFile().toPath();
+            Files.createDirectories(location.getParent());
+            Files.write(location, newBytes);
             file.getProject().refreshLocal(IResource.DEPTH_INFINITE, null);
-            return "Written " + newBytes.length + " bytes to " + path;
+            return "Created " + path + " (" + newBytes.length + " bytes)";
         }
 
-        private static String describeOld(final IFile theFile) {
-            try {
-                if(!theFile.exists() || theFile.getLocation() == null) {
-                    return "new file";
-                }
-                final Path location = theFile.getLocation().toFile().toPath();
-                return Files.size(location) + " bytes, "
-                    + Files.readAllLines(location, StandardCharsets.UTF_8).size() + " lines";
-            } catch (final IOException ex) {
-                return "unreadable";
-            }
-        }
-
-        private static Boolean confirmOnUiThread(final IFile theFile, final IPath thePath,
-            final boolean theExists, final int theNewSize, final String theOldDigest) {
+        private static Boolean confirmOnUiThread(final IPath thePath, final int theNewSize) {
             final Shell shell = Display.getDefault().getActiveShell();
-            final String message = (theExists ? "Replace file (was " : "Create new file ")
-                + theOldDigest + ")\n\u2192 new size: " + theNewSize + " bytes\n"
-                + thePath.toPortableString() + "\n\nAllow this change?";
+            final String message = "Create new file (" + theNewSize
+                + " bytes)\n" + thePath.toPortableString() + "\n\nAllow this change?";
             final org.eclipse.swt.widgets.Display display = Display.getDefault();
             final Boolean[] answer = new Boolean[1];
             display.syncExec(() -> answer[0] = Boolean.valueOf(MessageDialog.openConfirm(
                 shell == null ? new Shell(display) : shell,
                 "Edit mode: change confirmation", message)));
             return answer[0] == null ? Boolean.FALSE : answer[0];
+        }
+    }
+
+    /**
+     * Applies search/replace edit blocks to an existing workspace file and
+     * shows the resulting diff in a modal dialog before anything is written;
+     * edit mode only. A refused or no-op script is reported back to the model
+     * so it can repair it, and the file on disk is never left half-edited.
+     */
+    public static final class EditFileTool implements IToolExecutor {
+
+        @Override
+        public String getName() {
+            return "edit_file";
+        }
+
+        @Override
+        public ToolSpec getSpec() {
+            return new ToolSpec("edit_file",
+                "Change an existing workspace file with exact search/replace blocks. Only"
+                    + " available in edit mode; the user confirms the diff in a dialog."
+                    + " Every search fragment must occur EXACTLY ONCE in the current file"
+                    + " content, copied verbatim from read_file output; blocks apply in"
+                    + " order. Use an empty search to replace the whole file. Line endings"
+                    + " of the file are preserved automatically.",
+                editFileSchema());
+        }
+
+        @Override
+        public String execute(final String theArgumentsJson) throws Exception {
+            if(!AgentMode.isOn()) {
+                return "ERROR: edit mode is off, edit_file is disabled";
+            }
+            final EditScript.ParseResult parsed = EditScript.parse(theArgumentsJson);
+            if(!parsed.isOk()) {
+                return "ERROR: " + parsed.getError();
+            }
+            final EditScript script = parsed.getScript();
+            final Path file = resolve(script.getPath());
+            final String original = Files.readString(file, StandardCharsets.UTF_8);
+            final TextEditEngine.Result result =
+                new TextEditEngine().apply(original, script.getBlocks());
+            if(!result.isOk()) {
+                return "ERROR: " + result.getError();
+            }
+            if(!result.isChanged()) {
+                return "ERROR: the edit script changes nothing in this file."
+                    + " Use read_file and copy the fragment exactly as it is now.";
+            }
+            final String diff = FileDiff.render(script.getPath(), original, result.getText());
+            final Boolean confirmed = confirmDiffOnUiThread(script.getPath(), diff);
+            if(confirmed == null || !confirmed.booleanValue()) {
+                return "The user declined the change, nothing was written";
+            }
+            Files.writeString(file, result.getText(), StandardCharsets.UTF_8);
+            final IPath workspacePath = new org.eclipse.core.runtime.Path(script.getPath());
+            ResourcesPlugin.getWorkspace().getRoot().getFile(workspacePath).getProject()
+                .refreshLocal(IResource.DEPTH_INFINITE, null);
+            return "Applied " + result.getAppliedBlocks() + " edit blocks to "
+                + script.getPath();
+        }
+
+        private static JsonObject editFileSchema() {
+            final JsonObject blockProperties = new JsonObject();
+            final JsonObject search = new JsonObject();
+            search.addProperty("type", "string");
+            search.addProperty("description",
+                "exact fragment of the current file to find, must be unique");
+            blockProperties.add("search", search);
+            final JsonObject replace = new JsonObject();
+            replace.addProperty("type", "string");
+            replace.addProperty("description", "text that takes the fragment's place");
+            blockProperties.add("replace", replace);
+            final JsonObject block = new JsonObject();
+            block.addProperty("type", "object");
+            block.add("properties", blockProperties);
+            final JsonArray blockRequired = new JsonArray();
+            blockRequired.add("search");
+            blockRequired.add("replace");
+            block.add("required", blockRequired);
+            final JsonObject properties = new JsonObject();
+            final JsonObject path = new JsonObject();
+            path.addProperty("type", "string");
+            path.addProperty("description", "workspace-relative file path");
+            properties.add("path", path);
+            final JsonObject edits = new JsonObject();
+            edits.addProperty("type", "array");
+            edits.add("items", block);
+            edits.addProperty("description", "search/replace blocks, applied in order");
+            properties.add("edits", edits);
+            final JsonArray required = new JsonArray();
+            required.add("path");
+            required.add("edits");
+            final JsonObject schema = new JsonObject();
+            schema.addProperty("type", "object");
+            schema.add("properties", properties);
+            schema.add("required", required);
+            return schema;
+        }
+
+        private static Boolean confirmDiffOnUiThread(final String thePath, final String theDiff) {
+            final Shell shell = Display.getDefault().getActiveShell();
+            final Boolean[] answer = new Boolean[1];
+            Display.getDefault().syncExec(() -> {
+                final DiffConfirmationDialog dialog = new DiffConfirmationDialog(
+                    shell == null ? new Shell(Display.getDefault()) : shell, thePath, theDiff);
+                answer[0] = Boolean.valueOf(dialog.open() == Dialog.OK);
+            });
+            return answer[0] == null ? Boolean.FALSE : answer[0];
+        }
+    }
+
+    /** Modal OK/Cancel dialog showing the full diff in a monospace text area. */
+    private static final class DiffConfirmationDialog extends Dialog {
+
+        private final String pathText;
+        private final String diffText;
+
+        DiffConfirmationDialog(final Shell theParent, final String thePath, final String theDiff) {
+            super(theParent);
+            pathText = thePath;
+            diffText = theDiff;
+        }
+
+        @Override
+        protected org.eclipse.swt.widgets.Control createDialogArea(final Composite theParent) {
+            final Composite area = (Composite)super.createDialogArea(theParent);
+            final Label title = new Label(area, SWT.WRAP);
+            title.setText("Edit mode: apply these changes to " + pathText + "?");
+            GridDataFactory.fillDefaults().grab(true, false).hint(700, SWT.DEFAULT).applyTo(title);
+            final Text diff = new Text(area, SWT.READ_ONLY | SWT.MULTI | SWT.WRAP | SWT.V_SCROLL);
+            diff.setFont(org.eclipse.jface.resource.JFaceResources.getFontRegistry()
+                .get(org.eclipse.jface.resource.JFaceResources.TEXT_FONT));
+            diff.setText(diffText);
+            GridDataFactory.fillDefaults().grab(true, true).hint(700, 400).applyTo(diff);
+            return area;
+        }
+
+        @Override
+        protected void configureShell(final Shell theShell) {
+            super.configureShell(theShell);
+            theShell.setText("Edit mode: change confirmation");
+        }
+
+        @Override
+        protected void createButtonsForButtonBar(final Composite theParent) {
+            createButton(theParent, Dialog.OK, "Apply", true);
+            createButton(theParent, Dialog.CANCEL, "Cancel", false);
         }
     }
 

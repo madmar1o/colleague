@@ -936,12 +936,13 @@ public final class ChatPanel {
             system.append(ourSession.getSystemPrompt()).append(' ');
         }
         system.append("You can call the provided workspace tools (search_code, list_files,")
-            .append(" read_file, describe_configuration, write_file). For any question about")
-            .append(" the configuration itself - its name, version, what objects it has -")
-            .append(" call describe_configuration first. Search the project before answering")
-            .append(" code questions; quote paths and line numbers. Every write is confirmed")
-            .append(" by the user, so propose exact complete file contents. Answer in the")
-            .append(" language of the question.");
+            .append(" read_file, describe_configuration, write_file, edit_file). For any")
+            .append(" question about the configuration itself - its name, version, what")
+            .append(" objects it has - call describe_configuration first. To change an")
+            .append(" existing file use edit_file: read it first, then copy fragments")
+            .append(" verbatim so each search text is unique. Search the project before")
+            .append(" answering code questions; quote paths and line numbers. Every change")
+            .append(" is confirmed by the user. Answer in the language of the question.");
         String task = theQuestion;
         if(!theContext.isEmpty()) {
             task = task + "\n\nProject context found by search:\n" + theContext;
