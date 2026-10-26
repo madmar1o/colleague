@@ -10,6 +10,7 @@ import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.CTabFolder;
 import org.eclipse.swt.custom.CTabItem;
+import org.eclipse.swt.events.DisposeEvent;
 import org.eclipse.swt.layout.FillLayout;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
@@ -341,6 +342,19 @@ public class ColleagueView extends ViewPart {
         ourTabFolder.setSelection(notice);
     }
 
+    /**
+     * Stack fallback for an emptied tab folder: with no chat tabs left the
+     * tabs page shows nothing but blank space, so the visible page becomes
+     * the contacts list the user can pick a new chat from. Runs on the UI
+     * queue after a tab item was disposed.
+     */
+    private void fallBackToContactsIfEmpty() {
+        if(ourTabFolder.isDisposed() || ourTabFolder.getItemCount() > 0) {
+            return;
+        }
+        showMobilePage(ourContactsArea);
+    }
+
     private ChatPanel openContact(final ContactsPanel.Contact theContact) {
         if(ourTabFolder.isDisposed()) {
             return null;
@@ -359,6 +373,13 @@ public class ColleagueView extends ViewPart {
                 SYSTEM_PROMPT));
         final CTabItem tab = new CTabItem(ourTabFolder, SWT.CLOSE);
         tab.setText(theContact.getModel());
+        // closing the last chat tab must not leave the empty tab page on
+        // screen: the provider list is the only way back into a chat, so the
+        // stack falls back to it once the folder runs out of tabs. the close
+        // button disposes the item, and the folder itself gives no usable
+        // "now empty" event, so the item's own dispose is the trigger
+        tab.addDisposeListener((final DisposeEvent theEvent) ->
+            Display.getDefault().asyncExec(this::fallBackToContactsIfEmpty));
         // switch the page over before the browser is created: at cold start the
         // preferred contact opens automatically, and a browser created in a
         // hidden zero-sized page paints nothing
