@@ -23,6 +23,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mad.edt.colleague.llm.ILLMProvider;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
+import com.mad.edt.colleague.llm.LLMProviderType;
 import com.mad.edt.colleague.llm.LLMSettings;
 import com.mad.edt.colleague.llm.ProviderConfig;
 import com.mad.edt.colleague.llm.ProviderStore;
@@ -31,9 +32,10 @@ import com.mad.edt.colleague.llm.ProviderStore;
  * Messenger-style contact list rendered by the bundled {@code web/contacts.html}
  * page inside an embedded browser: one card per configured provider with its
  * chat-capable models as chips; clicking a chip opens a chat tab. The gear on
- * the page header opens a popup with the read-only provider list: pick which
- * provider new dialogs use and remove extra ones. When no browser backend is
- * available the panel falls back to a plain SWT tree plus a refresh button.
+ * the page header opens a popup with the provider list: pick which provider
+ * new dialogs use, change or remove one in place, and add a new one through
+ * the button under the list. When no browser backend is available the panel
+ * falls back to a plain SWT tree plus a refresh button.
  */
 public final class ContactsPanel {
 
@@ -238,6 +240,12 @@ public final class ContactsPanel {
             case "removeProvider":
                 removeProvider(BridgeBrowser.optString(theArguments, "id"));
                 return;
+            case "testProvider":
+                testProvider(theArguments);
+                return;
+            case "saveProvider":
+                saveProvider(theArguments);
+                return;
             default:
                 return;
         }
@@ -257,6 +265,100 @@ public final class ContactsPanel {
         reload();
     }
 
+    /**
+     * Probes an unsaved endpoint draft for its chat model list without
+     * registering anything: the page shows the answer right away and offers
+     * the models for the default-model pick.
+     *
+     * @param theArguments draft fields: type, url, key
+     */
+    private void testProvider(final JsonObject theArguments) {
+        final String type = BridgeBrowser.optString(theArguments, "type");
+        final String url = BridgeBrowser.optString(theArguments, "url");
+        if(url.isEmpty()) {
+            final JsonObject result = new JsonObject();
+            result.addProperty("ok", Boolean.FALSE);
+            result.addProperty("error", "не задан адрес сервиса");
+            ourBridge.push("testResult", result);
+            return;
+        }
+        Job.create("Colleague: provider test", (monitor) -> {
+            final JsonObject result = new JsonObject();
+            try {
+                final ProviderConfig config = ProviderConfig
+                    .builder("_probe", toType(type))
+                    .baseUrl(url)
+                    .apiKey(BridgeBrowser.optString(theArguments, "key"))
+                    .build();
+                final List<String> models = LLMProviderFactory.create(config).listModels()
+                    .stream()
+                    .filter(name -> !name.contains("embed") && !name.startsWith("bge"))
+                    .collect(Collectors.toList());
+                final JsonArray array = new JsonArray();
+                models.forEach(array::add);
+                result.add("models", array);
+                result.addProperty("ok", Boolean.TRUE);
+            } catch (final Exception ex) {
+                result.addProperty("ok", Boolean.FALSE);
+                result.addProperty("error", ex.getMessage() == null
+                    ? ex.getClass().getSimpleName() : ex.getMessage());
+            }
+            Display.getDefault().asyncExec(() -> {
+                if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
+                    ourBridge.push("testResult", result);
+                }
+            });
+            return Status.OK_STATUS;
+        }).schedule();
+    }
+
+    /**
+     * Registers (or updates) one provider from the page form. An empty key
+     * field keeps the key an existing provider already has: the page never
+     * reads stored secrets back.
+     *
+     * @param theArguments form fields: id, type, url, key, model, isDefault
+     */
+    private void saveProvider(final JsonObject theArguments) {
+        final String id = BridgeBrowser.optString(theArguments, "id");
+        final String url = BridgeBrowser.optString(theArguments, "url");
+        if(id.isEmpty() || url.isEmpty()) {
+            pushSaved(false, "нужны идентификатор и адрес сервиса");
+            return;
+        }
+        if(id.contains("\u0000") || id.contains("/")) {
+            pushSaved(false, "некорректный идентификатор");
+            return;
+        }
+        String key = BridgeBrowser.optString(theArguments, "key");
+        final ProviderConfig previous = LLMSettings.getConfig(id);
+        if(key.isEmpty() && previous != null && previous.getApiKey() != null) {
+            key = previous.getApiKey();
+        }
+        final String model = BridgeBrowser.optString(theArguments, "model");
+        LLMSettings.register(ProviderConfig
+            .builder(id, toType(BridgeBrowser.optString(theArguments, "type")))
+            .baseUrl(url)
+            .apiKey(key)
+            .defaultModel(model.isEmpty() ? null : model)
+            .build());
+        if(theArguments.has("isDefault") && theArguments.get("isDefault").getAsBoolean()) {
+            LLMSettings.setDefaultProviderId(id);
+        }
+        ProviderStore.saveFromSettings();
+        pushSaved(true, "");
+        reload();
+    }
+
+    /**
+     * @param thePageValue protocol as the page names it
+     * @return the matching endpoint dialect
+     */
+    private static LLMProviderType toType(final String thePageValue) {
+        return "openai".equals(thePageValue)
+            ? LLMProviderType.OPENAI_COMPATIBLE : LLMProviderType.OLLAMA;
+    }
+
     private void pushSaved(final boolean theOk, final String theError) {
         final JsonObject payload = new JsonObject();
         payload.addProperty("ok", Boolean.valueOf(theOk));
@@ -273,7 +375,12 @@ public final class ContactsPanel {
             }
             final JsonObject item = new JsonObject();
             item.addProperty("id", config.getId());
+            item.addProperty("type", config.getType().name());
             item.addProperty("baseUrl", config.getBaseUrl());
+            item.addProperty("hasKey", Boolean.valueOf(config.getApiKey() != null
+                && !config.getApiKey().isEmpty()));
+            item.addProperty("defaultModel", config.getDefaultModel() == null
+                ? "" : config.getDefaultModel());
             item.addProperty("default", Boolean.valueOf(
                 id.equals(LLMSettings.getDefaultProviderId())));
             providers.add(item);

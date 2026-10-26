@@ -72,6 +72,17 @@ table.plist th { color: var(--muted); font-weight: 600; font-size: 11px; }
 .btnrow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .btnrow button { flex: 0 1 auto; }
 td.act { white-space: nowrap; }
+input[type=text], input[type=password], select {
+  width: 100%; background: var(--panel2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px;
+  font: inherit; outline: none;
+}
+input[type=text]:focus, input[type=password]:focus, select:focus { border-color: var(--accent); }
+.fieldrow { margin-bottom: 8px; }
+.fieldrow label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+.hintline { color: var(--muted); font-size: 11px; min-height: 15px; margin: 4px 0; }
+.hintline.ok { color: #4caf7d; }
+.hintline.bad { color: #e08585; }
 </style>
 </head>
 <body>
@@ -90,7 +101,31 @@ td.act { white-space: nowrap; }
       <thead><tr><th>провайдер</th><th>адрес</th><th>по ум.</th><th></th></tr></thead>
       <tbody id="prows"></tbody>
     </table>
+    <div id="editbox" style="display:none">
+      <div class="fieldrow"><label>идентификатор</label>
+        <input type="text" id="f_id" placeholder="например cloud"></div>
+      <div class="fieldrow"><label>протокол</label>
+        <select id="f_type">
+          <option value="ollama">локальный рантайм (ollama)</option>
+          <option value="openai">OpenAI-совместимый</option>
+        </select></div>
+      <div class="fieldrow"><label>адрес сервиса</label>
+        <input type="text" id="f_url" placeholder="http://хост:порт"></div>
+      <div class="fieldrow"><label>ключ API (если нужен)</label>
+        <input type="password" id="f_key" placeholder="пусто — без ключа"></div>
+      <div class="btnrow">
+        <button id="btnTest">Проверить</button>
+        <button class="primary" id="btnSave">Сохранить</button>
+        <button id="btnCancelEdit">Отменить</button>
+      </div>
+      <div class="hintline" id="thint"></div>
+      <div class="fieldrow"><label>модель по умолчанию (после проверки)</label>
+        <select id="f_model"><option value="">— не выбрана —</option></select></div>
+      <div class="fieldrow"><label><input type="checkbox" id="f_default">
+        сделать этим провайдером по умолчанию новые диалоги</label></div>
+    </div>
     <div class="btnrow">
+      <button id="btnaddprov">+ Добавить провайдера</button>
       <button id="btnClose">Закрыть</button>
     </div>
   </div>
@@ -155,6 +190,9 @@ var listEl = document.getElementById("list");
 var statusEl = document.getElementById("status");
 var overlay = document.getElementById("overlay");
 var prows = document.getElementById("prows");
+var editbox = document.getElementById("editbox");
+var modelSel = document.getElementById("f_model");
+var thint = document.getElementById("thint");
 
 function setStatus(s) { statusEl.textContent = s || ""; }
 
@@ -219,22 +257,86 @@ function renderSettings(data) {
     rb.onchange = function () { apiCall("setDefault", { id: p.id }); };
     r.appendChild(rb);
     var a = document.createElement("td"); a.className = "act";
+    var ed = document.createElement("button"); ed.textContent = "изменить";
+    ed.onclick = function () { showForm(); fillForm(p); };
     var rm = document.createElement("button"); rm.textContent = "удалить";
     rm.onclick = function () { apiCall("removeProvider", { id: p.id }); };
-    a.appendChild(rm);
+    a.appendChild(ed); a.appendChild(rm);
     tr.appendChild(n); tr.appendChild(u); tr.appendChild(r); tr.appendChild(a);
     prows.appendChild(tr);
   });
+}
+
+function showForm() { editbox.style.display = ""; }
+function hideForm() { editbox.style.display = "none"; }
+
+function fillForm(p) {
+  document.getElementById("f_id").value = p.id;
+  document.getElementById("f_id").disabled = true;
+  document.getElementById("f_type").value = p.type === "OPENAI_COMPATIBLE" ? "openai" : "ollama";
+  document.getElementById("f_url").value = p.baseUrl || "";
+  document.getElementById("f_key").value = "";
+  document.getElementById("f_key").placeholder = p.hasKey ? "ключ задан — пусто, чтобы оставить" : "пусто — без ключа";
+  document.getElementById("f_default").checked = !!p["default"];
+  modelSel.textContent = "";
+  addModelOption(p.defaultModel || "", p.defaultModel || "");
+  thint.textContent = "";
+  thint.className = "hintline";
+}
+
+function clearForm() {
+  document.getElementById("f_id").value = "";
+  document.getElementById("f_id").disabled = false;
+  document.getElementById("f_type").value = "ollama";
+  document.getElementById("f_url").value = "";
+  document.getElementById("f_key").value = "";
+  document.getElementById("f_key").placeholder = "пусто — без ключа";
+  document.getElementById("f_default").checked = false;
+  modelSel.textContent = "";
+  addModelOption("", "— не выбрана —");
+  thint.textContent = "";
+  thint.className = "hintline";
+}
+
+function addModelOption(v, label) {
+  var o = document.createElement("option");
+  o.value = v; o.textContent = label;
+  modelSel.appendChild(o);
 }
 
 document.getElementById("btnrefresh").onclick = function () {
   setStatus("Загружаю провайдеров…"); apiCall("refresh", {});
 };
 document.getElementById("btnsettings").onclick = function () {
-  overlay.classList.add("shown"); apiCall("loadSettings", {});
+  overlay.classList.add("shown"); hideForm(); apiCall("loadSettings", {});
+};
+document.getElementById("btnaddprov").onclick = function () {
+  showForm(); clearForm();
+};
+document.getElementById("btnCancelEdit").onclick = function () {
+  hideForm();
 };
 document.getElementById("btnClose").onclick = function () {
-  overlay.classList.remove("shown");
+  hideForm(); overlay.classList.remove("shown");
+};
+document.getElementById("btnTest").onclick = function () {
+  thint.textContent = "Проверяю…"; thint.className = "hintline";
+  apiCall("testProvider", {
+    id: document.getElementById("f_id").value.trim(),
+    type: document.getElementById("f_type").value,
+    url: document.getElementById("f_url").value.trim(),
+    key: document.getElementById("f_key").value
+  });
+};
+document.getElementById("btnSave").onclick = function () {
+  apiCall("saveProvider", {
+    id: document.getElementById("f_id").value.trim(),
+    type: document.getElementById("f_type").value,
+    url: document.getElementById("f_url").value.trim(),
+    key: document.getElementById("f_key").value,
+    model: modelSel.value,
+    isDefault: document.getElementById("f_default").checked
+  });
 };
 
 window.colleaguePush = function (kind, payload) {
@@ -249,10 +351,33 @@ window.colleaguePush = function (kind, payload) {
     case "readyPalette": applyPalette(data); break;
     case "contactsData": renderContacts(data); break;
     case "settingsData": renderSettings(data); break;
+    case "testResult":
+      if (data.ok) {
+        var current = modelSel.value;
+        modelSel.textContent = "";
+        addModelOption("", "— не выбрана —");
+        (data.models || []).forEach(function (m) { addModelOption(m, m); });
+        if (current) { modelSel.value = current; }
+        thint.textContent = "связь есть, моделей: " + (data.models || []).length;
+        thint.className = "hintline ok";
+      } else {
+        thint.textContent = "ошибка: " + (data.error || "не удалось связаться");
+        thint.className = "hintline bad";
+      }
+      break;
     case "saved":
-      /* removing a provider answers here; a successful removal re-renders the
-         whole list through the reload anyway, only a refusal needs a line */
-      if (!data.ok) { setStatus(data.error || "не сохранено"); }
+      if (data.ok) {
+        /* the form did its job; the fresh list arrives through loadSettings
+           below, so the edit box closes on its own */
+        hideForm();
+        setStatus("сохранено");
+      } else if (editbox.style.display !== "none") {
+        thint.textContent = "не сохранено: " + (data.error || "");
+        thint.className = "hintline bad";
+      } else {
+        setStatus(data.error || "не сохранено");
+      }
+      apiCall("loadSettings", {});
       break;
     case "status": setStatus(data.text || ""); break;
   }
