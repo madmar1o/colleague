@@ -307,8 +307,9 @@ public final class QdrantClient {
     /**
      * Walks every stored point of the collection in payload-only scroll
      * pages and collects the named payload fields of each point. The walk
-     * hands the previous page offset to the next request and stops as soon
-     * as the store stops handing offsets over.
+     * hands the offset the store itself names in the page answer
+     * ({@code next_page_offset}) to the next request and stops as soon as
+     * the store stops handing offsets over.
      *
      * @param theCollection collection name
      * @param theFields payload fields to carry back
@@ -344,7 +345,7 @@ public final class QdrantClient {
                 payloads.add(payload == null ? new JsonObject() : payload);
                 pagePoints++;
             }
-            final com.google.gson.JsonElement next = page.get("next_page");
+            final com.google.gson.JsonElement next = page.get("next_page_offset");
             if(next == null || next.isJsonNull() || pagePoints == 0) {
                 break;
             }

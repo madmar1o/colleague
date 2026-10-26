@@ -15,19 +15,42 @@ import com.mad.edt.colleague.context.vector.QdrantClient.QdrantException;
  * Pins the scroll contract the fingerprint restore relies on: the walk pages
  * over the whole point set, asks for payload only (never vectors), passes the
  * previous page offset into the next request and stops when the store stops
- * handing offsets over.
+ * handing offsets over. The cursor field is the one the real store answers
+ * with - <code>next_page_offset</code>; an invented name silently truncates
+ * the walk to the first page.
  */
 class QdrantScrollContractTest {
 
     private static final String COLLECTION = "ws_test";
 
     @Test
+    void scrollWalksEveryPageViaTheStoresOwnOffsetCursor() throws QdrantException {
+        // the store hands the offset of the last point on each page and null
+        // on the last one; a cursor under any other name would silently stop
+        // the walk after the first page
+        final ScriptedHttpTransport store = new ScriptedHttpTransport()
+            .answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"a.bsl\","
+                + "\"hash\":\"h1\"}},{\"payload\":{\"path\":\"b.bsl\",\"hash\":\"h2\"}}],"
+                + "\"next_page_offset\":\"2\"}}")
+            .answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"c.bsl\","
+                + "\"hash\":\"h3\"}}],\"next_page_offset\":null}}");
+        final List<JsonObject> payloads = new QdrantClient("http://store.test:6333", 1000, store)
+            .scrollPayloads(COLLECTION, List.of("path", "hash"));
+
+        assertEquals(3, payloads.size());
+        assertEquals("c.bsl", payloads.get(2).get("path").getAsString());
+        // the second page must continue where the first one stopped
+        assertTrue(store.callAt(1).getJsonBody().contains("\"offset\":\"2\""),
+            store.callAt(1).getJsonBody());
+    }
+
+    @Test
     void scrollPagesOverAllPointsCarryingPayloadOnly() throws QdrantException {
         final ScriptedHttpTransport store = new ScriptedHttpTransport()
             .answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"a.bsl\","
-                + "\"hash\":\"h1\"}}],\"next_page\":\"10\"}}")
+                + "\"hash\":\"h1\"}}],\"next_page_offset\":\"10\"}}")
             .answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"b.bsl\","
-                + "\"hash\":\"h2\"}}],\"next_page\":null}}");
+                + "\"hash\":\"h2\"}}],\"next_page_offset\":null}}");
         final List<JsonObject> payloads = new QdrantClient("http://store.test:6333", 1000, store)
             .scrollPayloads(COLLECTION, List.of("path", "hash"));
 

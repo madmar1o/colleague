@@ -97,7 +97,7 @@ class SemanticIndexTest {
         // then the fingerprint walk over the stored points
         probeFourDimensions(embed);
         storeCollectionOk(store, 4);
-        store.answer(200, "{\"result\":{\"points\":[],\"next_page\":null}}");
+        store.answer(200, "{\"result\":{\"points\":[],\"next_page_offset\":null}}");
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());
         assertTrue(readyFlag(index));
@@ -126,7 +126,7 @@ class SemanticIndexTest {
         // retrying after a failure is allowed and re-probes the endpoints
         embed.answer(200, "{\"embeddings\":[[0.1,0.2,0.3,0.4]]}");
         storeCollectionOk(store, 4);
-        store.answer(200, "{\"result\":{\"points\":[],\"next_page\":null}}");
+        store.answer(200, "{\"result\":{\"points\":[],\"next_page_offset\":null}}");
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());
         // the hybrid layer then sees an index
@@ -193,7 +193,7 @@ class SemanticIndexTest {
             SemanticIndex.forTesting("colleague_cycle", store, embed);
         probeFourDimensions(embed);
         storeCollectionOk(store, 4);
-        store.answer(200, "{\"result\":{\"points\":[],\"next_page\":null}}");
+        store.answer(200, "{\"result\":{\"points\":[],\"next_page_offset\":null}}");
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());
 
@@ -244,7 +244,7 @@ class SemanticIndexTest {
         store.answer(200, "{\"result\":{\"config\":{\"params\":{\"vectors\":"
             + "{\"size\":4,\"distance\":\"Cosine\"}}}}}");
         store.answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"src/x.bsl\","
-            + "\"hash\":\"" + sha256Hex(Files.readAllBytes(file)) + "\"}}],\"next_page\":null}}");
+            + "\"hash\":\"" + sha256Hex(Files.readAllBytes(file)) + "\"}}],\"next_page_offset\":null}}");
         probeFourDimensions(embed);
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());
@@ -283,7 +283,7 @@ class SemanticIndexTest {
             SemanticIndex.forTesting("colleague_badfile", store, embed);
         probeFourDimensions(embed);
         storeCollectionOk(store, 4);
-        store.answer(200, "{\"result\":{\"points\":[],\"next_page\":null}}");
+        store.answer(200, "{\"result\":{\"points\":[],\"next_page_offset\":null}}");
         index.prepare();
 
         final Path good = theDir.resolve("g.bsl");

@@ -286,7 +286,7 @@ class VectorIndexTest {
         Files.writeString(file, numberedFile(30), StandardCharsets.UTF_8);
         final String hash = sha256Hex(numberedFile(30).getBytes(StandardCharsets.UTF_8));
         storeTransport.answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"a.bsl\","
-            + "\"hash\":\"" + hash + "\"}}],\"next_page\":null}}");
+            + "\"hash\":\"" + hash + "\"}}],\"next_page_offset\":null}}");
         final VectorIndex ourIndex = index();
         ourIndex.restoreFingerprints();
         assertEquals(1, ourIndex.trackedFileCount());
