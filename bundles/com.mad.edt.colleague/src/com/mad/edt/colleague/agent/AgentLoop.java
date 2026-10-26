@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.ChatRequest;
@@ -113,7 +114,7 @@ public final class AgentLoop {
 
             ChatResult result;
             try {
-                result = provider.chat(request.build());
+                result = streamedRound(request.build());
             } catch (final LLMException ex) {
                 // a local model server can lose only its generator process and
                 // reload it on the next request: for that failure alone one
@@ -122,7 +123,7 @@ public final class AgentLoop {
                     throw ex;
                 }
                 steps++;
-                result = provider.chat(request.build());
+                result = streamedRound(request.build());
             }
             if(!result.wantsToolCall()) {
                 return new AgentAnswer(finalText(result), steps, executed, true);
@@ -137,6 +138,25 @@ public final class AgentLoop {
         }
         return new AgentAnswer("Step budget exhausted after " + steps + " round-trips",
             steps, executed, false);
+    }
+
+    /**
+     * One model round-trip over the streaming transport. A reasoning-heavy
+     * turn of a local model can spend minutes generating its answer, longer
+     * than any fixed budget for a whole buffered response: a streamed call
+     * keeps the connection budget bound to the first frame only, so the
+     * timeout fires on a dead endpoint instead of on a slow but living one.
+     * Chunk consumers stay empty here: intermediate text of an agent turn is
+     * not shown while tool calls are still being decided.
+     *
+     * @param theRequest the round-trip request
+     * @return the round-trip result
+     * @throws LLMException when the endpoint is unreachable, rejects or
+     *             drops the call
+     */
+    private ChatResult streamedRound(final ChatRequest theRequest) throws LLMException {
+        final Consumer<String> ignored = chunk -> { };
+        return provider.chatStream(theRequest, ignored, ignored);
     }
 
     private String execute(final ToolCall theCall) {
