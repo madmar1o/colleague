@@ -71,6 +71,7 @@ public final class SemanticIndex {
     private final VectorIndex index;
     private volatile boolean ready;
     private volatile String lastError = "";
+    private volatile String fingerprintNote = "";
 
     private SemanticIndex(final VectorIndex theIndex) {
         index = theIndex;
@@ -153,7 +154,9 @@ public final class SemanticIndex {
     /**
      * Brings the collection in line with the embedding model once; failures
      * are remembered in {@link #getStatus()} and retried on the next call,
-     * so a late-starting endpoint recovers without a restart.
+     * so a late-starting endpoint recovers without a restart. The stored
+     * chunk fingerprints are adopted afterwards, so the first pass of a new
+     * session skips the files an earlier session already embedded.
      */
     public void prepare() {
         if(ready) {
@@ -161,10 +164,29 @@ public final class SemanticIndex {
         }
         try {
             index.ensureReady();
+            restoreStoredFingerprints();
             ready = true;
             lastError = "";
         } catch (final IndexFailure ex) {
             lastError = ex.getMessage();
+        }
+    }
+
+    /**
+     * Adopts the fingerprints carried in the stored chunk payloads. A broken
+     * walk only costs the shortcut: the layer still becomes ready, the note
+     * stays visible in {@link #getStatus()} and the next pass re-embeds the
+     * affected files the slow but sure way.
+     */
+    private void restoreStoredFingerprints() {
+        fingerprintNote = "";
+        try {
+            final int adopted = index.restoreFingerprints();
+            System.err.println("[colleague] semantic fingerprints adopted for "
+                + adopted + " stored files");
+        } catch (final IndexFailure ex) {
+            fingerprintNote = "fingerprints not restored: " + ex.getMessage();
+            System.err.println("[colleague] semantic " + fingerprintNote);
         }
     }
 
@@ -235,7 +257,7 @@ public final class SemanticIndex {
             final UpdateReport report = refreshFrom(theSources);
             return "collection " + getCollection() + ": re-embedded "
                 + report.reembedded() + ", skipped " + report.skipped()
-                + ", purged " + report.purged();
+                + ", purged " + report.purged() + ", failed " + report.failed();
         } catch (final SemanticFailure ex) {
             return "refresh failed: " + ex.getMessage();
         }
@@ -246,8 +268,9 @@ public final class SemanticIndex {
      */
     public String getStatus() {
         if(ready) {
+            final String note = fingerprintNote.isEmpty() ? "" : ", " + fingerprintNote;
             return "ready, collection " + index.getCollection() + ", tracked files "
-                + index.trackedFileCount();
+                + index.trackedFileCount() + note;
         }
         return "not ready: " + lastError;
     }

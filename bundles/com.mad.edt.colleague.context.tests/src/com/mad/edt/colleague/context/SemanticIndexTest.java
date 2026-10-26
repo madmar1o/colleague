@@ -93,18 +93,20 @@ class SemanticIndexTest {
         assertEquals(0, embed.getCallCount());
         assertEquals(0, store.getCallCount());
 
-        // prepare: dimension probe first, then the two collection checks
+        // prepare: dimension probe first, then the two collection checks,
+        // then the fingerprint walk over the stored points
         probeFourDimensions(embed);
         storeCollectionOk(store, 4);
+        store.answer(200, "{\"result\":{\"points\":[],\"next_page\":null}}");
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());
         assertTrue(readyFlag(index));
         assertEquals(1, embed.getCallCount());
-        assertEquals(2, store.getCallCount());
+        assertEquals(3, store.getCallCount());
         // a second pass on a ready index needs no traffic at all
         index.prepare();
         assertEquals(1, embed.getCallCount());
-        assertEquals(2, store.getCallCount());
+        assertEquals(3, store.getCallCount());
         assertNotNull(index.readyIndex());
     }
 
@@ -124,6 +126,7 @@ class SemanticIndexTest {
         // retrying after a failure is allowed and re-probes the endpoints
         embed.answer(200, "{\"embeddings\":[[0.1,0.2,0.3,0.4]]}");
         storeCollectionOk(store, 4);
+        store.answer(200, "{\"result\":{\"points\":[],\"next_page\":null}}");
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());
         // the hybrid layer then sees an index
@@ -190,6 +193,7 @@ class SemanticIndexTest {
             SemanticIndex.forTesting("colleague_cycle", store, embed);
         probeFourDimensions(embed);
         storeCollectionOk(store, 4);
+        store.answer(200, "{\"result\":{\"points\":[],\"next_page\":null}}");
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());
 
@@ -224,5 +228,96 @@ class SemanticIndexTest {
         assertTrue(merged.contains("chunk from the store"), merged);
         assertTrue(merged.contains("similarity 0.66"), merged);
         assertEquals("", ((HybridContextSource) hybrid).getLastSemanticError());
+    }
+
+    @Test
+    void prepareAdoptsFingerprintsSoARebootedSessionSkipsStoredFiles(@TempDir final Path theDir)
+        throws Exception {
+        final ScriptedHttpTransport store = new ScriptedHttpTransport();
+        final ScriptedHttpTransport embed = new ScriptedHttpTransport();
+        final SemanticIndex index =
+            SemanticIndex.forTesting("colleague_reboot", store, embed);
+        final Path file = theDir.resolve("x.bsl");
+        Files.writeString(file, "line1\nline2\nline3");
+        // the store payload of yesterday's session carries the file hash
+        store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
+        store.answer(200, "{\"result\":{\"config\":{\"params\":{\"vectors\":"
+            + "{\"size\":4,\"distance\":\"Cosine\"}}}}}");
+        store.answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"src/x.bsl\","
+            + "\"hash\":\"" + sha256Hex(Files.readAllBytes(file)) + "\"}}],\"next_page\":null}}");
+        probeFourDimensions(embed);
+        index.prepare();
+        assertTrue(index.isReady(), index.getStatus());
+
+        final SemanticIndex.FileSource sources = acceptor -> acceptor.accept(file, "src/x.bsl");
+        final UpdateReport report = index.refreshFrom(sources);
+        assertEquals(0, report.reembedded());
+        assertEquals(1, report.skipped());
+        // the whole cycle after the reboot stayed silent: prepare traffic only
+        assertEquals(1, embed.getCallCount());
+        assertEquals(3, store.getCallCount());
+    }
+
+    @Test
+    void fingerprintRestoreFailureKeepsTheLayerReady() {
+        final ScriptedHttpTransport store = new ScriptedHttpTransport();
+        final ScriptedHttpTransport embed = new ScriptedHttpTransport();
+        final SemanticIndex index = SemanticIndex.forTesting("ws", store, embed);
+        probeFourDimensions(embed);
+        storeCollectionOk(store, 4);
+        // the walk over stored points trips over a refused request
+        store.answer(500, "{\"status\":{\"error\":\"scroll failed\"}}");
+        index.prepare();
+        // a broken restore only costs the shortcut, never the layer itself
+        assertTrue(index.isReady(), index.getStatus());
+        assertTrue(index.getStatus().contains("fingerprints not restored"),
+            index.getStatus());
+    }
+
+    @Test
+    void oneBadFileLeavesTheRefreshPassSuccessful(@TempDir final Path theDir)
+        throws Exception {
+        final ScriptedHttpTransport store = new ScriptedHttpTransport();
+        final ScriptedHttpTransport embed = new ScriptedHttpTransport();
+        final SemanticIndex index =
+            SemanticIndex.forTesting("colleague_badfile", store, embed);
+        probeFourDimensions(embed);
+        storeCollectionOk(store, 4);
+        store.answer(200, "{\"result\":{\"points\":[],\"next_page\":null}}");
+        index.prepare();
+
+        final Path good = theDir.resolve("g.bsl");
+        final Path bad = theDir.resolve("b.bsl");
+        Files.writeString(good, "line1\nline2\nline3");
+        Files.writeString(bad, "line1\nline2\nline3");
+        final SemanticIndex.FileSource sources = acceptor -> {
+            acceptor.accept(good, "g.bsl");
+            acceptor.accept(bad, "b.bsl");
+        };
+        // good: clear, embed, write; bad: clear, then the embed refuses
+        store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
+        embed.answer(200, "{\"embeddings\":[[0.5,0.5,0.5,0.5]]}");
+        store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
+        store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
+        embed.answer(500, "{\"error\":\"runtime hiccup\"}");
+        final UpdateReport report = index.refreshFrom(sources);
+        assertEquals(1, report.reembedded());
+        assertEquals(1, report.failed());
+        // the retry pass: the tracked good file is silent, the bad one trips
+        // once more, and the log line tells about the failure
+        store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
+        embed.answer(500, "{\"error\":\"runtime hiccup\"}");
+        final String logLine = index.refreshAndLog(sources);
+        assertTrue(logLine.contains("failed 1"), logLine);
+    }
+
+    private static String sha256Hex(final byte[] theContent) throws Exception {
+        final java.security.MessageDigest digest =
+            java.security.MessageDigest.getInstance("SHA-256");
+        final StringBuilder hex = new StringBuilder();
+        for(final byte part : digest.digest(theContent)) {
+            hex.append(String.format("%02x", Integer.valueOf(part & 0xff)));
+        }
+        return hex.toString();
     }
 }

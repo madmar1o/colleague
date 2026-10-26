@@ -1,6 +1,8 @@
 package com.mad.edt.colleague.context.vector;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -60,6 +62,21 @@ class VectorIndexTest {
 
     private static SourceFile sourceOf(final Path theFile, final String theDisplayPath) {
         return new SourceFile(theFile, theDisplayPath);
+    }
+
+    /** same digest the index itself uses, so a stored payload hash is reusable */
+    private static String sha256Hex(final byte[] theContent) {
+        try {
+            final java.security.MessageDigest digest =
+                java.security.MessageDigest.getInstance("SHA-256");
+            final StringBuilder hex = new StringBuilder();
+            for(final byte part : digest.digest(theContent)) {
+                hex.append(String.format("%02x", Integer.valueOf(part & 0xff)));
+            }
+            return hex.toString();
+        } catch (final java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException(ex);
+        }
     }
 
     @Test
@@ -185,20 +202,104 @@ class VectorIndexTest {
     }
 
     @Test
-    void mismatchedEmbeddingVectorCountFailsBeforeTheWrite(@TempDir final Path theDir)
-        throws IOException {
+    void mismatchedEmbeddingVectorCountSkipsTheFileAndKeepsItUntracked(@TempDir final Path theDir)
+        throws IOException, IndexFailure {
         final Path file = theDir.resolve("a.bsl");
         Files.writeString(file, numberedFile(60), StandardCharsets.UTF_8);
         final VectorIndex ourIndex = index();
         storeOk();
         // the runtime answers one vector for the two expected chunks
         embedTransport.answer(200, "{\"embeddings\":[[1.0,2.0]]}");
-        final IndexFailure failure = assertThrows(IndexFailure.class,
-            () -> ourIndex.update(List.of(sourceOf(file, "a.bsl"))));
-        assertTrue(failure.getMessage().contains("1 vectors for 2"), failure.getMessage());
+        final UpdateReport report = ourIndex.update(List.of(sourceOf(file, "a.bsl")));
+        assertEquals(0, report.reembedded());
+        assertEquals(1, report.failed());
         // no write happened, the file stays untracked so a retry re-embeds it
         assertEquals(1, storeTransport.getCallCount());
         assertEquals(0, ourIndex.trackedFileCount());
+    }
+
+    @Test
+    void oneFailingFileDoesNotSinkTheWholePass(@TempDir final Path theDir)
+        throws IOException, IndexFailure {
+        // 57 000-file workspaces hit transient runtime hiccups: one broken
+        // file must cost its own pass only, the neighbors still get indexed
+        final Path good1 = theDir.resolve("g1.bsl");
+        final Path bad = theDir.resolve("bad.bsl");
+        final Path good2 = theDir.resolve("g2.bsl");
+        Files.writeString(good1, numberedFile(10), StandardCharsets.UTF_8);
+        Files.writeString(bad, numberedFile(10), StandardCharsets.UTF_8);
+        Files.writeString(good2, numberedFile(10), StandardCharsets.UTF_8);
+        final VectorIndex ourIndex = index();
+        // g1: clear, embed, write
+        storeOk();
+        embedVectors(1);
+        storeOk();
+        // bad: its stale points are cleared, then the embed refuses
+        storeOk();
+        embedTransport.answer(500, "{\"error\":\"runtime hiccup\"}");
+        // g2: clear, embed, write
+        storeOk();
+        embedVectors(1);
+        storeOk();
+        final UpdateReport report = ourIndex.update(
+            List.of(sourceOf(good1, "g1.bsl"), sourceOf(bad, "bad.bsl"),
+                sourceOf(good2, "g2.bsl")));
+        assertEquals(2, report.reembedded());
+        assertEquals(0, report.skipped());
+        assertEquals(1, report.failed());
+        // the two neighbors are tracked, the failed file stays retryable
+        assertEquals(2, ourIndex.trackedFileCount());
+        assertNotNull(ourIndex.fingerprintOf("g1.bsl"));
+        assertNull(ourIndex.fingerprintOf("bad.bsl"));
+    }
+
+    @Test
+    void repeatedFileFailuresOpenTheCircuitAndAbortThePass(@TempDir final Path theDir)
+        throws IOException {
+        // when the store itself is down, burning one request per remaining
+        // file is rude: after a few consecutive failures the pass gives up
+        final List<SourceFile> files = new java.util.ArrayList<>();
+        for(int n = 0; n < 12; n++) {
+            final Path file = theDir.resolve("f" + n + ".bsl");
+            Files.writeString(file, numberedFile(10), StandardCharsets.UTF_8);
+            files.add(sourceOf(file, file.getFileName().toString()));
+        }
+        for(int n = 0; n < VectorIndex.MAX_CONSECUTIVE_FILE_FAILURES; n++) {
+            // every file trips over the same refused store request
+            storeTransport.answer(500, "{\"status\":{\"error\":\"store down\"}}");
+        }
+        final IndexFailure failure = assertThrows(IndexFailure.class,
+            () -> index().update(files));
+        assertTrue(failure.getMessage().contains("consecutive"), failure.getMessage());
+        // each failing file cost exactly one store request, then the walk stopped
+        assertEquals(VectorIndex.MAX_CONSECUTIVE_FILE_FAILURES, storeTransport.getCallCount());
+        assertEquals(0, embedTransport.getCallCount());
+    }
+
+    @Test
+    void restoredFingerprintsMakeARebootedSessionSkipStoredFiles(@TempDir final Path theDir)
+        throws IOException, IndexFailure {
+        // the store already remembers every chunk of a file including its
+        // content hash: a fresh session adopts those fingerprints instead of
+        // re-embedding the whole workspace from scratch
+        final Path file = theDir.resolve("a.bsl");
+        Files.writeString(file, numberedFile(30), StandardCharsets.UTF_8);
+        final String hash = sha256Hex(numberedFile(30).getBytes(StandardCharsets.UTF_8));
+        storeTransport.answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"a.bsl\","
+            + "\"hash\":\"" + hash + "\"}}],\"next_page\":null}}");
+        final VectorIndex ourIndex = index();
+        ourIndex.restoreFingerprints();
+        assertEquals(1, ourIndex.trackedFileCount());
+
+        final int storeCalls = storeTransport.getCallCount();
+        final UpdateReport report = ourIndex.update(
+            List.of(sourceOf(file, "a.bsl")));
+        assertEquals(0, report.reembedded());
+        assertEquals(1, report.skipped());
+        assertEquals(0, report.failed());
+        // skipping is decided without any further store or embed traffic
+        assertEquals(storeCalls, storeTransport.getCallCount());
+        assertEquals(0, embedTransport.getCallCount());
     }
 
     @Test

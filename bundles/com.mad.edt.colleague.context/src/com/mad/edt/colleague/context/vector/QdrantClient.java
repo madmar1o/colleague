@@ -25,6 +25,9 @@ public final class QdrantClient {
 
     private static final int MAX_ERROR_BODY_CHARS = 300;
 
+    /** Points per page while walking the stored point set. */
+    private static final int SCROLL_PAGE_LIMIT = 256;
+
     private final String baseUrl;
     private final HttpTransport transport;
     private final int readTimeoutMs;
@@ -302,13 +305,61 @@ public final class QdrantClient {
     }
 
     /**
+     * Walks every stored point of the collection in payload-only scroll
+     * pages and collects the named payload fields of each point. The walk
+     * hands the previous page offset to the next request and stops as soon
+     * as the store stops handing offsets over.
+     *
+     * @param theCollection collection name
+     * @param theFields payload fields to carry back
+     * @return one payload object per stored point
+     * @throws QdrantException when the store refuses a page
+     */
+    public List<JsonObject> scrollPayloads(final String theCollection,
+        final List<String> theFields) throws QdrantException {
+        final List<JsonObject> payloads = new ArrayList<>();
+        String offset = null;
+        while(true) {
+            final JsonObject body = new JsonObject();
+            body.addProperty("limit", Integer.valueOf(SCROLL_PAGE_LIMIT));
+            body.addProperty("with_vector", Boolean.FALSE);
+            final JsonArray fields = new JsonArray();
+            for(final String field : theFields) {
+                fields.add(field);
+            }
+            body.add("with_payload", fields);
+            if(offset != null) {
+                body.addProperty("offset", offset);
+            }
+            final JsonObject result =
+                call("POST", "/collections/" + theCollection + "/points/scroll", body);
+            final JsonObject page =
+                result == null ? null : result.getAsJsonObject("result");
+            if(page == null || !page.has("points")) {
+                break;
+            }
+            int pagePoints = 0;
+            for(final com.google.gson.JsonElement element : page.getAsJsonArray("points")) {
+                final JsonObject payload = element.getAsJsonObject().getAsJsonObject("payload");
+                payloads.add(payload == null ? new JsonObject() : payload);
+                pagePoints++;
+            }
+            final com.google.gson.JsonElement next = page.get("next_page");
+            if(next == null || next.isJsonNull() || pagePoints == 0) {
+                break;
+            }
+            offset = next.getAsString();
+        }
+        return payloads;
+    }
+
+    /**
      * Number of stored points, for progress reporting and health checks.
      *
      * @param theCollection collection name
      * @return point count, {@code -1} when unknown
      */
-    public long count(final String theCollection) {
-        try {
+    public long count(final String theCollection) {        try {
             final JsonObject body = new JsonObject();
             body.addProperty("exact", Boolean.TRUE);
             final JsonObject result =

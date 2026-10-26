@@ -22,8 +22,12 @@ import com.mad.edt.colleague.context.vector.QdrantClient.QdrantException;
  * overlapping windows, embedded and stored under deterministic point ids, so
  * the same chunk always overwrites itself and no bookkeeping outside the
  * server is needed. Updates are incremental per file - the content hash of
- * every indexed file is remembered, and only files whose hash or size moved
- * are re-embedded after their stale points were deleted. Similarity search
+ * every indexed file is remembered, and only files whose hash moved are
+ * re-embedded after their stale points were deleted. Trouble with one file
+ * costs that file only: it stays untracked so a later pass retries it, while
+ * a run of consecutive failures gives the whole pass up early. Fingerprints
+ * can also be adopted back from the payload the store already carries, so a
+ * rebooted session skips files an earlier session embedded. Similarity search
  * renders chunks as model-facing blocks with the file path and line range.
  * Call from a background job; the state map is only touched there. The class
  * is subclassable so tests can stand in for a ready index without servers.
@@ -38,6 +42,16 @@ public class VectorIndex {
 
     /** Payload field naming the workspace-relative file of a chunk. */
     public static final String PATH_FIELD = "path";
+
+    /** Payload field carrying the content hash of the file owning a chunk. */
+    public static final String HASH_FIELD = "hash";
+
+    /**
+     * Consecutive per-file failures after which a pass gives up: when the
+     * store or the runtime is down, every remaining file would trip over the
+     * same refusal and the pass would only burn requests doing nothing.
+     */
+    public static final int MAX_CONSECUTIVE_FILE_FAILURES = 10;
 
     /**
      * One source file offered to the index.
@@ -148,11 +162,9 @@ public class VectorIndex {
     private static final class FileState {
 
         private final String ourHash;
-        private final long ourSize;
 
-        FileState(final String theHash, final long theSize) {
+        FileState(final String theHash) {
             ourHash = theHash;
-            ourSize = theSize;
         }
     }
 
@@ -221,33 +233,53 @@ public class VectorIndex {
      * skipped without a single store call, changed files have their stale
      * points deleted first and only then the fresh windows are embedded and
      * written, and files that vanished from the list are purged the same way.
+     * Trouble with one file costs that file alone: it counts as failed, stays
+     * untracked so a later pass retries it, and its neighbors are indexed as
+     * usual; only a run of consecutive failures ends the whole pass.
      *
      * @param theFiles current source files of the workspace
-     * @return counts of re-embedded, skipped and purged files
-     * @throws IndexFailure when reading, embedding or storing fails; files
+     * @return counts of re-embedded, skipped, purged and failed files
+     * @throws IndexFailure when consecutive per-file failures pile up; files
      *             already updated keep their new state
      */
     public UpdateReport update(final List<SourceFile> theFiles) throws IndexFailure {
         int refreshed = 0;
         int skipped = 0;
+        int failed = 0;
+        int consecutiveFailures = 0;
         final List<String> present = new ArrayList<>(theFiles.size());
         for(final SourceFile file : theFiles) {
             present.add(file.displayPath());
-            final byte[] content;
             try {
-                content = Files.readAllBytes(file.location());
+                final byte[] content = Files.readAllBytes(file.location());
+                final String hash = sha256(content);
+                final FileState known = states.get(file.displayPath());
+                if(known != null && known.ourHash.equals(hash)) {
+                    skipped++;
+                } else {
+                    reembed(file, content, hash);
+                    refreshed++;
+                }
+                consecutiveFailures = 0;
             } catch (final IOException ex) {
-                throw new IndexFailure("cannot read " + file.displayPath(), ex);
+                failed++;
+                consecutiveFailures++;
+                System.err.println("[colleague] semantic pass cannot read "
+                    + file.displayPath() + ": " + ex.getMessage());
+                if(consecutiveFailures >= MAX_CONSECUTIVE_FILE_FAILURES) {
+                    throw new IndexFailure("giving up the pass after " + consecutiveFailures
+                        + " consecutive file failures, last: cannot read " + file.displayPath(),
+                        ex);
+                }
+            } catch (final IndexFailure ex) {
+                failed++;
+                consecutiveFailures++;
+                System.err.println("[colleague] semantic pass " + ex.getMessage());
+                if(consecutiveFailures >= MAX_CONSECUTIVE_FILE_FAILURES) {
+                    throw new IndexFailure("giving up the pass after " + consecutiveFailures
+                        + " consecutive file failures, last: " + ex.getMessage(), ex);
+                }
             }
-            final String hash = sha256(content);
-            final FileState known = states.get(file.displayPath());
-            if(known != null && known.ourHash.equals(hash)
-                && known.ourSize == content.length) {
-                skipped++;
-                continue;
-            }
-            reembed(file, content, hash);
-            refreshed++;
         }
         int purged = 0;
         for(final String path : new ArrayList<>(states.keySet())) {
@@ -257,7 +289,7 @@ public class VectorIndex {
                 purged++;
             }
         }
-        return new UpdateReport(refreshed, skipped, purged);
+        return new UpdateReport(refreshed, skipped, purged, failed);
     }
 
     /**
@@ -266,8 +298,40 @@ public class VectorIndex {
      * @param reembedded files whose chunks were rewritten
      * @param skipped files whose fingerprint did not move
      * @param purged files that vanished and had their points deleted
+     * @param failed files whose own update tripped and stayed untracked so a
+     *            later pass retries them
      */
-    public record UpdateReport(int reembedded, int skipped, int purged) {
+    public record UpdateReport(int reembedded, int skipped, int purged, int failed) {
+    }
+
+    /**
+     * Adopts the fingerprints the store already carries in the payload of
+     * every stored chunk, so a freshly started session skips the files an
+     * earlier one embedded instead of re-embedding the whole workspace.
+     *
+     * @return number of files whose fingerprint was adopted
+     * @throws IndexFailure when the store refuses the walk
+     */
+    public int restoreFingerprints() throws IndexFailure {
+        final List<JsonObject> payloads;
+        try {
+            payloads = store.scrollPayloads(collection, List.of(PATH_FIELD, HASH_FIELD));
+        } catch (final QdrantException ex) {
+            throw new IndexFailure("cannot walk stored chunks: " + ex.getMessage(), ex);
+        }
+        int adopted = 0;
+        for(final JsonObject payload : payloads) {
+            final String path = text(payload, PATH_FIELD);
+            final String hash = text(payload, HASH_FIELD);
+            if(path.isEmpty() || hash.isEmpty()) {
+                continue;
+            }
+            if(!states.containsKey(path)) {
+                adopted++;
+            }
+            states.put(path, new FileState(hash));
+        }
+        return adopted;
     }
 
     /**
@@ -288,7 +352,7 @@ public class VectorIndex {
             chunker.split(new String(theContent, StandardCharsets.UTF_8));
         if(chunks.isEmpty()) {
             // the file went blank: deleting its points was all it needs
-            states.put(theFile.displayPath(), new FileState(theHash, theContent.length));
+            states.put(theFile.displayPath(), new FileState(theHash));
             return;
         }
         final List<String> texts = new ArrayList<>(chunks.size());
@@ -316,7 +380,7 @@ public class VectorIndex {
             payload.addProperty("endLine", Integer.valueOf(chunk.getEndLine()));
             payload.addProperty("chunk", Integer.valueOf(index));
             payload.addProperty("modified", Long.valueOf(modified));
-            payload.addProperty("hash", theHash);
+            payload.addProperty(HASH_FIELD, theHash);
             payload.addProperty("text", chunk.getText());
             points.add(new Point(QdrantClient.pointId(theFile.displayPath(), index),
                 vectors.get(index), payload));
@@ -327,7 +391,7 @@ public class VectorIndex {
             throw new IndexFailure("cannot store chunks of " + theFile.displayPath() + ": "
                 + ex.getMessage(), ex);
         }
-        states.put(theFile.displayPath(), new FileState(theHash, theContent.length));
+        states.put(theFile.displayPath(), new FileState(theHash));
     }
 
     /**

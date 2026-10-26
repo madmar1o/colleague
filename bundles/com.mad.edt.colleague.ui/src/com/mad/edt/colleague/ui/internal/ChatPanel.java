@@ -1012,6 +1012,20 @@ public final class ChatPanel {
         }
     }
 
+    /**
+     * @return {@code true} while any live panel is busy answering a question,
+     *         so background jobs can hold back and not compete with the
+     *         conversation for the model runtime
+     */
+    public static boolean anyBusy() {
+        for(final ChatPanel panel : OUR_PANELS) {
+            if(panel.ourBusy) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void updateModeIndicator() {
         if(ourBridge != null && ourBridge.isReady()) {
             final JsonObject payload = new JsonObject();
