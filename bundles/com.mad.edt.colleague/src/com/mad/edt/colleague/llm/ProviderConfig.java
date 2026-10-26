@@ -16,6 +16,21 @@ public final class ProviderConfig {
      */
     public static final String DEFAULT_LOCAL_KEEP_ALIVE = "30m";
 
+    /**
+     * Token window a local runtime is asked to keep ready by default: the
+     * runtime's own default is small enough to cut a normal question with
+     * attached workspace context away without any warning.
+     */
+    public static final int DEFAULT_LOCAL_CONTEXT_TOKENS = 8_192;
+
+    /**
+     * Largest token window the endpoint is ever asked for by default: a wide
+     * window is paid with model memory, so a prompt beyond this limit is
+     * deliberately left to the runtime's own trimming instead of inflating
+     * the cache without bound.
+     */
+    public static final int MAX_LOCAL_CONTEXT_TOKENS = 16_384;
+
     private final String id;
     private final LLMProviderType type;
     private final String baseUrl;
@@ -24,6 +39,7 @@ public final class ProviderConfig {
     private final int connectTimeoutMs;
     private final int readTimeoutMs;
     private final String keepAlive;
+    private final int contextWindowTokens;
 
     private ProviderConfig(final Builder theBuilder) {
         if(theBuilder.id == null || theBuilder.id.isEmpty()) {
@@ -40,6 +56,7 @@ public final class ProviderConfig {
         connectTimeoutMs = theBuilder.connectTimeoutMs;
         readTimeoutMs = theBuilder.readTimeoutMs;
         keepAlive = theBuilder.keepAlive;
+        contextWindowTokens = theBuilder.contextWindowTokens;
     }
 
     /**
@@ -98,6 +115,26 @@ public final class ProviderConfig {
      */
     public String getKeepAlive() {
         return keepAlive;
+    }
+
+    /**
+     * @return token window the local runtime is asked to keep ready for one
+     *         call, {@code 0} or less when the option is never sent
+     *         (gateway-style endpoints or an explicit opt-out)
+     */
+    public int getContextWindowTokens() {
+        return contextWindowTokens;
+    }
+
+    /**
+     * The bound a request-sized widening of the window may never pass: the
+     * configured window itself when it is already roomier than the default
+     * ceiling.
+     *
+     * @return ceiling in tokens
+     */
+    public int getContextWindowCeiling() {
+        return Math.max(MAX_LOCAL_CONTEXT_TOKENS, contextWindowTokens);
     }
 
     /**
@@ -168,6 +205,7 @@ public final class ProviderConfig {
         private int connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS;
         private int readTimeoutMs = DEFAULT_READ_TIMEOUT_MS;
         private String keepAlive;
+        private int contextWindowTokens;
 
         private Builder(final String theId, final LLMProviderType theType) {
             id = theId;
@@ -176,6 +214,10 @@ public final class ProviderConfig {
             // gateway-style endpoints start warm and ignore the claim
             keepAlive = theType == LLMProviderType.OLLAMA
                 ? DEFAULT_LOCAL_KEEP_ALIVE : null;
+            // only a local runtime silently trims the prompt to its own tiny
+            // default window; gateways take the whole message list as sent
+            contextWindowTokens = theType == LLMProviderType.OLLAMA
+                ? DEFAULT_LOCAL_CONTEXT_TOKENS : 0;
         }
 
         /**
@@ -232,6 +274,18 @@ public final class ProviderConfig {
          */
         public Builder keepAlive(final String theKeepAlive) {
             keepAlive = theKeepAlive;
+            return this;
+        }
+
+        /**
+         * Overrides the token window a local runtime is asked to keep ready
+         * for one call; {@code 0} or less never sends the option.
+         *
+         * @param theContextWindowTokens window in tokens
+         * @return this builder
+         */
+        public Builder contextWindowTokens(final int theContextWindowTokens) {
+            contextWindowTokens = theContextWindowTokens;
             return this;
         }
 
