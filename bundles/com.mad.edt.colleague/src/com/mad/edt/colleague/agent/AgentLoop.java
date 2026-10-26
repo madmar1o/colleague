@@ -111,7 +111,19 @@ public final class AgentLoop {
             request.maxTokens(ROUND_TRIP_OUTPUT_TOKENS);
             request.cancellation(cancellation);
 
-            final ChatResult result = provider.chat(request.build());
+            ChatResult result;
+            try {
+                result = provider.chat(request.build());
+            } catch (final LLMException ex) {
+                // a local model server can lose only its generator process and
+                // reload it on the next request: for that failure alone one
+                // identical repair call is worth a full round-trip of the budget
+                if(!ex.isTransient() || cancellation.isCancelled() || steps >= maxSteps) {
+                    throw ex;
+                }
+                steps++;
+                result = provider.chat(request.build());
+            }
             if(!result.wantsToolCall()) {
                 return new AgentAnswer(finalText(result), steps, executed, true);
             }

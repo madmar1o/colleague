@@ -42,4 +42,18 @@ public class LLMException extends Exception {
     public int getStatusCode() {
         return statusCode;
     }
+
+    /**
+     * Whether re-sending the very same request may still succeed. A server-side
+     * failure ({@code 5xx}) or a call the network never delivered is repairable:
+     * a local model server routinely keeps its serving port alive while only
+     * its model process dies, and loads a fresh one on the next request. A
+     * rejected request ({@code 4xx}) or a bad response body is permanent for
+     * this payload and re-sending it only burns the turn.
+     *
+     * @return {@code true} when one repair attempt is worth its cost
+     */
+    public boolean isTransient() {
+        return statusCode >= 500 || getCause() instanceof com.mad.edt.colleague.http.TransportFailure;
+    }
 }
