@@ -142,7 +142,6 @@ public class ColleagueView extends ViewPart {
         ourContactsArea = new Composite(ourMobileStack, SWT.NONE);
         ourContactsArea.setLayout(new FillLayout());
         ourContacts = new ContactsPanel(ourContactsArea, this::openContact, this::onContactsLoaded);
-        ourContacts.setOnAddProvider(this::addProviderWizard);
 
         ourTabsArea = new Composite(ourMobileStack, SWT.NONE);
         ourTabsArea.setLayout(new FillLayout());
@@ -327,16 +326,6 @@ public class ColleagueView extends ViewPart {
         ourPendingContext = null;
         if(stagedContext != null && !stagedContext.isEmpty()) {
             panel.attachContext(stagedContext);
-        }
-    }
-
-    private void addProviderWizard() {
-        final com.mad.edt.colleague.ui.internal.AddProviderDialog dialog =
-            new com.mad.edt.colleague.ui.internal.AddProviderDialog(getSite().getShell());
-        if(dialog.open() == org.eclipse.jface.window.Window.OK && dialog.getResult() != null) {
-            com.mad.edt.colleague.llm.LLMSettings.register(dialog.getResult());
-            com.mad.edt.colleague.llm.ProviderStore.saveFromSettings();
-            ourContacts.reload();
         }
     }
 

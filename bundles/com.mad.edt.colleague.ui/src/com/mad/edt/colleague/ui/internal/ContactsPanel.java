@@ -23,7 +23,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mad.edt.colleague.llm.ILLMProvider;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
-import com.mad.edt.colleague.llm.LLMProviderType;
 import com.mad.edt.colleague.llm.LLMSettings;
 import com.mad.edt.colleague.llm.ProviderConfig;
 import com.mad.edt.colleague.llm.ProviderStore;
@@ -31,11 +30,10 @@ import com.mad.edt.colleague.llm.ProviderStore;
 /**
  * Messenger-style contact list rendered by the bundled {@code web/contacts.html}
  * page inside an embedded browser: one card per configured provider with its
- * chat-capable models as chips; clicking a chip opens a chat tab. Provider
- * management (add, edit, remove, default provider) is a part of the same page,
- * so the whole panel including its buttons is drawn by HTML and follows the
- * light or dark theme chosen in EDT. When no browser backend is available the
- * panel falls back to a plain SWT tree plus buttons.
+ * chat-capable models as chips; clicking a chip opens a chat tab. The gear on
+ * the page header opens a popup with the read-only provider list: pick which
+ * provider new dialogs use and remove extra ones. When no browser backend is
+ * available the panel falls back to a plain SWT tree plus a refresh button.
  */
 public final class ContactsPanel {
 
@@ -81,16 +79,7 @@ public final class ContactsPanel {
     private Color ourPageBackground;
 
     private Tree ourTree;
-    private Runnable ourOnAddProvider;
     private boolean ourLoading;
-
-    /**
-     * @param theOnAddProvider invoked when the connect button is pressed in
-     *            the fallback layout; the HTML page manages providers itself
-     */
-    public void setOnAddProvider(final Runnable theOnAddProvider) {
-        ourOnAddProvider = theOnAddProvider;
-    }
 
     /**
      * @param theParent parent composite (caller provides the layout)
@@ -249,12 +238,6 @@ public final class ContactsPanel {
             case "removeProvider":
                 removeProvider(BridgeBrowser.optString(theArguments, "id"));
                 return;
-            case "testProvider":
-                testProvider(theArguments);
-                return;
-            case "saveProvider":
-                saveProvider(theArguments);
-                return;
             default:
                 return;
         }
@@ -274,81 +257,6 @@ public final class ContactsPanel {
         reload();
     }
 
-    private void testProvider(final JsonObject theArguments) {
-        final String type = BridgeBrowser.optString(theArguments, "type");
-        final String url = BridgeBrowser.optString(theArguments, "url");
-        if(url.isEmpty()) {
-            final JsonObject result = new JsonObject();
-            result.addProperty("ok", Boolean.FALSE);
-            result.addProperty("error", "не задан адрес сервиса");
-            ourBridge.push("testResult", result);
-            return;
-        }
-        Job.create("Colleague: provider test", (monitor) -> {
-            final JsonObject result = new JsonObject();
-            try {
-                final ProviderConfig config = ProviderConfig
-                    .builder("_probe", toType(type))
-                    .baseUrl(url)
-                    .apiKey(BridgeBrowser.optString(theArguments, "key"))
-                    .build();
-                final List<String> models = LLMProviderFactory.create(config).listModels()
-                    .stream()
-                    .filter(name -> !name.contains("embed") && !name.startsWith("bge"))
-                    .collect(Collectors.toList());
-                final JsonArray array = new JsonArray();
-                models.forEach(array::add);
-                result.add("models", array);
-                result.addProperty("ok", Boolean.TRUE);
-            } catch (final Exception ex) {
-                result.addProperty("ok", Boolean.FALSE);
-                result.addProperty("error", ex.getMessage() == null
-                    ? ex.getClass().getSimpleName() : ex.getMessage());
-            }
-            Display.getDefault().asyncExec(() -> {
-                if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
-                    ourBridge.push("testResult", result);
-                }
-            });
-            return Status.OK_STATUS;
-        }).schedule();
-    }
-
-    private void saveProvider(final JsonObject theArguments) {
-        final String id = BridgeBrowser.optString(theArguments, "id");
-        final String url = BridgeBrowser.optString(theArguments, "url");
-        if(id.isEmpty() || url.isEmpty()) {
-            pushSaved(false, "нужны идентификатор и адрес сервиса");
-            return;
-        }
-        if(id.contains("\u0000") || id.contains("/")) {
-            pushSaved(false, "некорректный идентификатор");
-            return;
-        }
-        String key = BridgeBrowser.optString(theArguments, "key");
-        final ProviderConfig previous = LLMSettings.getConfig(id);
-        if(key.isEmpty() && previous != null && previous.getApiKey() != null) {
-            key = previous.getApiKey();
-        }
-        final String model = BridgeBrowser.optString(theArguments, "model");
-        LLMSettings.register(ProviderConfig.builder(id, toType(BridgeBrowser.optString(theArguments, "type")))
-            .baseUrl(url)
-            .apiKey(key)
-            .defaultModel(model.isEmpty() ? null : model)
-            .build());
-        if(theArguments.has("isDefault") && theArguments.get("isDefault").getAsBoolean()) {
-            LLMSettings.setDefaultProviderId(id);
-        }
-        ProviderStore.saveFromSettings();
-        pushSaved(true, "");
-        reload();
-    }
-
-    private static LLMProviderType toType(final String thePageValue) {
-        return "openai".equals(thePageValue)
-            ? LLMProviderType.OPENAI_COMPATIBLE : LLMProviderType.OLLAMA;
-    }
-
     private void pushSaved(final boolean theOk, final String theError) {
         final JsonObject payload = new JsonObject();
         payload.addProperty("ok", Boolean.valueOf(theOk));
@@ -365,12 +273,7 @@ public final class ContactsPanel {
             }
             final JsonObject item = new JsonObject();
             item.addProperty("id", config.getId());
-            item.addProperty("type", config.getType().name());
             item.addProperty("baseUrl", config.getBaseUrl());
-            item.addProperty("hasKey", Boolean.valueOf(config.getApiKey() != null
-                && !config.getApiKey().isEmpty()));
-            item.addProperty("defaultModel", config.getDefaultModel() == null
-                ? "" : config.getDefaultModel());
             item.addProperty("default", Boolean.valueOf(
                 id.equals(LLMSettings.getDefaultProviderId())));
             providers.add(item);
@@ -429,7 +332,7 @@ public final class ContactsPanel {
         headerLayout.marginWidth = 0;
         headerLayout.marginHeight = 2;
         header.setLayout(headerLayout);
-        new Label(header, SWT.NONE).setText("Контакты");
+        new Label(header, SWT.NONE).setText("Провайдеры");
         final Button refreshButton = new Button(header, SWT.PUSH);
         refreshButton.setText("Обновить");
         refreshButton.addListener(SWT.Selection, event -> reload());
@@ -457,15 +360,6 @@ public final class ContactsPanel {
         ourTree.addTraverseListener(event -> {
             if(event.detail == SWT.TRAVERSE_RETURN) {
                 selectContact();
-            }
-        });
-
-        final Button connectButton = new Button(ourRoot, SWT.PUSH);
-        connectButton.setText("+ Подключить провайдер");
-        connectButton.setLayoutData(new GridData(SWT.FILL, SWT.BOTTOM, true, false));
-        connectButton.addListener(SWT.Selection, event -> {
-            if(ourOnAddProvider != null) {
-                ourOnAddProvider.run();
             }
         });
     }
