@@ -37,6 +37,8 @@ import com.mad.edt.colleague.agent.AgentLoop;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
 import com.mad.edt.colleague.agent.LoggingAgentObserver;
+import com.mad.edt.colleague.agent.PlanBoard;
+import com.mad.edt.colleague.agent.PlanTool;
 import com.mad.edt.colleague.chat.ContextBudget;
 import com.mad.edt.colleague.chat.EscapeSequence;
 import com.mad.edt.colleague.chat.PageCommandHandler;
@@ -114,6 +116,13 @@ public final class ChatPanel {
     private Consumer<String> ourAnswerListener;
     private Runnable ourOnBack;
     private Supplier<List<IToolExecutor>> ourToolSupplier;
+
+    /**
+     * The step plan this chat keeps visible across its turns: the model
+     * replaces it through the update_plan tool, and an unfinished board is
+     * carried into the next task so a long job survives turn boundaries.
+     */
+    private final PlanBoard ourPlanBoard = new PlanBoard();
     private Function<String, String> ourAutoContextSupplier;
     private final EscapeSequence ourEscGesture =
         new EscapeSequence(ESC_WINDOW_MS, ESC_DEDUP_MS);
@@ -945,8 +954,10 @@ public final class ChatPanel {
     private String runAgent(final String theQuestion, final String theContext,
         final CancellationFlag theCancellation)
         throws com.mad.edt.colleague.llm.LLMException {
+        final List<IToolExecutor> tools = new ArrayList<>(ourToolSupplier.get());
+        tools.add(new PlanTool(ourPlanBoard));
         final AgentLoop loop = new AgentLoop(ourSession.getProvider(),
-            ourToolSupplier.get(), ourModel, AGENT_MAX_STEPS, theCancellation,
+            tools, ourModel, AGENT_MAX_STEPS, theCancellation,
             new LoggingAgentObserver());
         final StringBuilder system = new StringBuilder();
         if(ourSession.getSystemPrompt() != null && !ourSession.getSystemPrompt().isEmpty()) {
@@ -961,10 +972,16 @@ public final class ChatPanel {
             .append(" existing file use edit_file: read it first, then copy fragments")
             .append(" verbatim so each search text is unique. Search the project before")
             .append(" answering code questions; quote paths and line numbers. Every change")
-            .append(" is confirmed by the user. Answer in the language of the question.");
+            .append(" is confirmed by the user. Keep your approach visible: before a")
+            .append(" multi-step task call update_plan with the steps, and call it again")
+            .append(" each time a step finishes. Answer in the language of the question.");
         String task = theQuestion;
         if(!theContext.isEmpty()) {
             task = task + "\n\nProject context found by search:\n" + theContext;
+        }
+        if(hasUnfinishedSteps()) {
+            task = task + "\n\nPlan you left on the board in earlier turns:\n"
+                + ourPlanBoard.render();
         }
         final long startedAt = System.nanoTime();
         final AgentAnswer answer = loop.run(system.toString(), task);
@@ -976,6 +993,19 @@ public final class ChatPanel {
             "%n--- режим правки: %d шагов, %d вызовов инструментов, %d мс",
             Integer.valueOf(answer.getSteps()), Integer.valueOf(answer.getExecutedToolCalls()),
             Long.valueOf(elapsedMs));
+    }
+
+    /**
+     * @return {@code true} when the board still carries steps the model has
+     *         not finished, the only state worth carrying into the next task
+     */
+    private boolean hasUnfinishedSteps() {
+        for(final PlanBoard.Step step : ourPlanBoard.steps()) {
+            if(step.getStatus() != PlanBoard.Status.DONE) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
