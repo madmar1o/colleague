@@ -92,6 +92,7 @@ public class ColleagueView extends ViewPart {
     private boolean ourSelfTestPending;
     private boolean ourBrowserTestDone;
     private boolean ourBrowserTestPending;
+    private boolean ourProbeDone;
 
     /**
      * Stages a question for the open instance or for the next view creation.
@@ -200,6 +201,45 @@ public class ColleagueView extends ViewPart {
 
         com.mad.edt.colleague.llm.ProviderStore.loadIntoSettings();
         ourContacts.reload();
+        scheduleAgentProbe();
+    }
+
+    /**
+     * Unattended live probe: a property-given delay after the view opens, one
+     * real agent turn runs through the ordinary chat pipeline - edit mode on,
+     * tools limited to the read-only set so no confirmation dialog can ever
+     * block an unattended run, question fixed so its expected shape is known.
+     * The turn traces its rounds to the console, holds the generator gate end
+     * to end, and a concurrent background embedding pass either waits for it
+     * or yields with its own logged abort. The probe exists so an unattended
+     * check can decide pass/fail from the log alone.
+     */
+    private void scheduleAgentProbe() {
+        final long delayMs = Long.getLong("colleague.agent.probe", 0L).longValue();
+        if(delayMs <= 0L) {
+            return;
+        }
+        System.err.println("[colleague] agent probe scheduled in " + delayMs + " ms");
+        Display.getDefault().timerExec((int)delayMs, () -> {
+            if(ourProbeDone || ourTabFolder.isDisposed()) {
+                return;
+            }
+            final ChatPanel panel = targetPanelForStaged();
+            if(panel == null) {
+                System.err.println("[colleague] agent probe skipped: no chat panel yet");
+                return;
+            }
+            ourProbeDone = true;
+            AgentMode.setOn(true);
+            panel.setToolSupplier(() -> WorkspaceTools.readOnly(ourCodeSearch, ourOverview));
+            System.err.println("[colleague] agent probe: edit mode on, read-only tools,"
+                + " sending the probe question");
+            panel.fillQuestion("Сколько всего объектов метаданных в конфигурации этого"
+                + " проекта и сколько из них справочников? Сначала обязательно вызови"
+                + " инструмент describe_configuration, затем ответь двумя числами."
+                + " Ничего не изменяй.");
+            panel.send();
+        });
     }
 
     /**
