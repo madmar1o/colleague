@@ -9,6 +9,16 @@ import com.mad.edt.colleague.llm.ToolSpec;
 public interface IToolExecutor {
 
     /**
+     * @return whether one run of this tool only observes state and can run
+     *         side by side with other calls of the same round: several reads
+     *         and searches then cost their slowest member instead of their
+     *         sum. Anything that may write must stay serial ({@code false}).
+     */
+    default boolean isParallelSafe() {
+        return false;
+    }
+
+    /**
      * @return tool name, matches the name advertised to the model
      */
     String getName();

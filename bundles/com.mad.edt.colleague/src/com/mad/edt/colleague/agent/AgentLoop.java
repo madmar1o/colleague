@@ -159,14 +159,7 @@ public final class AgentLoop {
             observer.onRound(steps, result.getToolCalls().size());
 
             messages.add(ChatMessage.assistantToolCalls(result.getContent(), result.getToolCalls()));
-            for(final ToolCall call : result.getToolCalls()) {
-                final long startedAt = System.nanoTime();
-                final String toolResult = execute(call);
-                observer.onToolCall(steps, call.getName(), call.getArgumentsJson(), toolResult,
-                    (System.nanoTime() - startedAt) / 1_000_000);
-                executed++;
-                messages.add(ChatMessage.toolResult(call.getId(), truncate(toolResult)));
-            }
+            executed += runToolRound(result.getToolCalls(), steps, messages);
         }
         return new AgentAnswer("Step budget exhausted after " + steps + " round-trips",
             steps, executed, false);
@@ -202,6 +195,100 @@ public final class AgentLoop {
             final String message = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
             return "ERROR: " + message;
         }
+    }
+
+    /**
+     * Executes one round's tool calls and feeds the results back to the
+     * conversation in call order.
+     *
+     * @param theCalls calls as the model emitted them
+     * @param theStep round-trip number that requested them
+     * @param theMessages conversation to append the tool results to
+     * @return number of executed calls
+     */
+    private int runToolRound(final List<ToolCall> theCalls, final int theStep,
+        final List<ChatMessage> theMessages) {
+        if(canRunConcurrently(theCalls)) {
+            return runConcurrently(theCalls, theStep, theMessages);
+        }
+        for(final ToolCall call : theCalls) {
+            final long startedAt = System.nanoTime();
+            final String toolResult = execute(call);
+            observer.onToolCall(theStep, call.getName(), call.getArgumentsJson(), toolResult,
+                (System.nanoTime() - startedAt) / 1_000_000);
+            theMessages.add(ChatMessage.toolResult(call.getId(), truncate(toolResult)));
+        }
+        return theCalls.size();
+    }
+
+    /**
+     * @param theCalls the round's tool calls
+     * @return {@code true} when the round asks for more than one call and
+     *         every one of them is a known side-effect-free tool, the only
+     *         shape that may run at the same time; a single write-capable
+     *         call keeps the whole round strictly serial
+     */
+    private boolean canRunConcurrently(final List<ToolCall> theCalls) {
+        if(theCalls.size() < 2) {
+            return false;
+        }
+        for(final ToolCall call : theCalls) {
+            final IToolExecutor executor = executors.get(call.getName());
+            if(executor == null || !executor.isParallelSafe()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Runs one round's calls side by side: several searches and file reads
+     * observe no each other, so their latencies should not add up. Worker
+     * threads stay daemon so a stuck tool can never keep the platform alive;
+     * the round only ends once every result is in, and the trace plus the
+     * conversation keep the original call order.
+     *
+     * @param theCalls the round's tool calls, all parallel-safe and known
+     * @param theStep round-trip number that requested them
+     * @param theMessages conversation to append the tool results to
+     * @return number of executed calls
+     */
+    private int runConcurrently(final List<ToolCall> theCalls, final int theStep,
+        final List<ChatMessage> theMessages) {
+        final String[] outcome = new String[theCalls.size()];
+        final long[] elapsedMs = new long[theCalls.size()];
+        final List<Thread> workers = new ArrayList<>(theCalls.size());
+        for(int index = 0; index < theCalls.size(); index++) {
+            final int slot = index;
+            final ToolCall call = theCalls.get(index);
+            final Thread worker = new Thread(() -> {
+                final long startedAt = System.nanoTime();
+                outcome[slot] = execute(call);
+                elapsedMs[slot] = (System.nanoTime() - startedAt) / 1_000_000;
+            }, "colleague-tool-" + call.getName());
+            worker.setDaemon(true);
+            workers.add(worker);
+            worker.start();
+        }
+        for(final Thread worker : workers) {
+            try {
+                worker.join();
+            } catch (final InterruptedException ex) {
+                // the turn is being stopped mid-round: unstarted or unfinished
+                // slots still need a result message so the conversation shape
+                // stays valid, and the cancellation flag ends the loop after
+                Thread.currentThread().interrupt();
+            }
+        }
+        for(int index = 0; index < theCalls.size(); index++) {
+            final ToolCall call = theCalls.get(index);
+            final String toolResult = outcome[index] == null
+                ? "ERROR: interrupted before the result arrived" : outcome[index];
+            observer.onToolCall(theStep, call.getName(), call.getArgumentsJson(), toolResult,
+                elapsedMs[index]);
+            theMessages.add(ChatMessage.toolResult(call.getId(), truncate(toolResult)));
+        }
+        return theCalls.size();
     }
 
     /**

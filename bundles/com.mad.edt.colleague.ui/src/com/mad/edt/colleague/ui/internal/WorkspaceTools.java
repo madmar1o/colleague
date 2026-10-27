@@ -93,6 +93,13 @@ public final class WorkspaceTools {
         }
 
         @Override
+        public boolean isParallelSafe() {
+            // search only reads the index snapshot, several searches at once
+            // never observe each other
+            return true;
+        }
+
+        @Override
         public ToolSpec getSpec() {
             return new ToolSpec("search_code",
                 "Search workspace source files (.bsl module texts and .mdo metadata) by"
@@ -122,6 +129,11 @@ public final class WorkspaceTools {
         @Override
         public String getName() {
             return "list_files";
+        }
+
+        @Override
+        public boolean isParallelSafe() {
+            return true;
         }
 
         @Override
@@ -183,6 +195,11 @@ public final class WorkspaceTools {
         @Override
         public String getName() {
             return "read_file";
+        }
+
+        @Override
+        public boolean isParallelSafe() {
+            return true;
         }
 
         @Override
@@ -435,6 +452,12 @@ public final class WorkspaceTools {
         @Override
         public String getName() {
             return "describe_configuration";
+        }
+
+        @Override
+        public boolean isParallelSafe() {
+            // the configuration picture is a prebuilt cache read as text
+            return true;
         }
 
         @Override
