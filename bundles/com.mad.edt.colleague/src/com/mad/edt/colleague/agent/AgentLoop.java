@@ -142,6 +142,16 @@ public final class AgentLoop {
                 steps++;
                 result = streamedRound(request.build());
             }
+            if(isEmptyTurn(result) && steps < maxSteps) {
+                // the round-trip ended with neither text nor a call: the
+                // reasoning pass ate the generation budget before producing an
+                // action. One repair asks the same task without thinking; if
+                // that stays empty too, the model is not fixable this way and
+                // chasing it further only burns the budget
+                steps++;
+                request.think(false);
+                result = streamedRound(request.build());
+            }
             if(!result.wantsToolCall()) {
                 observer.onRound(steps, 0);
                 return new AgentAnswer(finalText(result), steps, executed, true);
@@ -192,6 +202,16 @@ public final class AgentLoop {
             final String message = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
             return "ERROR: " + message;
         }
+    }
+
+    /**
+     * @param theResult the round-trip result
+     * @return {@code true} when the round produced neither answer text nor a
+     *         tool call, the signature of a reasoning pass cut off mid-way
+     */
+    private static boolean isEmptyTurn(final ChatResult theResult) {
+        return !theResult.wantsToolCall()
+            && (theResult.getContent() == null || theResult.getContent().trim().isEmpty());
     }
 
     /**
