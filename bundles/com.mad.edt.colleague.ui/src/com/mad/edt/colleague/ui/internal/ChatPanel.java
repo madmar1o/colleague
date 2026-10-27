@@ -37,6 +37,7 @@ import com.mad.edt.colleague.agent.AgentLoop;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
 import com.mad.edt.colleague.agent.LoggingAgentObserver;
+import com.mad.edt.colleague.chat.ContextBudget;
 import com.mad.edt.colleague.chat.EscapeSequence;
 import com.mad.edt.colleague.chat.PageCommandHandler;
 import com.mad.edt.colleague.chat.StreamBatcher;
@@ -62,6 +63,11 @@ public final class ChatPanel {
 
     /** Model round-trips allowed for one edit-mode question. */
     private static final int AGENT_MAX_STEPS = 8;
+    /**
+     * Preloaded context an agent turn may carry: the loop has its own search
+     * tools, so a big dump only buys prompt processing and cut-off rounds.
+     */
+    private static final int AGENT_CONTEXT_MAX_CHARS = 3_000;
     /** streaming policy: what one batch may carry and how often they go out */
     private static final int STREAM_BATCH_CHARS = 200;
     private static final long STREAM_BATCH_INTERVAL_MS = 150L;
@@ -807,7 +813,9 @@ public final class ChatPanel {
                     + " chars for question [" + question.replace('\n', ' ') + "]");
                 final String answer;
                 if(editMode) {
-                    answer = runAgent(question, effectiveContext, turn.cancellation());
+                    answer = runAgent(question,
+                        ContextBudget.trimMiddle(effectiveContext, AGENT_CONTEXT_MAX_CHARS),
+                        turn.cancellation());
                 } else {
                     answer = ourSession.ask(ourModel, effectiveContext, question,
                         browser ? chunk -> feedDelta(chunk, deltaBatcher)
