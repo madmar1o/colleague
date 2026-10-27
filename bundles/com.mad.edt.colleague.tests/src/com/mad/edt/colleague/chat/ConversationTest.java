@@ -238,17 +238,20 @@ class ConversationTest {
     }
 
     @Test
-    void historyCapKeepsTheNewestMessages() {
+    void historyCapCompactsTheOldestMessages() {
         final ScriptedProvider provider = new ScriptedProvider("base-model");
         final Conversation conversation = new Conversation(provider, null);
         for(int index = 0; index < 30; index++) {
             conversation.noteExchange("q" + index, "a" + index);
         }
-        // each append trims as it goes: of 30 pairs the oldest 10 disappear
-        // and the newest 40 message entries, q10 through a29, survive
-        assertEquals(40, conversation.snapshotHistory().size());
-        assertEquals("q10", conversation.snapshotHistory().get(0).getContent());
-        assertEquals("a29", conversation.snapshotHistory().get(39).getContent());
+        // each append compacts as it goes: the oldest turns fold into one
+        // digest at the front instead of vanishing, and the newest turns
+        // stay verbatim at the tail
+        assertEquals(27, conversation.snapshotHistory().size());
+        assertTrue(conversation.snapshotHistory().get(0).getContent()
+            .startsWith(Conversation.DIGEST_MARKER));
+        assertEquals("q17", conversation.snapshotHistory().get(1).getContent());
+        assertEquals("a29", conversation.snapshotHistory().get(26).getContent());
     }
 
     @Test

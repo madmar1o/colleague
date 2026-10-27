@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import com.mad.edt.colleague.agent.PlanBoard.Status;
@@ -80,5 +82,20 @@ class PlanToolTest {
         assertTrue(result.contains("pending"));
         assertTrue(result.contains("active"));
         assertTrue(result.contains("done"));
+    }
+
+    @Test
+    void aWholePlanIsRejectedWhenAnyEntryIsBad() {
+        final PlanBoard board = new PlanBoard();
+        final PlanTool tool = new PlanTool(board);
+        board.replace(List.of(new PlanBoard.Step("kept plan", PlanBoard.Status.DONE)));
+
+        // half an approach applied to the board would leave the model
+        // looking at a plan it never asked for
+        tool.execute("{\"items\":[{\"content\":\"fine\",\"status\":\"done\"},"
+            + "{\"content\":\"\",\"status\":\"pending\"}]}");
+
+        assertEquals(1, board.stepCount());
+        assertEquals("Current plan (1/1 done, 0 active):\n1. [x] kept plan", board.render());
     }
 }

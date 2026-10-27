@@ -20,7 +20,34 @@ import com.mad.edt.colleague.llm.LLMException;
  */
 public final class Conversation {
 
-    private static final int MAX_HISTORY_MESSAGES = 40;
+    /**
+     * How many messages the history holds before the oldest turns are
+     * compacted into a digest. A hard cap on replayed history keeps prompt
+     * cost predictable for a local model.
+     */
+    public static final int MAX_HISTORY_MESSAGES = 40;
+
+    /**
+     * First line of the digest message that replaces compacted turns: the
+     * model is told outright that earlier conversation was summarized
+     * instead of being handed the summary as if it were a live turn.
+     */
+    public static final String DIGEST_MARKER = "[earlier conversation compacted]";
+
+    /**
+     * How many most recent messages always stay verbatim: recent turns are
+     * what follow-up questions are built on, they are never folded away.
+     */
+    private static final int KEEP_RECENT_MESSAGES = 24;
+
+    /**
+     * Ceiling for the digest body itself: an entire working day of repeated
+     * compactions must not grow the summary back into a second full history.
+     */
+    private static final int DIGEST_MAX_CHARS = 1_800;
+
+    /** How much of one compacted message reaches a digest line. */
+    private static final int DIGEST_SNIPPET_CHARS = 120;
 
     private final ILLMProvider provider;
     private final String systemPrompt;
@@ -224,9 +251,62 @@ public final class Conversation {
         return name != null && name.contains("qwen3");
     }
 
+    /**
+     * Folds the oldest turns that no longer fit the cap into one digest
+     * message kept at the front: silently discarding them would leave the
+     * model without any trace of what the conversation was about, while the
+     * digest costs one short system message. Every later compaction merges
+     * its share into that same digest so there is always exactly one, and
+     * the most recent turns always stay verbatim.
+     */
     private void trimHistory() {
-        while(history.size() > MAX_HISTORY_MESSAGES) {
-            history.remove(0);
+        if(history.size() <= MAX_HISTORY_MESSAGES) {
+            return;
         }
+        final StringBuilder body = new StringBuilder();
+        int from = 0;
+        if(isDigest(history.get(0))) {
+            // an earlier digest joins the fold: its notes carry over into
+            // the new one instead of a second digest stacking up
+            body.append(digestBody(history.get(0))).append('\n');
+            from = 1;
+        }
+        final int foldUntil = history.size() - KEEP_RECENT_MESSAGES;
+        for(int index = from; index < foldUntil; index++) {
+            final ChatMessage message = history.get(index);
+            final String label;
+            if(ChatMessage.ROLE_USER.equals(message.getRole())) {
+                label = "Q: ";
+            } else if(ChatMessage.ROLE_ASSISTANT.equals(message.getRole())) {
+                label = "A: ";
+            } else {
+                // per-turn context notes are re-attached every turn anyway,
+                // folding them into the digest would only repeat noise
+                continue;
+            }
+            body.append(label).append(snippet(message.getContent())).append('\n');
+        }
+        // the old digest (index 0) is cleared with the fold too: its notes
+        // already went into body, and re-inserting at index 0 keeps exactly
+        // one digest at the front
+        history.subList(0, foldUntil).clear();
+        history.add(0, ChatMessage.system(DIGEST_MARKER + "\n"
+            + ContextBudget.trimMiddle(body.toString().strip(), DIGEST_MAX_CHARS)));
+    }
+
+    private static boolean isDigest(final ChatMessage theMessage) {
+        return ChatMessage.ROLE_SYSTEM.equals(theMessage.getRole())
+            && theMessage.getContent().startsWith(DIGEST_MARKER);
+    }
+
+    private static String digestBody(final ChatMessage theDigest) {
+        final int lineEnd = theDigest.getContent().indexOf('\n');
+        return lineEnd < 0 ? "" : theDigest.getContent().substring(lineEnd + 1);
+    }
+
+    private static String snippet(final String theContent) {
+        final String flattened = theContent.strip().replaceAll("\\s*[\r\n]+\\s*", " ");
+        return flattened.length() <= DIGEST_SNIPPET_CHARS ? flattened
+            : flattened.substring(0, DIGEST_SNIPPET_CHARS) + "...";
     }
 }
