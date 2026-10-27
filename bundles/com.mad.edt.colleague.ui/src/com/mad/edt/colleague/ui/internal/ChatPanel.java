@@ -44,6 +44,7 @@ import com.mad.edt.colleague.chat.StreamBatcher;
 import com.mad.edt.colleague.chat.TurnController;
 import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.CancellationFlag;
+import com.mad.edt.colleague.llm.GeneratorGate;
 import com.mad.edt.colleague.llm.ILLMProvider;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 
@@ -805,6 +806,11 @@ public final class ChatPanel {
             STREAM_BATCH_INTERVAL_MS);
 
         final IJobFunction questionBody = (final IProgressMonitor monitor) -> {
+            // the turn owns the generator from context gathering to the last
+            // streamed chunk: a background embedding pass interleaving in
+            // between swaps the single resident model and every step of this
+            // turn pays for loading it back
+            GeneratorGate.GLOBAL.enter();
             try {
                 ourTurns.attachWorker(turn, Thread.currentThread());
                 final String effectiveContext = context.isEmpty() && ourAutoContextSupplier != null
@@ -874,6 +880,7 @@ public final class ChatPanel {
                 }
                 return Status.OK_STATUS;
             } finally {
+                GeneratorGate.GLOBAL.leave();
                 if(Thread.currentThread().isInterrupted()) {
                     // the stop interrupt belongs to this turn only: clear its
                     // status so it cannot leak into the next pooled worker run
