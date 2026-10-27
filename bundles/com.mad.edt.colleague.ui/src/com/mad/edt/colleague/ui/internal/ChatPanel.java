@@ -34,9 +34,11 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mad.edt.colleague.agent.AgentAnswer;
 import com.mad.edt.colleague.agent.AgentLoop;
+import com.mad.edt.colleague.agent.AgentMemory;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
 import com.mad.edt.colleague.agent.LoggingAgentObserver;
+import com.mad.edt.colleague.agent.MemoryTool;
 import com.mad.edt.colleague.agent.PlanBoard;
 import com.mad.edt.colleague.agent.PlanTool;
 import com.mad.edt.colleague.chat.ContextBudget;
@@ -123,6 +125,13 @@ public final class ChatPanel {
      * carried into the next task so a long job survives turn boundaries.
      */
     private final PlanBoard ourPlanBoard = new PlanBoard();
+
+    /**
+     * Shared lesson memory of the workbench session, {@code null} when none
+     * was handed over; the remember tool writes into it and its lessons join
+     * the agent instructions.
+     */
+    private AgentMemory ourLessonMemory;
     private Function<String, String> ourAutoContextSupplier;
     private final EscapeSequence ourEscGesture =
         new EscapeSequence(ESC_WINDOW_MS, ESC_DEDUP_MS);
@@ -227,6 +236,14 @@ public final class ChatPanel {
      */
     public void setToolSupplier(final Supplier<List<IToolExecutor>> theToolSupplier) {
         ourToolSupplier = theToolSupplier;
+    }
+
+    /**
+     * @param theLessonMemory cross-session lesson memory shared by all chats
+     *            of the workbench session, {@code null} for none
+     */
+    public void setLessonMemory(final AgentMemory theLessonMemory) {
+        ourLessonMemory = theLessonMemory;
     }
 
     /**
@@ -956,6 +973,9 @@ public final class ChatPanel {
         throws com.mad.edt.colleague.llm.LLMException {
         final List<IToolExecutor> tools = new ArrayList<>(ourToolSupplier.get());
         tools.add(new PlanTool(ourPlanBoard));
+        if(ourLessonMemory != null) {
+            tools.add(new MemoryTool(ourLessonMemory));
+        }
         final AgentLoop loop = new AgentLoop(ourSession.getProvider(),
             tools, ourModel, AGENT_MAX_STEPS, theCancellation,
             new LoggingAgentObserver());
@@ -975,6 +995,14 @@ public final class ChatPanel {
             .append(" is confirmed by the user. Keep your approach visible: before a")
             .append(" multi-step task call update_plan with the steps, and call it again")
             .append(" each time a step finishes. Answer in the language of the question.");
+        if(ourLessonMemory != null) {
+            system.append(" When you learn something worth keeping for later sessions on")
+                .append(" this project - a quirk, a rule the user corrected you on, an")
+                .append(" approach that worked - call remember with one short sentence.");
+        }
+        if(ourLessonMemory != null && ourLessonMemory.lessonCount() > 0) {
+            system.append(' ').append(ourLessonMemory.render());
+        }
         String task = theQuestion;
         if(!theContext.isEmpty()) {
             task = task + "\n\nProject context found by search:\n" + theContext;

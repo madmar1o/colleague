@@ -1,5 +1,7 @@
 package com.mad.edt.colleague.ui.view;
 
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +26,7 @@ import org.eclipse.ui.part.ViewPart;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.FrameworkUtil;
 
+import com.mad.edt.colleague.agent.AgentMemory;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
@@ -33,6 +36,7 @@ import com.mad.edt.colleague.context.SemanticIndex;
 import com.mad.edt.colleague.context.SemanticSettings;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
 import com.mad.edt.colleague.llm.LLMSettings;
+import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
 import com.mad.edt.colleague.ui.internal.ChatSession;
 import com.mad.edt.colleague.ui.internal.ContactsPanel;
@@ -83,6 +87,13 @@ public class ColleagueView extends ViewPart {
     private CTabFolder ourTabFolder;
     private CodeSearch ourCodeSearch;
     private ConfigurationOverview ourOverview;
+
+    /**
+     * Lesson memory shared by every chat tab of this workbench session: the
+     * agent writes lessons through the remember tool and reads them back in
+     * later sessions from a file in the plugin's state area.
+     */
+    private AgentMemory ourLessonMemory;
     private SemanticIndex ourSemantic;
     private volatile boolean ourOverviewStale;
 
@@ -451,6 +462,23 @@ public class ColleagueView extends ViewPart {
         showMobilePage(ourContactsArea);
     }
 
+    /**
+     * @return the shared lesson memory, opened once per workbench session
+     *         over a file in the plugin's own state area; when the state
+     *         area is unavailable the temporary directory keeps the lesson
+     *         file working in a degraded way instead of failing the view
+     */
+    private AgentMemory lessonMemory() {
+        if(ourLessonMemory == null) {
+            final ColleagueUIPlugin plugin = ColleagueUIPlugin.getDefault();
+            final Path state = plugin != null
+                ? plugin.getStateLocation().toFile().toPath()
+                : Paths.get(System.getProperty("java.io.tmpdir"));
+            ourLessonMemory = new AgentMemory(state.resolve("agent-lessons.txt"));
+        }
+        return ourLessonMemory;
+    }
+
     private ChatPanel openContact(final ContactsPanel.Contact theContact) {
         if(ourTabFolder.isDisposed()) {
             return null;
@@ -487,6 +515,7 @@ public class ColleagueView extends ViewPart {
         panel.setToolSupplier(() -> AgentMode.isOn()
             ? WorkspaceTools.withWrite(ourCodeSearch, ourOverview)
             : WorkspaceTools.readOnly(ourCodeSearch, ourOverview));
+        panel.setLessonMemory(lessonMemory());
         panel.setAutoContextSupplier(this::collectAutoContext);
         panel.setOnBack(() -> showMobilePage(ourContactsArea));
         tab.setControl(body);
