@@ -16,6 +16,7 @@ import com.google.gson.JsonObject;
 import com.mad.edt.colleague.context.vector.EmbeddingClient.EmbeddingException;
 import com.mad.edt.colleague.context.vector.QdrantClient.Point;
 import com.mad.edt.colleague.context.vector.QdrantClient.QdrantException;
+import com.mad.edt.colleague.llm.GeneratorGate;
 
 /**
  * Semantic module index over the vector store: source files are chunked into
@@ -138,7 +139,7 @@ public class VectorIndex {
      * Failure of one index operation: an unreadable file set, a rejected
      * embedding batch or a store error.
      */
-    public static final class IndexFailure extends Exception {
+    public static class IndexFailure extends Exception {
 
         private static final long serialVersionUID = 1L;
 
@@ -173,6 +174,8 @@ public class VectorIndex {
     private final EmbeddingClient embedder;
     private final ModuleChunker chunker = new ModuleChunker(CHUNK_LINES, OVERLAP_LINES);
     private final Map<String, FileState> states = new HashMap<>();
+    private final GeneratorGate generatorGate;
+    private final int generatorWaitMs;
 
     /**
      * @param theCollection collection holding this workspace's chunks
@@ -181,9 +184,26 @@ public class VectorIndex {
      */
     public VectorIndex(final String theCollection, final QdrantClient theStore,
         final EmbeddingClient theEmbedder) {
+        this(theCollection, theStore, theEmbedder, null, 0);
+    }
+
+    /**
+     * @param theCollection collection holding this workspace's chunks
+     * @param theStore vector store client
+     * @param theEmbedder embedding client whose model defines the vector size
+     * @param theGeneratorGate gate counting live model turns, {@code null}
+     *            when embedding competes for nothing (e.g. a separate server)
+     * @param theGeneratorWaitMs how long one file may wait for the gate to go
+     *            quiet before the whole pass is given up
+     */
+    public VectorIndex(final String theCollection, final QdrantClient theStore,
+        final EmbeddingClient theEmbedder, final GeneratorGate theGeneratorGate,
+        final int theGeneratorWaitMs) {
         collection = theCollection;
         store = theStore;
         embedder = theEmbedder;
+        generatorGate = theGeneratorGate;
+        generatorWaitMs = Math.max(0, theGeneratorWaitMs);
     }
 
     /**
@@ -257,6 +277,7 @@ public class VectorIndex {
                 if(known != null && known.ourHash.equals(hash)) {
                     skipped++;
                 } else {
+                    awaitQuietGenerator(file);
                     reembed(file, content, hash);
                     refreshed++;
                 }
@@ -271,6 +292,12 @@ public class VectorIndex {
                         + " consecutive file failures, last: cannot read " + file.displayPath(),
                         ex);
                 }
+            } catch (final GeneratorBusy ex) {
+                // not one file's bad luck but the whole generator being taken:
+                // counting it per file would only burn one more bounded wait
+                // per remaining file, so the pass ends here and the next
+                // scheduled pass picks up where this one stopped
+                throw ex;
             } catch (final IndexFailure ex) {
                 failed++;
                 consecutiveFailures++;
@@ -302,6 +329,40 @@ public class VectorIndex {
      *            later pass retries them
      */
     public record UpdateReport(int reembedded, int skipped, int purged, int failed) {
+    }
+
+    /**
+     * The pass gave up because a live model turn kept occupying the generator
+     * past the wait budget. Extends {@link IndexFailure} so every caller that
+     * already handles pass failures treats it as one: the files updated so
+     * far keep their state and the next scheduled pass retries the rest.
+     */
+    private static final class GeneratorBusy extends IndexFailure {
+
+        private static final long serialVersionUID = 1L;
+
+        GeneratorBusy(final String theMessage) {
+            super(theMessage);
+        }
+    }
+
+    /**
+     * Waits until no live chat or agent turn occupies the local generator
+     * before spending embedding calls on one file: sharing that generator on
+     * a small GPU makes the model server swap models, and the user's turn
+     * pays for every swap. Untracked files stay untracked, so an abandoned
+     * pass is picked up by the next one.
+     *
+     * @param theFile file about to be re-embedded, for the failure text
+     * @throws GeneratorBusy when the gate stayed busy past the budget
+     */
+    private void awaitQuietGenerator(final SourceFile theFile) throws GeneratorBusy {
+        if(generatorGate == null || generatorGate.awaitIdle(generatorWaitMs)) {
+            return;
+        }
+        throw new GeneratorBusy("generator busy: a live model turn holds the generator, "
+            + "giving up the pass at " + theFile.displayPath() + " after waiting "
+            + generatorWaitMs + " ms");
     }
 
     /**

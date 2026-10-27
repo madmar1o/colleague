@@ -14,6 +14,7 @@ import com.mad.edt.colleague.context.vector.VectorIndex.IndexFailure;
 import com.mad.edt.colleague.context.vector.VectorIndex.SourceFile;
 import com.mad.edt.colleague.context.vector.VectorIndex.UpdateReport;
 import com.mad.edt.colleague.http.HttpTransport;
+import com.mad.edt.colleague.llm.GeneratorGate;
 
 /**
  * Public entry point of the semantic context layer: builds a {@link VectorIndex}
@@ -37,6 +38,13 @@ public final class SemanticIndex {
 
     /** Project-name part budget, keeping collection names store safe. */
     public static final int PROJECT_NAME_BUDGET = 200;
+
+    /**
+     * How long one file may wait for a live chat or agent turn to release the
+     * shared generator before the whole embedding pass is given up; a later
+     * scheduled pass retries only the files that stayed untracked.
+     */
+    public static final int GENERATOR_WAIT_MS = 15_000;
 
     /**
      * Hands every searchable file to the acceptor as the pair
@@ -89,7 +97,8 @@ public final class SemanticIndex {
         return new SemanticIndex(new VectorIndex(collectionFor(workspaceProjectName()),
             new QdrantClient(SemanticSettings.getStoreUrl(), STORE_TIMEOUT_MS),
             new EmbeddingClient(SemanticSettings.resolveEmbedUrl(),
-                SemanticSettings.getModel(), EMBED_TIMEOUT_MS)));
+                SemanticSettings.getModel(), EMBED_TIMEOUT_MS),
+            GeneratorGate.GLOBAL, GENERATOR_WAIT_MS));
     }
 
     /**
