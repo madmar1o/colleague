@@ -247,8 +247,9 @@ final class BridgeBrowser {
             syncPollViaLocation();
             return;
         }
-        traceCall("navigation", method, parseArgs(json));
-        handle(method, parseArgs(json));
+        final JsonObject navigationArgs = parseArgs(json);
+        traceCall("navigation", method, navigationArgs);
+        handle(method, navigationArgs);
     }
 
     /**
