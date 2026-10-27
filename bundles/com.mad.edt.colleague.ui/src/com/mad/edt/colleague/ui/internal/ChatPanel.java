@@ -36,6 +36,7 @@ import com.mad.edt.colleague.agent.AgentAnswer;
 import com.mad.edt.colleague.agent.AgentLoop;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
+import com.mad.edt.colleague.agent.LoggingAgentObserver;
 import com.mad.edt.colleague.chat.EscapeSequence;
 import com.mad.edt.colleague.chat.PageCommandHandler;
 import com.mad.edt.colleague.chat.StreamBatcher;
@@ -930,7 +931,8 @@ public final class ChatPanel {
         final CancellationFlag theCancellation)
         throws com.mad.edt.colleague.llm.LLMException {
         final AgentLoop loop = new AgentLoop(ourSession.getProvider(),
-            ourToolSupplier.get(), ourModel, AGENT_MAX_STEPS, theCancellation);
+            ourToolSupplier.get(), ourModel, AGENT_MAX_STEPS, theCancellation,
+            new LoggingAgentObserver());
         final StringBuilder system = new StringBuilder();
         if(ourSession.getSystemPrompt() != null && !ourSession.getSystemPrompt().isEmpty()) {
             system.append(ourSession.getSystemPrompt()).append(' ');

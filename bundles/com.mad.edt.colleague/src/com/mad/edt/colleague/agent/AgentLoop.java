@@ -40,6 +40,7 @@ public final class AgentLoop {
     private final String model;
     private final int maxSteps;
     private final CancellationFlag cancellation;
+    private final AgentObserver observer;
 
     /**
      * @param theProvider model endpoint
@@ -62,6 +63,21 @@ public final class AgentLoop {
      */
     public AgentLoop(final ILLMProvider theProvider, final List<IToolExecutor> theTools,
         final String theModel, final int theMaxSteps, final CancellationFlag theCancellation) {
+        this(theProvider, theTools, theModel, theMaxSteps, theCancellation, AgentObserver.NOOP);
+    }
+
+    /**
+     * @param theProvider model endpoint
+     * @param theTools callable tools, name-collisions keep the last one
+     * @param theModel model to use, {@code null} for the provider default
+     * @param theMaxSteps budget of model round-trips, {@code <= 0} for the default
+     * @param theCancellation shared stop flag: the loop aborts between steps
+     *            and every model round-trip carries it
+     * @param theObserver step trace listener, {@code null} for no listening
+     */
+    public AgentLoop(final ILLMProvider theProvider, final List<IToolExecutor> theTools,
+        final String theModel, final int theMaxSteps, final CancellationFlag theCancellation,
+        final AgentObserver theObserver) {
         provider = theProvider;
         executors = new LinkedHashMap<>();
         for(final IToolExecutor executor : theTools) {
@@ -70,6 +86,7 @@ public final class AgentLoop {
         model = theModel;
         maxSteps = theMaxSteps > 0 ? theMaxSteps : DEFAULT_MAX_STEPS;
         cancellation = theCancellation == null ? new CancellationFlag() : theCancellation;
+        observer = theObserver == null ? AgentObserver.NOOP : theObserver;
     }
 
     /**
@@ -126,12 +143,17 @@ public final class AgentLoop {
                 result = streamedRound(request.build());
             }
             if(!result.wantsToolCall()) {
+                observer.onRound(steps, 0);
                 return new AgentAnswer(finalText(result), steps, executed, true);
             }
+            observer.onRound(steps, result.getToolCalls().size());
 
             messages.add(ChatMessage.assistantToolCalls(result.getContent(), result.getToolCalls()));
             for(final ToolCall call : result.getToolCalls()) {
+                final long startedAt = System.nanoTime();
                 final String toolResult = execute(call);
+                observer.onToolCall(steps, call.getName(), call.getArgumentsJson(), toolResult,
+                    (System.nanoTime() - startedAt) / 1_000_000);
                 executed++;
                 messages.add(ChatMessage.toolResult(call.getId(), truncate(toolResult)));
             }
