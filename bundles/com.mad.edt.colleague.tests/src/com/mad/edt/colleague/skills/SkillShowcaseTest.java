@@ -91,14 +91,15 @@ class SkillShowcaseTest {
 
         final String result = tool.execute("{\"id\":\"reporter\"}");
 
-        Assertions.assertTrue(result.contains("<skill_content>"), result);
+        Assertions.assertTrue(result.contains("<skill_content")
+                && result.contains("</skill_content>"), result);
         Assertions.assertTrue(result.contains(BODY_MARKER),
             "the body arrives only after the model asked for it");
         Assertions.assertTrue(result.contains("ref"), result);
         Assertions.assertTrue(result.contains("more file(s)"),
             "a long file list must be sampled, not dumped: " + result);
-        final int listedNames = result.length()
-            - result.replace(".md", "").length();
+        final int listedNames =
+            (result.length() - result.replace(".md", "").length()) / ".md".length();
         Assertions.assertTrue(listedNames <= 10,
             "at most ten file names may be listed, got " + listedNames);
     }
