@@ -57,8 +57,11 @@ public final class SkillLoader {
         final String name = header.fields().getOrDefault("name",
             theSkillFile.getParentFile().getName());
         final String description = header.fields().getOrDefault("description", "");
+        final boolean autoInvoke = !"true".equalsIgnoreCase(
+            header.fields().getOrDefault("disable-model-invocation", "false"));
 
-        return new SkillDefinition(name, description, header.body(), loadTools(theToolsFile));
+        return new SkillDefinition(name, description, header.body(), loadTools(theToolsFile),
+            theSkillFile.getParentFile().toPath(), autoInvoke);
     }
 
     private List<ToolSpec> loadTools(final File theToolsFile) throws IOException {
