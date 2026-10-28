@@ -47,3 +47,15 @@ ChatResult.truncated() и новый конструктор/фабрика — J
 8. В репозиторий не заносить названия чужих продуктов и их внутренность (colleague/AGENTS.md);
    «эталон» = поведение из референсных исходников ВНЕ репозитория.
 9. Не менять Bundle-Version, targets/*.target, версии Tycho/EDT «за компанию» с задачей.
+
+## Итог реализации (2026-10-28)
+Выполнено. Коммиты: `0e79197` (test, красный) → `f497fe0` (feat: report context truncation to the user).
+
+- `ChatResult.truncated()` — stop reason `length` известен как обрезка окна.
+- `Conversation.wasLastTurnTruncated()` (флаг ставится по `result.truncated()`), делегация
+  через `ChatSession`; `ChatPanel` дописывает в статус-событие `kind:status`:
+  «контекст обрезан рантаймом, ответ неполный» (в browser-режиме это pushNow("status", ...)).
+- Шаг 2 карточки (OllamaLLMProvider читает done_reason) уже был выполнен ранее — проверено тестом.
+- Подровень num_ctx 16384 (DEFAULT_LOCAL_CONTEXT_TOKENS) не тронут; адаптивное расширение
+  окна (requestedWindowTokens) уже было.
+- Не проверено живым прогоном EDT: реальная обрезка на длинном вопросе показывает пометку.
