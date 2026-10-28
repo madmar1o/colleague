@@ -46,6 +46,8 @@ import com.mad.edt.colleague.chat.EscapeSequence;
 import com.mad.edt.colleague.chat.PageCommandHandler;
 import com.mad.edt.colleague.chat.StreamBatcher;
 import com.mad.edt.colleague.chat.TurnController;
+import com.mad.edt.colleague.commands.CommandDefinition;
+import com.mad.edt.colleague.commands.SlashCommands;
 import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.CancellationFlag;
 import com.mad.edt.colleague.llm.GeneratorGate;
@@ -127,6 +129,14 @@ public final class ChatPanel {
      * adds neither the load_skill tool nor the catalog block.
      */
     private Supplier<SkillRegistry> ourSkillSupplier;
+
+    /**
+     * Project-local slash commands the user can type in the chat line,
+     * {@code null} when the workspace carries none; consulted before every
+     * send, so a matching line is expanded into its prompt template while a
+     * plain or unknown line stays exactly as typed.
+     */
+    private Supplier<SlashCommands> ourCommandSupplier;
 
     /**
      * The step plan this chat keeps visible across its turns: the model
@@ -255,6 +265,15 @@ public final class ChatPanel {
      */
     public void setSkillSupplier(final Supplier<SkillRegistry> theSkillSupplier) {
         ourSkillSupplier = theSkillSupplier;
+    }
+
+    /**
+     * @param theCommandSupplier slash commands loaded from the workspace,
+     *            consulted before every send; {@code null} or an empty
+     *            catalog leaves slash lines as ordinary chat text
+     */
+    public void setCommandSupplier(final Supplier<SlashCommands> theCommandSupplier) {
+        ourCommandSupplier = theCommandSupplier;
     }
 
     /**
@@ -457,6 +476,7 @@ public final class ChatPanel {
         @Override
         public void bridgeReady() {
             pushHistory();
+            pushCommandCatalog();
             setStatus(AgentMode.isOn()
                 ? "Режим правки ВКЛЮЧЁН — агент с инструментами проекта"
                 : "Готов к работе");
@@ -758,6 +778,31 @@ public final class ChatPanel {
         payload.add("items", items);
         pushNow("history", payload);
     }
+
+    /**
+     * Hands the page the slash-command catalog so it can hint the names while
+     * the user types: one entry per command with its one-line description.
+     * No supplier or an empty catalog pushes nothing, the composer then has
+     * no slash hints at all.
+     */
+    private void pushCommandCatalog() {
+        final SlashCommands commands =
+            ourCommandSupplier == null ? null : ourCommandSupplier.get();
+        if(commands == null || commands.catalog().isEmpty()
+            || ourBridge == null || !ourBridge.isReady()) {
+            return;
+        }
+        final JsonArray entries = new JsonArray();
+        for(final CommandDefinition command : commands.catalog()) {
+            final JsonObject entry = new JsonObject();
+            entry.addProperty("name", command.getName());
+            entry.addProperty("description", command.getDescription());
+            entries.add(entry);
+        }
+        final JsonObject payload = new JsonObject();
+        payload.add("commands", entries);
+        pushNow("commands", payload);
+    }
     /** Plain styled-text conversation used when no browser backend is available. */
     private void createFallback(final Composite theParent) {
         ourConversation = new StyledText(theParent,
@@ -829,6 +874,14 @@ public final class ChatPanel {
         if(question.isEmpty() || ourBusy) {
             return;
         }
+        // a slash line naming a loaded command is expanded into its prompt
+        // template before the model sees it; the chat bubble keeps showing
+        // what the user actually typed, an unknown slash line stays text
+        final SlashCommands commands =
+            ourCommandSupplier == null ? null : ourCommandSupplier.get();
+        final SlashCommands.Invocation invocation =
+            commands == null ? null : commands.match(question);
+        final String prompt = invocation == null ? question : invocation.prompt();
         final String context = ourAttachedContext;
         ourAttachedContext = "";
         final boolean editMode = AgentMode.isOn() && ourToolSupplier != null;
@@ -873,16 +926,16 @@ public final class ChatPanel {
             try {
                 ourTurns.attachWorker(turn, Thread.currentThread());
                 final String effectiveContext = context.isEmpty() && ourAutoContextSupplier != null
-                    ? applyOrEmpty(ourAutoContextSupplier, question) : context;
+                    ? applyOrEmpty(ourAutoContextSupplier, prompt) : context;
                 System.err.println("[colleague] autocontext: " + effectiveContext.length()
                     + " chars for question [" + question.replace('\n', ' ') + "]");
                 final String answer;
                 if(editMode) {
-                    answer = runAgent(question,
+                    answer = runAgent(prompt,
                         ContextBudget.trimMiddle(effectiveContext, AGENT_CONTEXT_MAX_CHARS),
                         turn.cancellation());
                 } else {
-                    answer = ourSession.ask(ourModel, effectiveContext, question,
+                    answer = ourSession.ask(ourModel, effectiveContext, prompt,
                         browser ? chunk -> feedDelta(chunk, deltaBatcher)
                             : chunk -> { },
                         browser ? chunk -> feedDelta(chunk, thinkingBatcher,
