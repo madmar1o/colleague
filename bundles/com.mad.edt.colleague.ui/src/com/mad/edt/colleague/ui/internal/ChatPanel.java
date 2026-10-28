@@ -181,7 +181,7 @@ public final class ChatPanel {
         if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
             final JsonObject payload = new JsonObject();
             payload.addProperty("text", theQuestion);
-            ourBridge.push("input", payload);
+            pushNow("input", payload);
             return;
         }
         if(ourQuestion != null && !ourQuestion.isDisposed()) {
@@ -340,7 +340,7 @@ public final class ChatPanel {
         try {
             ViewBridge.ensureUserDataDir();
             ourBridge = new BridgeBrowser(ourRoot, "web/chat.html", this::handleBridge);
-            push("ready", null);
+            postEvent("ready", null);
             watchTheme();
             traceGeometry();
             installEscapeFilter();
@@ -641,7 +641,7 @@ public final class ChatPanel {
             : "Режим правки ВЫКЛЮЧЕН");
     }
 
-    private void push(final String theKind, final JsonObject thePayload) {
+    private void postEvent(final String theKind, final JsonObject thePayload) {
         final JsonObject payload = thePayload == null ? new JsonObject() : thePayload;
         if("ready".equals(theKind)) {
             final JsonObject palette = ThemeSupport.pagePalette(
@@ -656,6 +656,22 @@ public final class ChatPanel {
             payload.addProperty("mode", Boolean.valueOf(AgentMode.isOn()));
         }
         ourBridge.push(theKind, payload);
+    }
+
+    /**
+     * Queues one event and asks the bridge to deliver it right away, so the
+     * page sees it within a UI tick instead of at the next sync poll. The
+     * polling reply stays as the fallback for the moment the script channel
+     * is not warm yet.
+     *
+     * @param theKind event name seen by the page
+     * @param thePayload JSON payload of the event
+     */
+    private void pushNow(final String theKind, final JsonObject thePayload) {
+        ourBridge.push(theKind, thePayload);
+        // the queue is the single source of truth for delivery, so the batch
+        // argument stays empty; pushEvents drains everything queued before it
+        ourBridge.pushEvents(java.util.Collections.<Object[]>emptyList());
     }
 
     /**
@@ -685,7 +701,7 @@ public final class ChatPanel {
             final JsonObject palette = ThemeSupport.pagePalette(theAnchor);
             ourLastPalette = palette.toString();
             applyNativePalette(palette);
-            ourBridge.push("readyPalette", palette);
+            pushNow("readyPalette", palette);
         }
     }
 
@@ -698,7 +714,7 @@ public final class ChatPanel {
             if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
                 ourLastPalette = palette.toString();
                 applyNativePalette(palette);
-                ourBridge.push("readyPalette", palette);
+                pushNow("readyPalette", palette);
             }
         });
     }
@@ -721,7 +737,7 @@ public final class ChatPanel {
         }
         final JsonObject payload = new JsonObject();
         payload.add("items", items);
-        ourBridge.push("history", payload);
+        pushNow("history", payload);
     }
     /** Plain styled-text conversation used when no browser backend is available. */
     private void createFallback(final Composite theParent) {
@@ -802,10 +818,10 @@ public final class ChatPanel {
             final JsonObject user = new JsonObject();
             user.addProperty("text", question);
             user.addProperty("time", timeLabel());
-            ourBridge.push("user", user);
+            pushNow("user", user);
             final JsonObject busy = new JsonObject();
             busy.addProperty("busy", Boolean.TRUE);
-            ourBridge.push("busy", busy);
+            pushNow("busy", busy);
         } else {
             if(!context.isEmpty()) {
                 appendLine("Вы: " + question + "  [к вопросу прикреплён контекст проекта, "
@@ -872,7 +888,7 @@ public final class ChatPanel {
                             final JsonObject payload = new JsonObject();
                             payload.addProperty("text", body);
                             payload.addProperty("time", timeLabel());
-                            ourBridge.push("answer", payload);
+                            pushNow("answer", payload);
                         } else {
                             appendLine("Colleague: " + body);
                         }
@@ -896,7 +912,7 @@ public final class ChatPanel {
                             final JsonObject payload = new JsonObject();
                             payload.addProperty("text", String.valueOf(ex.getMessage()));
                             payload.addProperty("time", timeLabel());
-                            ourBridge.push("error", payload);
+                            pushNow("error", payload);
                         } else {
                             appendLine("Ошибка: " + ex.getMessage());
                         }
@@ -920,7 +936,7 @@ public final class ChatPanel {
                     if(ourBridge != null && ourBridge.isReady()) {
                         final JsonObject busy = new JsonObject();
                         busy.addProperty("busy", Boolean.FALSE);
-                        ourBridge.push("busy", busy);
+                        pushNow("busy", busy);
                     }
                 });
             }
@@ -958,7 +974,7 @@ public final class ChatPanel {
             if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
                 final JsonObject payload = new JsonObject();
                 payload.addProperty("text", batch);
-                ourBridge.push(theKind, payload);
+                pushNow(theKind, payload);
             }
         });
     }
@@ -1054,7 +1070,7 @@ public final class ChatPanel {
         if(ourBridge != null && ourBridge.isReady()) {
             final JsonObject busy = new JsonObject();
             busy.addProperty("busy", Boolean.FALSE);
-            ourBridge.push("busy", busy);
+            pushNow("busy", busy);
         }
     }
 
@@ -1108,7 +1124,7 @@ public final class ChatPanel {
         if(ourBridge != null && ourBridge.isReady()) {
             final JsonObject payload = new JsonObject();
             payload.addProperty("on", Boolean.valueOf(AgentMode.isOn()));
-            ourBridge.push("mode", payload);
+            pushNow("mode", payload);
             return;
         }
         if(ourModeButton == null || ourModeButton.isDisposed()) {
@@ -1194,7 +1210,7 @@ public final class ChatPanel {
         if(ourBridge != null && ourBridge.isReady()) {
             final JsonObject payload = new JsonObject();
             payload.addProperty("text", theText == null ? "" : theText);
-            ourBridge.push("status", payload);
+            pushNow("status", payload);
             return;
         }
         if(ourStatusLabel == null || ourStatusLabel.isDisposed()) {
