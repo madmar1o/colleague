@@ -36,7 +36,11 @@ import com.mad.edt.colleague.ui.ColleagueUIPlugin;
  * (on either channel) with the batch of queued {@code [kind, json]} events as
  * the value it returns from the function. The page polls with
  * {@code colleague("sync", "{}")} whenever it has no call of its own to make,
- * so Java never has to run script inside the page.
+ * so Java never has to run script inside the page. Since the push change the
+ * queue is also drained on Java's own initiative: {@link #pushEvents(List)}
+ * hands the batch to {@link BridgePushDelivery} right after it was queued, so
+ * the page learns about an event within one UI tick instead of at the next
+ * poll; the polling reply stays as the fallback path.
  */
 final class BridgeBrowser {
 
@@ -45,6 +49,7 @@ final class BridgeBrowser {
 
     private final Browser ourBrowser;
     private final BiConsumer<String, JsonObject> ourHandler;
+    private final BridgePushDelivery ourDelivery;
     private final List<String[]> ourQueue = new ArrayList<>();
     private boolean ourReady;
     private boolean ourFuncSeen;
@@ -62,6 +67,9 @@ final class BridgeBrowser {
         final BiConsumer<String, JsonObject> theHandler) {
         ourHandler = theHandler;
         ourBrowser = new Browser(theParent, SWT.NONE);
+        ourDelivery = new BridgePushDelivery(
+            script -> () -> executePush(script),
+            tick -> ourBrowser.getDisplay().timerExec(0, tick));
         ourBrowser.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
         ourBrowser.addLocationListener(new LocationListener() {
             @Override
@@ -109,6 +117,61 @@ final class BridgeBrowser {
         synchronized(ourQueue) {
             ourQueue.add(new String[] {theKind, thePayload.toString()});
         }
+    }
+
+    /**
+     * Queues an asynchronous push of pending events to the attached page.
+     * Delivery goes through the browser script channel on the next UI tick;
+     * when the script channel is not warm yet, the events stay in the
+     * durable batch queue and are drained by the next synchronous reply.
+     * The queue itself is the source of truth: everything queued before this
+     * call leaves together, so {@code theBatch} is only a hint about what the
+     * caller meant to deliver.
+     *
+     * @param theBatch ordered events to deliver
+     */
+    void pushEvents(final List<Object[]> theBatch) {
+        deliverQueued();
+    }
+
+    /**
+     * Moves every queued event into a script call pending on the next UI tick.
+     * The queue is taken under the lock that guards {@link #push}, so a push
+     * racing with a call reply cannot split or duplicate a batch.
+     *
+     * @return {@code true} when a non-empty batch was scheduled
+     */
+    private boolean deliverQueued() {
+        final List<String[]> entries;
+        synchronized(ourQueue) {
+            entries = new ArrayList<>(ourQueue);
+            ourQueue.clear();
+        }
+        if(entries.isEmpty()) {
+            return false;
+        }
+        final String script = ourDelivery.schedule(toBatches(entries));
+        if(!script.isEmpty()) {
+            System.out.println("[colleague] push delivered: " + entries.size()
+                + " event(s) queued for the page without a poll");
+            return true;
+        }
+        return false;
+    }
+
+    /** Runs a push script inside the page, tolerating a disposed browser. */
+    private void executePush(final String theScript) {
+        if(!ourBrowser.isDisposed()) {
+            ourBrowser.execute(theScript);
+        }
+    }
+
+    private static List<Object[]> toBatches(final List<String[]> theEntries) {
+        final List<Object[]> batches = new ArrayList<>(theEntries.size());
+        for(final String[] entry : theEntries) {
+            batches.add(entry);
+        }
+        return batches;
     }
 
     /** @return {@code true} once the page announced itself on any channel */
@@ -159,29 +222,25 @@ final class BridgeBrowser {
 
     /**
      * Removes every queued event and renders it as the JSON batch the page
-     * applies through its own {@code colleaguePush}.
+     * applies through its own {@code colleaguePush}; the same renderer backs
+     * the push path, so both channels carry identical batches.
      *
      * @return {@code [["kind","{json}"],...]} text, possibly {@code []}
      */
     private String drainBatch(final int theCallSeq) {
-        final JsonArray events = new JsonArray();
+        final List<String[]> entries;
         synchronized(ourQueue) {
-            for(final String[] entry : ourQueue) {
-                final JsonArray event = new JsonArray();
-                event.add(entry[0]);
-                event.add(entry[1]);
-                events.add(event);
-            }
+            entries = new ArrayList<>(ourQueue);
             ourQueue.clear();
         }
-        final String batch = events.toString();
+        final String batch = BridgePushDelivery.renderBatch(toBatches(entries));
         if(!"[]".equals(batch)) {
             if(!ourDeliverySeen) {
                 ourDeliverySeen = true;
                 System.out.println("[colleague] bridge: first event batch delivered "
                     + "to the page");
             }
-            System.out.println("[colleague] bridge: " + events.size()
+            System.out.println("[colleague] bridge: " + entries.size()
                 + " event(s) delivered in reply to call #" + theCallSeq);
         }
         return batch;
@@ -276,7 +335,8 @@ final class BridgeBrowser {
     /**
      * A polling call cannot be answered on the navigation channel; its events
      * are handed over with the next function call, or in a pinch run through
-     * a script that the backend does accept on a navigated document.
+     * a script that the backend does accept on a navigated document. The
+     * script goes out through the same push delivery as {@link #pushEvents}.
      */
     private void syncPollViaLocation() {
         if(ourBrowser.isDisposed()) {
@@ -286,13 +346,7 @@ final class BridgeBrowser {
         if("[]".equals(batch)) {
             return;
         }
-        final String script = "window.colleagueEvents(" + batch.replace("<", "\\u003c")
-            + ")";
-        ourBrowser.getDisplay().timerExec(0, () -> {
-            if(!ourBrowser.isDisposed()) {
-                ourBrowser.execute(script);
-            }
-        });
+        ourDelivery.scheduleBatch(batch);
     }
 
     /**

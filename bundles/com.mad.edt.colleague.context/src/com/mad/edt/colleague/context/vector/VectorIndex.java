@@ -178,13 +178,21 @@ public class VectorIndex {
     private final int generatorWaitMs;
 
     /**
+     * Whether the embedding endpoint and the chat endpoint address the same
+     * model server (same host:port). Only then do live chat turns and
+     * embedding batches compete for one generator; separated runtimes have
+     * nothing to wait for.
+     */
+    private final boolean sharesGeneratorEndpoint;
+
+    /**
      * @param theCollection collection holding this workspace's chunks
      * @param theStore vector store client
      * @param theEmbedder embedding client whose model defines the vector size
      */
     public VectorIndex(final String theCollection, final QdrantClient theStore,
         final EmbeddingClient theEmbedder) {
-        this(theCollection, theStore, theEmbedder, null, 0);
+        this(theCollection, theStore, theEmbedder, null, 0, "");
     }
 
     /**
@@ -199,11 +207,33 @@ public class VectorIndex {
     public VectorIndex(final String theCollection, final QdrantClient theStore,
         final EmbeddingClient theEmbedder, final GeneratorGate theGeneratorGate,
         final int theGeneratorWaitMs) {
+        this(theCollection, theStore, theEmbedder, theGeneratorGate, theGeneratorWaitMs, "");
+    }
+
+    /**
+     * @param theCollection collection holding this workspace's chunks
+     * @param theStore vector store client
+     * @param theEmbedder embedding client whose model defines the vector size
+     * @param theGeneratorGate gate counting live model turns, {@code null}
+     *            when embedding competes for nothing (e.g. a separate server)
+     * @param theGeneratorWaitMs how long one file may wait for the gate to go
+     *            quiet before the whole pass is given up
+     * @param theChatRuntimeUrl chat endpoint root the live turns answer from,
+     *            empty when unknown (the gate is then trusted as before);
+     *            a different host:port than the embedding endpoint means the
+     *            gate never applies
+     */
+    public VectorIndex(final String theCollection, final QdrantClient theStore,
+        final EmbeddingClient theEmbedder, final GeneratorGate theGeneratorGate,
+        final int theGeneratorWaitMs, final String theChatRuntimeUrl) {
         collection = theCollection;
         store = theStore;
         embedder = theEmbedder;
         generatorGate = theGeneratorGate;
         generatorWaitMs = Math.max(0, theGeneratorWaitMs);
+        sharesGeneratorEndpoint = theChatRuntimeUrl == null
+            || theChatRuntimeUrl.trim().isEmpty()
+            || sharesHostAndPort(theEmbedder.getBaseUrl(), theChatRuntimeUrl);
     }
 
     /**
@@ -350,19 +380,81 @@ public class VectorIndex {
      * Waits until no live chat or agent turn occupies the local generator
      * before spending embedding calls on one file: sharing that generator on
      * a small GPU makes the model server swap models, and the user's turn
-     * pays for every swap. Untracked files stay untracked, so an abandoned
+     * pays for every swap. The gate condition is host:port identity - it
+     * only applies while the embedding endpoint and the chat endpoint name
+     * the same server, because a separate embedding runtime has no generator
+     * to fight over and waiting on it would stall the pass for no reason.
+     * Untracked files stay untracked, so an abandoned
      * pass is picked up by the next one.
      *
      * @param theFile file about to be re-embedded, for the failure text
      * @throws GeneratorBusy when the gate stayed busy past the budget
      */
     private void awaitQuietGenerator(final SourceFile theFile) throws GeneratorBusy {
-        if(generatorGate == null || generatorGate.awaitIdle(generatorWaitMs)) {
+        if(generatorGate == null || !sharesGeneratorEndpoint
+            || generatorGate.awaitIdle(generatorWaitMs)) {
             return;
         }
         throw new GeneratorBusy("generator busy: a live model turn holds the generator, "
             + "giving up the pass at " + theFile.displayPath() + " after waiting "
             + generatorWaitMs + " ms");
+    }
+
+    /**
+     * Decides whether two endpoint roots address one and the same server by
+     * comparing only the host:port part of their URLs: the chat API answers
+     * on one route and the embedding API on another, while the generator the
+     * gate protects lives in the server process behind both. An empty side
+     * never matches - an endpoint nobody named cannot be called shared.
+     *
+     * @param theFirstUrl endpoint root URL, may be empty
+     * @param theSecondUrl endpoint root URL, may be empty
+     * @return whether both URLs name the same host and port
+     */
+    static boolean sharesHostAndPort(final String theFirstUrl, final String theSecondUrl) {
+        final String first = hostAndPort(theFirstUrl);
+        final String second = hostAndPort(theSecondUrl);
+        return !first.isEmpty() && first.equalsIgnoreCase(second);
+    }
+
+    /**
+     * Reduces one endpoint URL to its {@code host:port} authority: the scheme
+     * prefix, any credentials and everything from the first path, query or
+     * fragment separator on are cut away, and a missing port falls back to
+     * the scheme default so a written and an implied port still compare
+     * equal.
+     *
+     * @param theUrl endpoint root URL, may be {@code null} or empty
+     * @return lower-cased {@code host:port}, empty when no host is present
+     */
+    private static String hostAndPort(final String theUrl) {
+        if(theUrl == null) {
+            return "";
+        }
+        String rest = theUrl.trim();
+        final int schemeEnd = rest.indexOf("://");
+        final String scheme = schemeEnd < 0 ? "" : rest.substring(0, schemeEnd).toLowerCase();
+        if(schemeEnd >= 0) {
+            rest = rest.substring(schemeEnd + 3);
+        }
+        for(int i = 0; i < rest.length(); i++) {
+            final char symbol = rest.charAt(i);
+            if(symbol == '/' || symbol == '?' || symbol == '#') {
+                rest = rest.substring(0, i);
+                break;
+            }
+        }
+        final int credentials = rest.lastIndexOf('@');
+        if(credentials >= 0) {
+            rest = rest.substring(credentials + 1);
+        }
+        if(rest.isEmpty()) {
+            return "";
+        }
+        if(rest.indexOf(':') < 0) {
+            rest = rest + ':' + ("https".equals(scheme) ? "443" : "80");
+        }
+        return rest.toLowerCase();
     }
 
     /**
