@@ -54,6 +54,12 @@ public final class Conversation {
     private final List<ChatMessage> history = new ArrayList<>();
 
     /**
+     * Whether the last finished turn was cut by the runtime's context
+     * window; the chat panel reads it to label such an answer incomplete.
+     */
+    private boolean lastTurnTruncated;
+
+    /**
      * @param theProvider endpoint to talk to
      * @param theSystemPrompt assistant role instructions, may be {@code null}
      */
@@ -172,10 +178,21 @@ public final class Conversation {
         final long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
 
         rememberExchange(contextMessage, theQuestion, result.getContent());
+        lastTurnTruncated = result.truncated();
 
         return result.getContent()
             + String.format("%n--- %d/%d tokens, %d ms", Integer.valueOf(result.getPromptTokens()),
                 Integer.valueOf(result.getCompletionTokens()), Long.valueOf(elapsedMs));
+    }
+
+    /**
+     * @return {@code true} when the last finished turn ended because the
+     *         runtime's context window ran out and cut the oldest prompt
+     *         text away; the chat panel shows the user that the answer is
+     *         only as complete as the surviving tail of the prompt
+     */
+    public boolean wasLastTurnTruncated() {
+        return lastTurnTruncated;
     }
 
     /**

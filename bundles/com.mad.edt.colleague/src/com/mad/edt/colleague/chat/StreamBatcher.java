@@ -13,6 +13,21 @@ import java.util.function.LongSupplier;
  */
 public final class StreamBatcher {
 
+    /**
+     * Production size cap for one streamed batch. Deliberately coarse: every
+     * push is one task in the browser page's event queue, and a token-level
+     * stream would otherwise flood the UI queue with dozens of tasks per
+     * second for no visible gain.
+     */
+    public static final int DEFAULT_MAX_BATCH_CHARS = 800;
+
+    /**
+     * Production quiet interval between two batches. Sized so a turn shows
+     * a handful of smooth updates per second; the first chunk of a turn is
+     * never held back by this timer, so perceived latency does not grow.
+     */
+    public static final long DEFAULT_MIN_INTERVAL_MS = 400L;
+
     private final int myMaxBatchChars;
     private final long myMinIntervalMs;
     private final LongSupplier myClock;
@@ -27,6 +42,22 @@ public final class StreamBatcher {
      */
     public StreamBatcher(final int theMaxBatchChars, final long theMinIntervalMs) {
         this(theMaxBatchChars, theMinIntervalMs, System::currentTimeMillis);
+    }
+
+    /**
+     * Production streaming policy with the wall clock.
+     */
+    public StreamBatcher() {
+        this(DEFAULT_MAX_BATCH_CHARS, DEFAULT_MIN_INTERVAL_MS, System::currentTimeMillis);
+    }
+
+    /**
+     * Production streaming policy on a clock the caller controls.
+     *
+     * @param theClock time source in milliseconds
+     */
+    public StreamBatcher(final LongSupplier theClock) {
+        this(DEFAULT_MAX_BATCH_CHARS, DEFAULT_MIN_INTERVAL_MS, theClock);
     }
 
     public StreamBatcher(final int theMaxBatchChars, final long theMinIntervalMs,
