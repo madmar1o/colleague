@@ -214,8 +214,8 @@ class SubagentToolTest {
     @DisplayName("two delegates in one round come back in the order they were called")
     void resultsKeepCallOrder() throws Exception {
         final ScriptedProvider provider = new ScriptedProvider(
-            toolRound("c1|subagent|{\"description\":\"first\",\"prompt\":\"ask one\"}",
-                "c2|subagent|{\"description\":\"second\",\"prompt\":\"ask two\"}"),
+            toolRound("c1|subagent|{\"agent\":\"first\",\"description\":\"first\",\"prompt\":\"ask one\"}",
+                "c2|subagent|{\"agent\":\"second\",\"description\":\"second\",\"prompt\":\"ask two\"}"),
             textRound("answer one"),
             textRound("answer two"),
             textRound("parent done"));

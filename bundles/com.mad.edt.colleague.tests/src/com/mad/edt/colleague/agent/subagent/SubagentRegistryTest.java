@@ -35,7 +35,8 @@ class SubagentRegistryTest {
 
         Assertions.assertEquals(SubagentRegistry.MAX_SESSIONS, registry.size());
         Assertions.assertNull(registry.get("agent0"), "the oldest delegate left the shelf");
-        Assertions.assertNotNull(registry.get("agent1"));
+        Assertions.assertNull(registry.get("agent1"), "the next one left too");
+        Assertions.assertNotNull(registry.get("agent2"));
         Assertions.assertNotNull(registry.get("agent9"));
     }
 
