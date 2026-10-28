@@ -872,7 +872,15 @@ public final class ChatPanel {
                 }
                 final int split = answer.lastIndexOf("\n--- ");
                 final String body = split > 0 ? answer.substring(0, split).strip() : answer;
-                final String stats = split > 0 ? answer.substring(split + 1).strip() : "";
+                final String baseStats = split > 0 ? answer.substring(split + 1).strip() : "";
+                // the runtime cuts the oldest prompt text in silence when the
+                // window runs out: only the stop reason says so, and without
+                // this note the user reads a shortened answer as a full one
+                final String stats = ourSession.wasLastTurnTruncated()
+                    ? (baseStats.isEmpty()
+                        ? "Контекст обрезан рантаймом, ответ неполный"
+                        : baseStats + " — контекст обрезан рантаймом, ответ неполный")
+                    : baseStats;
                 ourLastAnswer = body;
                 if(turn.cancellation().isCancelled()) {
                     System.out.println("[colleague] cancelled turn observed: partial "
