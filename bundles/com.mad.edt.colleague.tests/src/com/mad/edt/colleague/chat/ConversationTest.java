@@ -343,4 +343,19 @@ class ConversationTest {
             "user|q2"),
             rolesAndContent(provider.requests().get(1)));
     }
+
+    @Test
+    void truncationFromTheRuntimeReachesTheUiSide() throws LLMException {
+        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final Conversation conversation = new Conversation(provider, null);
+        // the runtime says the window ran out: the chat panel reads the flag
+        // off the conversation after the call and says the answer is cut
+        provider.script(new ChatResult("half", "model", "length", 900, 40));
+        conversation.ask("plain-model", "ctx", "q1");
+        assertTrue(conversation.wasLastTurnTruncated());
+        provider.script(new ChatResult("whole", "model", "stop", 9, 4));
+        conversation.ask("plain-model", "ctx", "q2");
+        assertEquals(false, Boolean.valueOf(conversation.wasLastTurnTruncated()),
+            "a normally finished turn clears the flag");
+    }
 }
