@@ -1,6 +1,7 @@
 package com.mad.edt.colleague.ui.internal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -100,6 +101,12 @@ class BridgePushDeliveryTest {
         page.runPending();
 
         assertEquals(1, page.scriptCount());
-        assertTrue(page.lastScript().contains("\\u003cb\\u003e"));
+        // no bare angle bracket may reach the script source: it would let a
+        // payload open a tag or break out of the surrounding script text.
+        // The escape is spelled at runtime because a literal backslash-u
+        // sequence written in this source file is resolved by the compiler.
+        String openEscape = "\\" + "u003c";
+        assertTrue(page.lastScript().contains(openEscape + "b"));
+        assertFalse(page.lastScript().contains("<"));
     }
 }
