@@ -6,6 +6,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.eclipse.core.resources.IProject;
+import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
@@ -36,6 +38,9 @@ import com.mad.edt.colleague.context.SemanticIndex;
 import com.mad.edt.colleague.context.SemanticSettings;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
 import com.mad.edt.colleague.llm.LLMSettings;
+import com.mad.edt.colleague.skills.SkillDefinition;
+import com.mad.edt.colleague.skills.SkillLoader;
+import com.mad.edt.colleague.skills.SkillRegistry;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
 import com.mad.edt.colleague.ui.internal.ChatSession;
@@ -97,6 +102,13 @@ public class ColleagueView extends ViewPart {
     private AgentMemory ourLessonMemory;
     private SemanticIndex ourSemantic;
     private volatile boolean ourOverviewStale;
+
+    /**
+     * Project-local skills of the workspace, loaded once per view session
+     * from {@code .colleague/skills} of the first open project; every chat
+     * tab advertises the same catalog through load_skill.
+     */
+    private SkillRegistry ourSkillCatalog;
 
     private String ourLastAnswer = "";
     private ChatPanel ourLastAnsweredPanel;
@@ -487,6 +499,39 @@ public class ColleagueView extends ViewPart {
     }
 
     /**
+     * Project-local skills advertised to every agent turn: loaded once per
+     * view session from {@code .colleague/skills} under the first open
+     * workspace project. A missing or unreadable directory leaves the catalog
+     * empty, which simply runs the chats without the skill layer instead of
+     * failing the view.
+     *
+     * @return shared skill catalog, never {@code null}
+     */
+    private SkillRegistry skillCatalog() {
+        if(ourSkillCatalog == null) {
+            final SkillRegistry registry = new SkillRegistry();
+            for(final IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
+                if(!project.isOpen()) {
+                    continue;
+                }
+                final java.io.File skillsDir = project.getLocation()
+                    .append(".colleague/skills").toFile();
+                try {
+                    for(final SkillDefinition skill : new SkillLoader().loadAll(skillsDir)) {
+                        registry.register(skill);
+                    }
+                } catch (final java.io.IOException ex) {
+                    System.err.println("[colleague] skills directory unreadable: "
+                        + ex.getMessage());
+                }
+                break;
+            }
+            ourSkillCatalog = registry;
+        }
+        return ourSkillCatalog;
+    }
+
+    /**
      * Opens a contact the way the ordinary UI paths do (list click, cold
      * start auto-open): the tab itself appears right away, but the heavy
      * chat page - the embedded browser and its controls - is queued behind
@@ -627,6 +672,7 @@ public class ColleagueView extends ViewPart {
             ? WorkspaceTools.withWrite(ourCodeSearch, ourOverview)
             : WorkspaceTools.readOnly(ourCodeSearch, ourOverview));
         panel.setLessonMemory(lessonMemory());
+        panel.setSkillSupplier(this::skillCatalog);
         panel.setAutoContextSupplier(this::collectAutoContext);
         panel.setOnBack(() -> showMobilePage(ourContactsArea));
         theTab.setData(panel);

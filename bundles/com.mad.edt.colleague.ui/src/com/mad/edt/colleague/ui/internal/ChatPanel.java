@@ -50,6 +50,9 @@ import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.CancellationFlag;
 import com.mad.edt.colleague.llm.GeneratorGate;
 import com.mad.edt.colleague.llm.ILLMProvider;
+import com.mad.edt.colleague.skills.SkillRegistry;
+import com.mad.edt.colleague.skills.SkillShowcase;
+import com.mad.edt.colleague.skills.SkillTool;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 
 /**
@@ -117,6 +120,13 @@ public final class ChatPanel {
     private Consumer<String> ourAnswerListener;
     private Runnable ourOnBack;
     private Supplier<List<IToolExecutor>> ourToolSupplier;
+
+    /**
+     * Project-local skill catalog for the agent path, {@code null} when the
+     * workspace carries no skills; consulted every turn so an empty catalog
+     * adds neither the load_skill tool nor the catalog block.
+     */
+    private Supplier<SkillRegistry> ourSkillSupplier;
 
     /**
      * The step plan this chat keeps visible across its turns: the model
@@ -235,6 +245,16 @@ public final class ChatPanel {
      */
     public void setToolSupplier(final Supplier<List<IToolExecutor>> theToolSupplier) {
         ourToolSupplier = theToolSupplier;
+    }
+
+    /**
+     * @param theSkillSupplier project-local skills advertised to the agent as
+     *            a catalog plus the load_skill tool, consulted at each
+     *            question; {@code null} or an empty catalog runs the agent
+     *            without the skill layer
+     */
+    public void setSkillSupplier(final Supplier<SkillRegistry> theSkillSupplier) {
+        ourSkillSupplier = theSkillSupplier;
     }
 
     /**
@@ -997,6 +1017,10 @@ public final class ChatPanel {
         if(ourLessonMemory != null) {
             tools.add(new MemoryTool(ourLessonMemory));
         }
+        final SkillRegistry skills = ourSkillSupplier == null ? null : ourSkillSupplier.get();
+        if(skills != null && !skills.isEmpty()) {
+            tools.add(new SkillTool(skills));
+        }
         final AgentLoop loop = new AgentLoop(ourSession.getProvider(),
             tools, ourModel, AGENT_MAX_STEPS, theCancellation,
             new LoggingAgentObserver());
@@ -1023,6 +1047,9 @@ public final class ChatPanel {
         }
         if(ourLessonMemory != null && ourLessonMemory.lessonCount() > 0) {
             system.append(' ').append(ourLessonMemory.render());
+        }
+        if(skills != null && !skills.isEmpty()) {
+            system.append(new SkillShowcase(skills).catalogSection());
         }
         String task = theQuestion;
         if(!theContext.isEmpty()) {
