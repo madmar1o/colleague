@@ -62,3 +62,33 @@ public final class ToolPolicy {
 8. В репозиторий не заносить названия чужих продуктов и их внутренность (colleague/AGENTS.md);
    «эталон» = поведение из референсных исходников ВНЕ репозитория.
 9. Не менять Bundle-Version, targets/*.target, версии Tycho/EDT «за компанию» с задачей.
+
+## Итог реализации (2026-10-28)
+Выполнено. Коммиты: `64180a7` (test, красный: AgentProfileLoaderTest + ProfileToolPolicyTest) →
+`6f1ddd8` (feat: agent profiles with per-profile tool policy — core-пакет) → `6b02b8e` (test,
+красный: маршрутизация чипа + секция profiles) → `a720550` (feat: profile chip and per-profile
+tool policy in the chat panel). done_commit=`a720550`.
+
+- Пакет `com.mad.edt.colleague.agents` (core, добавлен в Export-Package): `AgentProfile`
+  (name/description/system/modelName/maxSteps/mode PRIMARY|SUBAGENT|ALL/toolNames/hidden),
+  `AgentProfileLoader` (`.colleague/agents/*.md`, frontmatter через общий парсер PP-F0; тело —
+  системный промпт; `max-steps`, `mode`, `tools`, `hidden`, `model`), `ToolPolicy`
+  (`allowed(profile, specs)` / `allows(profile, name)` / `isWriteTool`).
+- Политика: профиль только СУЖАЕТ список, который уже предложил воркспейс (список и так
+  формируется по режиму: readOnly vs withWrite), поэтому расширяет write-доступ физически не
+  может — это закреплено тестом `profileNeverWidensTheOfferedSet`.
+- Врезка в `ChatPanel.runAgent`: `pickedProfile()` → фильтрация инструментов через ToolPolicy,
+  `max-steps` профиля вместо `AGENT_MAX_STEPS`, `model` профиля вместо модели вкладки, тело
+  профиля дописывается в системную часть поверх общих правил.
+- UI: чип `профиль: …` в шапке (`btnprofile`, клик листает обычный→профили→обычный),
+  bridge-команда `pickProfile` → `PageCommandHandler.Actions.pickProfile`; секция `profiles`
+  события `catalog` (F9) заполняется реальными профилями, скрытые (`hidden: true`) в чип не
+  попадают; `ColleagueView.profileCatalog()` грузит `.colleague/agents` первого открытого
+  проекта один раз за сессию вида (общий `colleagueDirectory`).
+- Отклонения: (1) под фильтр профиля попадают и служебные инструменты (`update_plan`,
+  `remember`, `load_skill`) — если профиль назвал свой список, он ограничивает всё, что видит
+  модель, иначе «только read-only» профиль всё равно получил бы планировщик; (2) профиль с
+  `mode: subagent` не может быть выбран чипом (фолбэк к обычному агенту) — subagent-режим
+  включается в F4; (3) в красных тестах F3/`PageCatalogEventsTest` были собственные опечатки
+  (неверная арность `SkillDefinition`, `null` вместо `List.of()`) — поправлены в feat-коммитах,
+  поведение продукта не меняли.
