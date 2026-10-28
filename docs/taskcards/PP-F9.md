@@ -46,3 +46,21 @@
 8. В репозиторий не заносить названия чужих продуктов и их внутренность (colleague/AGENTS.md);
    «эталон» = поведение из референсных исходников ВНЕ репозитория.
 9. Не менять Bundle-Version, targets/*.target, версии Tycho/EDT «за компанию» с задачей.
+
+## Итог реализации (2026-10-28)
+Выполнено. Коммиты: `09ffc97` (test, красный: PageCatalogEventsTest) → `45fc206`
+(feat: advertise commands and skills to the chat page). done_commit=`45fc206`.
+
+- Новый core-класс `com.mad.edt.colleague.chat.PageCatalogEvents.build(commands, skills)` —
+  payload события `catalog`: массивы `commands` / `skills` / `profiles` с парами `name` +
+  `description`; пустые секции — пустые массивы (не отсутствующие поля), `profiles` заполнится
+  в вехе M24 (F3/F4), страница читает поле уже сейчас.
+- `ChatPanel`: при готовности моста (`bridgeReady`) шлётся одно событие `catalog` вместо
+  отдельного `commands` из F2 — DRY: подсказки по слэшу и строка каталога питаются из одного
+  пакета (`pushCatalogEvent`, старый `pushCommandCatalog` удалён).
+- `chat.html`: строка `команды: /… · скилы: …` над композером (`catalogline`, в `title` —
+  описания), подсказки по слэшу берут список из того же события.
+- Отклонения: (1) событие `commands` из F2 заменено общим `catalog` (иначе два пакета с одним
+  содержимым); (2) в красном тесте был собственный дефект — `null` вместо `List.of()` в
+  `SkillDefinition` (конструктор не принимает null-список инструментов), поправлен в том же
+  feat-коммите, поведение продукта не менял.
