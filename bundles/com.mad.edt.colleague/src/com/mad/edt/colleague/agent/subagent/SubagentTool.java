@@ -32,6 +32,23 @@ public final class SubagentTool implements IToolExecutor {
 
     private static final String TOOL_NAME = "subagent";
 
+    /**
+     * Hears about one finished delegate turn so the chat page can show a card
+     * for the work a delegate did. The listener runs on the thread that asked
+     * for the delegate; page delivery stays the listener's problem.
+     */
+    public interface DelegateListener {
+
+        /**
+         * One delegate turn ended.
+         *
+         * @param theAgent delegate name the turn ran under
+         * @param theDescription what the delegate was asked to do
+         * @param theResult final answer of the delegate, or its failure text
+         */
+        void onDelegateFinished(String theAgent, String theDescription, String theResult);
+    }
+
     private final ILLMProvider provider;
     private final String model;
     private final List<IToolExecutor> parentTools;
@@ -39,6 +56,7 @@ public final class SubagentTool implements IToolExecutor {
     private final int depth;
     private final CancellationFlag cancellation;
     private final SubagentRegistry registry;
+    private final DelegateListener listener;
 
     /**
      * @param theProvider model endpoint shared with the parent
@@ -72,6 +90,25 @@ public final class SubagentTool implements IToolExecutor {
         final List<IToolExecutor> theParentTools, final List<AgentProfile> theProfiles,
         final int theHowDeep, final CancellationFlag theCancellation,
         final SubagentRegistry theRegistry) {
+        this(theProvider, theModel, theParentTools, theProfiles, theHowDeep, theCancellation,
+            theRegistry, null);
+    }
+
+    /**
+     * @param theProvider model endpoint shared with the parent
+     * @param theModel model of the parent
+     * @param theParentTools tools offered to the parent
+     * @param theProfiles agent profiles the delegate may be named after
+     * @param theHowDeep nesting level of this tool
+     * @param theCancellation stop flag shared with the parent turn
+     * @param theRegistry live delegates shared with the parent chat
+     * @param theListener hears every finished delegate turn to show it on the
+     *            page, {@code null} for silence
+     */
+    public SubagentTool(final ILLMProvider theProvider, final String theModel,
+        final List<IToolExecutor> theParentTools, final List<AgentProfile> theProfiles,
+        final int theHowDeep, final CancellationFlag theCancellation,
+        final SubagentRegistry theRegistry, final DelegateListener theListener) {
         provider = theProvider;
         model = theModel;
         parentTools = List.copyOf(theParentTools);
@@ -79,6 +116,7 @@ public final class SubagentTool implements IToolExecutor {
         depth = theHowDeep;
         cancellation = theCancellation == null ? new CancellationFlag() : theCancellation;
         registry = theRegistry == null ? new SubagentRegistry() : theRegistry;
+        listener = theListener;
     }
 
     @Override
@@ -151,7 +189,11 @@ public final class SubagentTool implements IToolExecutor {
         final List<IToolExecutor> delegateTools = new ArrayList<>();
         final ToolPolicy policy = new ToolPolicy();
         for(final IToolExecutor tool : parentTools) {
-            if(!policy.isWriteTool(tool.getName()) && policy.allows(profile, tool.getName())) {
+            // the read-only subset of the parent: a writer is refused by name,
+            // and anything that mutates other state (the plan board, lesson
+            // memory) is not parallel-safe and stays with the parent
+            if(tool.isParallelSafe() && !policy.isWriteTool(tool.getName())
+                && policy.allows(profile, tool.getName())) {
                 delegateTools.add(tool);
             }
         }
@@ -173,10 +215,34 @@ public final class SubagentTool implements IToolExecutor {
         try {
             final AgentAnswer answer = SubagentRunner.runForeground(name, loop, conversation);
             remember(name, theDescription, delegateModel, conversation, answer.getText());
+            announce(name, theDescription, answer.getText());
             return answer.getText();
         } catch (final LLMException ex) {
-            return "ERROR: " + (ex.getMessage() == null
+            final String failure = "ERROR: " + (ex.getMessage() == null
                 ? ex.getClass().getSimpleName() : ex.getMessage());
+            announce(name, theDescription, failure);
+            return failure;
+        }
+    }
+
+    /**
+     * Hands one finished delegate turn to the page listener. A listener that
+     * throws only costs the card, never the delegate's answer.
+     *
+     * @param theAgent delegate name
+     * @param theDescription what it was asked to do
+     * @param theResult final answer or failure text shown on the card
+     */
+    private void announce(final String theAgent, final String theDescription,
+        final String theResult) {
+        if(listener == null) {
+            return;
+        }
+        try {
+            listener.onDelegateFinished(theAgent, theDescription == null ? "" : theDescription,
+                theResult);
+        } catch (final RuntimeException ex) {
+            System.err.println("[colleague] subagent card listener failed: " + ex);
         }
     }
 

@@ -622,6 +622,23 @@ function addTool(t) {
   if (!pendingTools) { setTools([]); }
   if (pendingTools) { pendingTools.appendChild(chipFor(t)); scrollDown(); }
 }
+/* One finished delegate gets its own line on the transcript: the page never
+   sees the delegate's inner rounds, only the fact that a named helper worked
+   and what it answered. */
+function addSubagent(d) {
+  hideWelcome();
+  var row = document.createElement("div"); row.className = "tools";
+  var c = document.createElement("span");
+  var failed = (d.result || "").indexOf("ERROR") === 0;
+  c.className = "chip " + (failed ? "pending" : "done");
+  var label = "субагент " + (d.agent || "delegate");
+  if (d.description) { label += ": " + d.description; }
+  label += failed ? " — сбой" : " — готово";
+  c.textContent = label;
+  if (d.result) { c.title = d.result; }
+  row.appendChild(c);
+  msgs.appendChild(row); scrollDown();
+}
 function setStatus(s) { statusEl.textContent = s || ""; }
 function setMode(on) {
   modeEl.classList.toggle("on", !!on);
@@ -798,6 +815,7 @@ window.colleaguePush = function (kind, payload) {
     case "answer": endStream(); endThinking(); setTools(data.tools || []); addIncoming("answer", data.text || "", data.time); break;
     case "error": endStream(); addIncoming("error", data.text || "", data.time); break;
     case "tool": addTool(data); break;
+    case "subagent": addSubagent(data); break;
     case "status": setStatus(data.text || ""); break;
     case "mode": setMode(!!data.on); setStatus(data.text || ""); break;
     case "busy":
