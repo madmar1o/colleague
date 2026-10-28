@@ -43,6 +43,7 @@ import com.mad.edt.colleague.agent.PlanBoard;
 import com.mad.edt.colleague.agent.PlanTool;
 import com.mad.edt.colleague.chat.ContextBudget;
 import com.mad.edt.colleague.chat.EscapeSequence;
+import com.mad.edt.colleague.chat.PageCatalogEvents;
 import com.mad.edt.colleague.chat.PageCommandHandler;
 import com.mad.edt.colleague.chat.StreamBatcher;
 import com.mad.edt.colleague.chat.TurnController;
@@ -476,7 +477,7 @@ public final class ChatPanel {
         @Override
         public void bridgeReady() {
             pushHistory();
-            pushCommandCatalog();
+            pushCatalogEvent();
             setStatus(AgentMode.isOn()
                 ? "Режим правки ВКЛЮЧЁН — агент с инструментами проекта"
                 : "Готов к работе");
@@ -780,28 +781,22 @@ public final class ChatPanel {
     }
 
     /**
-     * Hands the page the slash-command catalog so it can hint the names while
-     * the user types: one entry per command with its one-line description.
-     * No supplier or an empty catalog pushes nothing, the composer then has
-     * no slash hints at all.
+     * Advertises the workspace catalog to the page when the tab opens: slash
+     * commands, project skills and (once they exist) agent profiles, so the
+     * composer can hint command names and the page can list what is installed
+     * without asking the user to guess. An empty catalog still pushes the
+     * event, the page then simply shows nothing extra.
      */
-    private void pushCommandCatalog() {
-        final SlashCommands commands =
-            ourCommandSupplier == null ? null : ourCommandSupplier.get();
-        if(commands == null || commands.catalog().isEmpty()
-            || ourBridge == null || !ourBridge.isReady()) {
+    private void pushCatalogEvent() {
+        if(ourBridge == null || !ourBridge.isReady()) {
             return;
         }
-        final JsonArray entries = new JsonArray();
-        for(final CommandDefinition command : commands.catalog()) {
-            final JsonObject entry = new JsonObject();
-            entry.addProperty("name", command.getName());
-            entry.addProperty("description", command.getDescription());
-            entries.add(entry);
-        }
-        final JsonObject payload = new JsonObject();
-        payload.add("commands", entries);
-        pushNow("commands", payload);
+        final SlashCommands commands =
+            ourCommandSupplier == null ? null : ourCommandSupplier.get();
+        final SkillRegistry skills =
+            ourSkillSupplier == null ? null : ourSkillSupplier.get();
+        pushNow("catalog", PageCatalogEvents.build(
+            commands == null ? List.of() : commands.catalog(), skills));
     }
     /** Plain styled-text conversation used when no browser backend is available. */
     private void createFallback(final Composite theParent) {
