@@ -4,6 +4,8 @@
 Зависимости: нет (первая задача плана)
 
 ## Статус и порядок работы (для каждого агента)
+0. Статус задачи: **done** (`done_commit=6a2f456`, влита в `milestone/m21`). Дальше по этому разделу —
+   порядок работы для следующих задач.
 1. Начать с `git log --oneline main..HEAD` и `git diff main...HEAD --stat` — что уже сделано в ветке.
 2. Взять Qdrant-точку задачи (curl POST http://localhost:6333/collections/colleague_tasks/points/scroll
    с фильтром `match` по payload.id = PP-P1) — поля status/details/acceptance/done_commit.
@@ -56,3 +58,23 @@ public void pushEvents(final List<Object[]> theBatch)
 8. В репозиторий не заносить названия чужих продуктов и их внутренность (colleague/AGENTS.md);
    «эталон» = поведение из референсных исходников ВНЕ репозитория.
 9. Не менять Bundle-Version, targets/*.target, версии Tycho/EDT «за компанию» с задачей.
+
+## Итог реализации (PP-P1, done_commit 6a2f456)
+- `BridgePushDelivery` (новый класс в `ui.internal`): рендер пакета `[["kind","{json}"],...]`
+  и постановка вызова `window.colleagueEvents(...)` в очередь UI-тика. Приёмники — функции
+  (`Function<String,Runnable>` + `Consumer<Runnable>`), поэтому тестируется без SWT.
+- `BridgeBrowser.pushEvents(List<Object[]> theBatch)`: снимает всю batch-очередь под тем же
+  замком, что и `push`, и отдаёт её в `BridgePushDelivery`; в out-логе маркер
+  `[colleague] push delivered`. `drainBatch`/`syncPollViaLocation` переписаны на общий
+  `renderBatch`/`scheduleBatch` — оба канала отдают идентичные пакеты (в `syncPollViaLocation`
+  заодно устранена потеря пакета при исключении `execute`: теперь события исполняются в тике).
+- `ChatPanel`: обёртка `push` переименована в `postEvent`, добавлен `pushNow(kind,payload)`
+  (enqueue + немедленная доставка); все 14 мест отправки событий переводятся на `pushNow`.
+- `chat.html`: интервал sync 1500 -> 4000 мс (только fallback).
+- Тесты: **создан тестовый фрагмент `com.mad.edt.colleague.ui.tests`** (`Fragment-Host: com.mad.edt.colleague.ui`,
+  добавлен в `bundles/pom.xml`). Карточка указывала фрагмент `com.mad.edt.colleague.tests`
+  (`Fragment-Host: com.mad.edt.colleague`) — из него пакеты `ui.internal` недоступны, поэтому
+  фрагмент заведён по образцу `context.tests`. Тестов нет в feature.xml — тестовые фрагменты
+  в фичу не входят (так же, как `tests` и `context.tests`).
+- Не проверено живым прогоном: замер <300 мс через `colleague.browser.selftest` и маркеры в
+  out-логе EDT требуют запуска Workbench — оставить на приёмку с UI.
