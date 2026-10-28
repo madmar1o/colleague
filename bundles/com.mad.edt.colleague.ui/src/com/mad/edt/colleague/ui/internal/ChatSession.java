@@ -97,6 +97,15 @@ public final class ChatSession {
     }
 
     /**
+     * @return {@code true} when the last finished turn of this session was
+     *         cut by the runtime's context window, so the shown answer is
+     *         incomplete
+     */
+    public boolean wasLastTurnTruncated() {
+        return conversation.wasLastTurnTruncated();
+    }
+
+    /**
      * Discards the accumulated conversation.
      */
     public void reset() {

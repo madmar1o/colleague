@@ -15,6 +15,8 @@ import com.mad.edt.colleague.context.vector.VectorIndex.SourceFile;
 import com.mad.edt.colleague.context.vector.VectorIndex.UpdateReport;
 import com.mad.edt.colleague.http.HttpTransport;
 import com.mad.edt.colleague.llm.GeneratorGate;
+import com.mad.edt.colleague.llm.LLMSettings;
+import com.mad.edt.colleague.llm.ProviderConfig;
 
 /**
  * Public entry point of the semantic context layer: builds a {@link VectorIndex}
@@ -98,7 +100,20 @@ public final class SemanticIndex {
             new QdrantClient(SemanticSettings.getStoreUrl(), STORE_TIMEOUT_MS),
             new EmbeddingClient(SemanticSettings.resolveEmbedUrl(),
                 SemanticSettings.getModel(), EMBED_TIMEOUT_MS),
-            GeneratorGate.GLOBAL, GENERATOR_WAIT_MS));
+            GeneratorGate.GLOBAL, GENERATOR_WAIT_MS, chatRuntimeUrl()));
+    }
+
+    /**
+     * Chat endpoint the live model turns answer from, so the index can tell
+     * whether embedding competes for that generator or runs on a separate
+     * runtime. Taken from the default provider's own root URL; remote chat
+     * providers therefore separate themselves from local embedding by nature.
+     *
+     * @return chat endpoint root URL, empty when no provider answers
+     */
+    private static String chatRuntimeUrl() {
+        final ProviderConfig chat = LLMSettings.getConfig(LLMSettings.getDefaultProviderId());
+        return chat == null ? "" : chat.getBaseUrl();
     }
 
     /**
