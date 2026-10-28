@@ -43,13 +43,19 @@ import com.mad.edt.colleague.agent.PlanBoard;
 import com.mad.edt.colleague.agent.PlanTool;
 import com.mad.edt.colleague.chat.ContextBudget;
 import com.mad.edt.colleague.chat.EscapeSequence;
+import com.mad.edt.colleague.chat.PageCatalogEvents;
 import com.mad.edt.colleague.chat.PageCommandHandler;
 import com.mad.edt.colleague.chat.StreamBatcher;
 import com.mad.edt.colleague.chat.TurnController;
+import com.mad.edt.colleague.commands.CommandDefinition;
+import com.mad.edt.colleague.commands.SlashCommands;
 import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.CancellationFlag;
 import com.mad.edt.colleague.llm.GeneratorGate;
 import com.mad.edt.colleague.llm.ILLMProvider;
+import com.mad.edt.colleague.skills.SkillRegistry;
+import com.mad.edt.colleague.skills.SkillShowcase;
+import com.mad.edt.colleague.skills.SkillTool;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 
 /**
@@ -73,9 +79,8 @@ public final class ChatPanel {
      * tools, so a big dump only buys prompt processing and cut-off rounds.
      */
     private static final int AGENT_CONTEXT_MAX_CHARS = 3_000;
-    /** streaming policy: what one batch may carry and how often they go out */
-    private static final int STREAM_BATCH_CHARS = 200;
-    private static final long STREAM_BATCH_INTERVAL_MS = 150L;
+    // streaming policy lives with StreamBatcher itself (DEFAULT_MAX_BATCH_CHARS
+    // and DEFAULT_MIN_INTERVAL_MS) so the tests pin the numbers the page runs on
 
     /** Max gap between two ESC presses that toggles the edit mode. */
     private static final long ESC_WINDOW_MS = 2_000L;
@@ -118,6 +123,21 @@ public final class ChatPanel {
     private Consumer<String> ourAnswerListener;
     private Runnable ourOnBack;
     private Supplier<List<IToolExecutor>> ourToolSupplier;
+
+    /**
+     * Project-local skill catalog for the agent path, {@code null} when the
+     * workspace carries no skills; consulted every turn so an empty catalog
+     * adds neither the load_skill tool nor the catalog block.
+     */
+    private Supplier<SkillRegistry> ourSkillSupplier;
+
+    /**
+     * Project-local slash commands the user can type in the chat line,
+     * {@code null} when the workspace carries none; consulted before every
+     * send, so a matching line is expanded into its prompt template while a
+     * plain or unknown line stays exactly as typed.
+     */
+    private Supplier<SlashCommands> ourCommandSupplier;
 
     /**
      * The step plan this chat keeps visible across its turns: the model
@@ -181,7 +201,7 @@ public final class ChatPanel {
         if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
             final JsonObject payload = new JsonObject();
             payload.addProperty("text", theQuestion);
-            ourBridge.push("input", payload);
+            pushNow("input", payload);
             return;
         }
         if(ourQuestion != null && !ourQuestion.isDisposed()) {
@@ -236,6 +256,25 @@ public final class ChatPanel {
      */
     public void setToolSupplier(final Supplier<List<IToolExecutor>> theToolSupplier) {
         ourToolSupplier = theToolSupplier;
+    }
+
+    /**
+     * @param theSkillSupplier project-local skills advertised to the agent as
+     *            a catalog plus the load_skill tool, consulted at each
+     *            question; {@code null} or an empty catalog runs the agent
+     *            without the skill layer
+     */
+    public void setSkillSupplier(final Supplier<SkillRegistry> theSkillSupplier) {
+        ourSkillSupplier = theSkillSupplier;
+    }
+
+    /**
+     * @param theCommandSupplier slash commands loaded from the workspace,
+     *            consulted before every send; {@code null} or an empty
+     *            catalog leaves slash lines as ordinary chat text
+     */
+    public void setCommandSupplier(final Supplier<SlashCommands> theCommandSupplier) {
+        ourCommandSupplier = theCommandSupplier;
     }
 
     /**
@@ -340,7 +379,7 @@ public final class ChatPanel {
         try {
             ViewBridge.ensureUserDataDir();
             ourBridge = new BridgeBrowser(ourRoot, "web/chat.html", this::handleBridge);
-            push("ready", null);
+            postEvent("ready", null);
             watchTheme();
             traceGeometry();
             installEscapeFilter();
@@ -438,6 +477,7 @@ public final class ChatPanel {
         @Override
         public void bridgeReady() {
             pushHistory();
+            pushCatalogEvent();
             setStatus(AgentMode.isOn()
                 ? "Режим правки ВКЛЮЧЁН — агент с инструментами проекта"
                 : "Готов к работе");
@@ -641,7 +681,7 @@ public final class ChatPanel {
             : "Режим правки ВЫКЛЮЧЕН");
     }
 
-    private void push(final String theKind, final JsonObject thePayload) {
+    private void postEvent(final String theKind, final JsonObject thePayload) {
         final JsonObject payload = thePayload == null ? new JsonObject() : thePayload;
         if("ready".equals(theKind)) {
             final JsonObject palette = ThemeSupport.pagePalette(
@@ -656,6 +696,22 @@ public final class ChatPanel {
             payload.addProperty("mode", Boolean.valueOf(AgentMode.isOn()));
         }
         ourBridge.push(theKind, payload);
+    }
+
+    /**
+     * Queues one event and asks the bridge to deliver it right away, so the
+     * page sees it within a UI tick instead of at the next sync poll. The
+     * polling reply stays as the fallback for the moment the script channel
+     * is not warm yet.
+     *
+     * @param theKind event name seen by the page
+     * @param thePayload JSON payload of the event
+     */
+    private void pushNow(final String theKind, final JsonObject thePayload) {
+        ourBridge.push(theKind, thePayload);
+        // the queue is the single source of truth for delivery, so the batch
+        // argument stays empty; pushEvents drains everything queued before it
+        ourBridge.pushEvents(java.util.Collections.<Object[]>emptyList());
     }
 
     /**
@@ -685,7 +741,7 @@ public final class ChatPanel {
             final JsonObject palette = ThemeSupport.pagePalette(theAnchor);
             ourLastPalette = palette.toString();
             applyNativePalette(palette);
-            ourBridge.push("readyPalette", palette);
+            pushNow("readyPalette", palette);
         }
     }
 
@@ -698,7 +754,7 @@ public final class ChatPanel {
             if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
                 ourLastPalette = palette.toString();
                 applyNativePalette(palette);
-                ourBridge.push("readyPalette", palette);
+                pushNow("readyPalette", palette);
             }
         });
     }
@@ -721,7 +777,26 @@ public final class ChatPanel {
         }
         final JsonObject payload = new JsonObject();
         payload.add("items", items);
-        ourBridge.push("history", payload);
+        pushNow("history", payload);
+    }
+
+    /**
+     * Advertises the workspace catalog to the page when the tab opens: slash
+     * commands, project skills and (once they exist) agent profiles, so the
+     * composer can hint command names and the page can list what is installed
+     * without asking the user to guess. An empty catalog still pushes the
+     * event, the page then simply shows nothing extra.
+     */
+    private void pushCatalogEvent() {
+        if(ourBridge == null || !ourBridge.isReady()) {
+            return;
+        }
+        final SlashCommands commands =
+            ourCommandSupplier == null ? null : ourCommandSupplier.get();
+        final SkillRegistry skills =
+            ourSkillSupplier == null ? null : ourSkillSupplier.get();
+        pushNow("catalog", PageCatalogEvents.build(
+            commands == null ? List.of() : commands.catalog(), skills));
     }
     /** Plain styled-text conversation used when no browser backend is available. */
     private void createFallback(final Composite theParent) {
@@ -794,6 +869,14 @@ public final class ChatPanel {
         if(question.isEmpty() || ourBusy) {
             return;
         }
+        // a slash line naming a loaded command is expanded into its prompt
+        // template before the model sees it; the chat bubble keeps showing
+        // what the user actually typed, an unknown slash line stays text
+        final SlashCommands commands =
+            ourCommandSupplier == null ? null : ourCommandSupplier.get();
+        final SlashCommands.Invocation invocation =
+            commands == null ? null : commands.match(question);
+        final String prompt = invocation == null ? question : invocation.prompt();
         final String context = ourAttachedContext;
         ourAttachedContext = "";
         final boolean editMode = AgentMode.isOn() && ourToolSupplier != null;
@@ -802,10 +885,10 @@ public final class ChatPanel {
             final JsonObject user = new JsonObject();
             user.addProperty("text", question);
             user.addProperty("time", timeLabel());
-            ourBridge.push("user", user);
+            pushNow("user", user);
             final JsonObject busy = new JsonObject();
             busy.addProperty("busy", Boolean.TRUE);
-            ourBridge.push("busy", busy);
+            pushNow("busy", busy);
         } else {
             if(!context.isEmpty()) {
                 appendLine("Вы: " + question + "  [к вопросу прикреплён контекст проекта, "
@@ -826,10 +909,8 @@ public final class ChatPanel {
         }
         setStatus(editMode ? "Агент: ищу по проекту и исполняю инструменты..." : "Думаю...");
 
-        final StreamBatcher deltaBatcher = new StreamBatcher(STREAM_BATCH_CHARS,
-            STREAM_BATCH_INTERVAL_MS);
-        final StreamBatcher thinkingBatcher = new StreamBatcher(STREAM_BATCH_CHARS,
-            STREAM_BATCH_INTERVAL_MS);
+        final StreamBatcher deltaBatcher = new StreamBatcher();
+        final StreamBatcher thinkingBatcher = new StreamBatcher();
 
         final IJobFunction questionBody = (final IProgressMonitor monitor) -> {
             // the turn owns the generator from context gathering to the last
@@ -840,16 +921,16 @@ public final class ChatPanel {
             try {
                 ourTurns.attachWorker(turn, Thread.currentThread());
                 final String effectiveContext = context.isEmpty() && ourAutoContextSupplier != null
-                    ? applyOrEmpty(ourAutoContextSupplier, question) : context;
+                    ? applyOrEmpty(ourAutoContextSupplier, prompt) : context;
                 System.err.println("[colleague] autocontext: " + effectiveContext.length()
                     + " chars for question [" + question.replace('\n', ' ') + "]");
                 final String answer;
                 if(editMode) {
-                    answer = runAgent(question,
+                    answer = runAgent(prompt,
                         ContextBudget.trimMiddle(effectiveContext, AGENT_CONTEXT_MAX_CHARS),
                         turn.cancellation());
                 } else {
-                    answer = ourSession.ask(ourModel, effectiveContext, question,
+                    answer = ourSession.ask(ourModel, effectiveContext, prompt,
                         browser ? chunk -> feedDelta(chunk, deltaBatcher)
                             : chunk -> { },
                         browser ? chunk -> feedDelta(chunk, thinkingBatcher,
@@ -859,7 +940,15 @@ public final class ChatPanel {
                 }
                 final int split = answer.lastIndexOf("\n--- ");
                 final String body = split > 0 ? answer.substring(0, split).strip() : answer;
-                final String stats = split > 0 ? answer.substring(split + 1).strip() : "";
+                final String baseStats = split > 0 ? answer.substring(split + 1).strip() : "";
+                // the runtime cuts the oldest prompt text in silence when the
+                // window runs out: only the stop reason says so, and without
+                // this note the user reads a shortened answer as a full one
+                final String stats = ourSession.wasLastTurnTruncated()
+                    ? (baseStats.isEmpty()
+                        ? "Контекст обрезан рантаймом, ответ неполный"
+                        : baseStats + " — контекст обрезан рантаймом, ответ неполный")
+                    : baseStats;
                 ourLastAnswer = body;
                 if(turn.cancellation().isCancelled()) {
                     System.out.println("[colleague] cancelled turn observed: partial "
@@ -872,7 +961,7 @@ public final class ChatPanel {
                             final JsonObject payload = new JsonObject();
                             payload.addProperty("text", body);
                             payload.addProperty("time", timeLabel());
-                            ourBridge.push("answer", payload);
+                            pushNow("answer", payload);
                         } else {
                             appendLine("Colleague: " + body);
                         }
@@ -896,7 +985,7 @@ public final class ChatPanel {
                             final JsonObject payload = new JsonObject();
                             payload.addProperty("text", String.valueOf(ex.getMessage()));
                             payload.addProperty("time", timeLabel());
-                            ourBridge.push("error", payload);
+                            pushNow("error", payload);
                         } else {
                             appendLine("Ошибка: " + ex.getMessage());
                         }
@@ -920,7 +1009,7 @@ public final class ChatPanel {
                     if(ourBridge != null && ourBridge.isReady()) {
                         final JsonObject busy = new JsonObject();
                         busy.addProperty("busy", Boolean.FALSE);
-                        ourBridge.push("busy", busy);
+                        pushNow("busy", busy);
                     }
                 });
             }
@@ -958,7 +1047,7 @@ public final class ChatPanel {
             if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
                 final JsonObject payload = new JsonObject();
                 payload.addProperty("text", batch);
-                ourBridge.push(theKind, payload);
+                pushNow(theKind, payload);
             }
         });
     }
@@ -975,6 +1064,10 @@ public final class ChatPanel {
         tools.add(new PlanTool(ourPlanBoard));
         if(ourLessonMemory != null) {
             tools.add(new MemoryTool(ourLessonMemory));
+        }
+        final SkillRegistry skills = ourSkillSupplier == null ? null : ourSkillSupplier.get();
+        if(skills != null && !skills.isEmpty()) {
+            tools.add(new SkillTool(skills));
         }
         final AgentLoop loop = new AgentLoop(ourSession.getProvider(),
             tools, ourModel, AGENT_MAX_STEPS, theCancellation,
@@ -1002,6 +1095,9 @@ public final class ChatPanel {
         }
         if(ourLessonMemory != null && ourLessonMemory.lessonCount() > 0) {
             system.append(' ').append(ourLessonMemory.render());
+        }
+        if(skills != null && !skills.isEmpty()) {
+            system.append(new SkillShowcase(skills).catalogSection());
         }
         String task = theQuestion;
         if(!theContext.isEmpty()) {
@@ -1054,7 +1150,7 @@ public final class ChatPanel {
         if(ourBridge != null && ourBridge.isReady()) {
             final JsonObject busy = new JsonObject();
             busy.addProperty("busy", Boolean.FALSE);
-            ourBridge.push("busy", busy);
+            pushNow("busy", busy);
         }
     }
 
@@ -1108,7 +1204,7 @@ public final class ChatPanel {
         if(ourBridge != null && ourBridge.isReady()) {
             final JsonObject payload = new JsonObject();
             payload.addProperty("on", Boolean.valueOf(AgentMode.isOn()));
-            ourBridge.push("mode", payload);
+            pushNow("mode", payload);
             return;
         }
         if(ourModeButton == null || ourModeButton.isDisposed()) {
@@ -1194,7 +1290,7 @@ public final class ChatPanel {
         if(ourBridge != null && ourBridge.isReady()) {
             final JsonObject payload = new JsonObject();
             payload.addProperty("text", theText == null ? "" : theText);
-            ourBridge.push("status", payload);
+            pushNow("status", payload);
             return;
         }
         if(ourStatusLabel == null || ourStatusLabel.isDisposed()) {
