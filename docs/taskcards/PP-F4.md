@@ -63,3 +63,39 @@ public final class SubagentTool {
 8. В репозиторий не заносить названия чужих продуктов и их внутренность (colleague/AGENTS.md);
    «эталон» = поведение из референсных исходников ВНЕ репозитория.
 9. Не менять Bundle-Version, targets/*.target, версии Tycho/EDT «за компанию» с задачей.
+
+## Итог реализации (2026-10-29)
+Выполнено. Коммиты: `ad78542` (test, красный: SubagentToolTest + SubagentRegistryTest) →
+`1e26ef6` (feat: delegate subagents with a nested read-only loop — core-пакет) → `c4278fc`
+(feat: карточка «субагент … — готово» на странице + мост kind:subagent) → `eec9dfd`
+(test: e2e-сценарий делегирования реальной моделью). done_commit=`1e26ef6` (ядро; UI-обвязка —
+`c4278fc`, e2e-доказательство — `eec9dfd`).
+
+- Пакет `com.mad.edt.colleague.agent.subagent` (core, добавлен в Export-Package):
+  `SubagentTool` (инструмент `subagent`, аргументы agent/description/prompt; вложенный
+  `AgentLoop` с `SUBAGENT_MAX_STEPS=4`, глубина `MAX_DEPTH=1`, live-сессии),
+  `SubagentRunner` (Eclipse Job `colleague-subagent-<agent>`, общий `GeneratorGate.GLOBAL`,
+  потолок ожидания хода `TURN_WAIT_MS=240 c`, Job разрешён правилом 3),
+  `SubagentRegistry` (live-сессии делегатов, `MAX_SESSIONS=8`, eviction старейшего,
+  повторное имя заменяет запись на месте).
+- Вложенный цикл продолжает историю делегата: у `AgentLoop` появился вход `run(List<ChatMessage>)`
+  (существующий `run(system, user)` делегирует ему, поведение прежнее).
+- Read-only граница: делегат получает инструменты родителя, у которых `isParallelSafe()` и имя не
+  writer (по `ToolPolicy.isWriteTool`), плюс разрешён профилем; вложенный экземпляр `SubagentTool`
+  добавляется всегда — модель получает явный отказ по глубине вместо unknown-tool.
+- Профили F3: имя делегата ищется среди профилей с `mode != PRIMARY`; model/max-steps/тело
+  профиля применяются к вложенному циклу.
+- UI: `ChatPanel` предлагает `subagent` в edit-mode (если профиль не вычеркнул имя), реестр
+  live-делегатов живёт на панель между ходами; `SubagentTool.DelegateListener` → `pushNow
+  ("subagent", {agent, description, result})`; в `chat.html` `addSubagent` — чип-строка
+  «субагент <имя>: <описание> — готово/сбой», результат в `title`.
+- Отклонения: (1) сигнатура Javadoc-каркаса (`spec()`, `execute(agent, prompt)`) приведена к
+  контракту `IToolExecutor`/`ToolSpec` (правило 5): `getName/getSpec/execute(json)`, публичный
+  `run(agent, description, prompt)`; (2) критерий read-only ужестолнён против буквального
+  «read-only инструменты родителя»: планировщик и память уроков меняют состояние, поэтому
+  фильтруются по `isParallelSafe()`, а не только по имени writer; (3) добавлен четвёртый тест
+  `liveSessionContinuesTheSameDelegate` (реестр live-сессий — часть карточки, требовал фиксации);
+  (4) «в e2e-трейсе виден вызов subagent» реализовано вторым gated-сценарием
+  `realModelDelegatesToASubagent` (`COLLEAGUE_E2E=1`): в трейс Лога попадает `tool subagent ... ->
+  8 chars`, ассерт проверяет, что ответ делегата вернулся результат-сообщением, `edit_file`
+  в трейсе не появился, файл не изменён.
