@@ -81,3 +81,17 @@ public final class ReloadableRegistry<V> {
 8. В репозиторий не заносить названия чужих продуктов и их внутренность (colleague/AGENTS.md);
    «эталон» = поведение из референсных исходников ВНЕ репозитория.
 9. Не менять Bundle-Version, targets/*.target, версии Tycho/EDT «за компанию» с задачей.
+
+## Итог реализации (2026-10-28)
+Выполнено. Коммиты: `6de2cbb` (test, красный) → `227a587` (test, защита рефакторинга) →
+`a841e0d` (refactor: one frontmatter parser behind skills, commands and profiles). done_commit=`a841e0d`.
+
+- Новый пакет `com.mad.edt.colleague.ext` (core, Export-Package): `Frontmatter` (BOM/CRLF-толерантный
+  split, key по первому двоеточию, value с двоеточиями сохраняется, body без заголовка — весь текст) и
+  `ReloadableRegistry<V>` (reload(Map), reload(SnapshotBuilder) — бросивший билдер оставляет прежний
+  снимок live, get/snapshot, порядок регистрации через LinkedHashMap).
+- `SkillLoader.loadOne` теперь тонкий читатель поверх `Frontmatter` (28 строк парсинга → 6).
+- Отклонение от карточки: «существующий SkillLoaderTest» в репозитории отсутствовал — рефакторинг был
+  без защиты, поэтому `SkillLoaderTest` создан (4 теста: header/colons, fallback на имя директории,
+  tools.json, сортировка и пропуск директорий без SKILL.md) и закоммичен до refactor-коммита.
+- Красный шаг: `FrontmatterParserTest` (6 тестов) закоммичен до существования пакета ext.
