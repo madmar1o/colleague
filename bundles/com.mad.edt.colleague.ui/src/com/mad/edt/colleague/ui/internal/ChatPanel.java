@@ -73,9 +73,8 @@ public final class ChatPanel {
      * tools, so a big dump only buys prompt processing and cut-off rounds.
      */
     private static final int AGENT_CONTEXT_MAX_CHARS = 3_000;
-    /** streaming policy: what one batch may carry and how often they go out */
-    private static final int STREAM_BATCH_CHARS = 200;
-    private static final long STREAM_BATCH_INTERVAL_MS = 150L;
+    // streaming policy lives with StreamBatcher itself (DEFAULT_MAX_BATCH_CHARS
+    // and DEFAULT_MIN_INTERVAL_MS) so the tests pin the numbers the page runs on
 
     /** Max gap between two ESC presses that toggles the edit mode. */
     private static final long ESC_WINDOW_MS = 2_000L;
@@ -842,10 +841,8 @@ public final class ChatPanel {
         }
         setStatus(editMode ? "Агент: ищу по проекту и исполняю инструменты..." : "Думаю...");
 
-        final StreamBatcher deltaBatcher = new StreamBatcher(STREAM_BATCH_CHARS,
-            STREAM_BATCH_INTERVAL_MS);
-        final StreamBatcher thinkingBatcher = new StreamBatcher(STREAM_BATCH_CHARS,
-            STREAM_BATCH_INTERVAL_MS);
+        final StreamBatcher deltaBatcher = new StreamBatcher();
+        final StreamBatcher thinkingBatcher = new StreamBatcher();
 
         final IJobFunction questionBody = (final IProgressMonitor monitor) -> {
             // the turn owns the generator from context gathering to the last
