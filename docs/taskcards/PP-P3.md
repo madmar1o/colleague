@@ -47,3 +47,21 @@
 8. В репозиторий не заносить названия чужих продуктов и их внутренность (colleague/AGENTS.md);
    «эталон» = поведение из референсных исходников ВНЕ репозитория.
 9. Не менять Bundle-Version, targets/*.target, версии Tycho/EDT «за компанию» с задачей.
+
+## Итог реализации (2026-10-28)
+Выполнено. Коммиты: `618f968` (test, красный) → `c1c5f7b` (fix: defer browser creation and project index away from startup).
+
+- Новый seam `StartupDeferral` (ui.internal): `INDEX_JOB_DELAY_MS=30_000`,
+  `scheduleIndexJob(...)` — job с `setSystem(true)` и задержкой 30 с; `defer(...)` —
+  тяжёлая сборка чат-страницы после первой отрисовки (asyncExec).
+- `ColleagueView`: job «Colleague: project index» запускается через seam; `openContact`
+  (пути UI: клик по списку, автооткрытие, тест phase2) создаёт вкладку сразу, а `ChatPanel`
+  с браузером строит после отрисовки; синхронный `openContactNow` — для staged-вопросов
+  и selftest'ов, которым панель нужна сразу.
+- **Отклонение 1:** тест проверяет seam, которым теперь сшит `createPartControl`, а не сам
+  `createPartControl` — headless-юнит не может поднять workbench-страницу с SWT.
+- **Отклонение 2:** в целевом рантайме EDT у `Job` нет константы `SCHEDULED` (есть
+  `SLEEPING/WAITING/RUNNING`) — тест паркует job в `SLEEPING|WAITING` и запрещает `RUNNING`.
+- **Отклонение 3:** вместо `Display.timerExec(0,...)` — `asyncExec`: задача идёт сразу после
+  текущего прогона событий, что и есть «после первой отрисовки» для открываемой вкладки.
+- Не проверено живым прогоном EDT: отсутствие фриза вкладки и старт индекса не раньше 30 с.
