@@ -112,6 +112,21 @@ public final class AgentLoop {
             messages.add(ChatMessage.system(theSystemPrompt));
         }
         messages.add(ChatMessage.user(theUserMessage));
+        return run(messages);
+    }
+
+    /**
+     * Runs one task over an already open conversation: the loop continues the
+     * history it is handed instead of starting a fresh one. A delegate that
+     * resumes its parent's or its own earlier exchange uses this entry.
+     *
+     * @param theConversation messages to start from, system message first when
+     *            the caller wants one; the loop appends to this list
+     * @return the final answer
+     * @throws LLMException when the model endpoint fails
+     */
+    public AgentAnswer run(final List<ChatMessage> theConversation) throws LLMException {
+        final List<ChatMessage> messages = new ArrayList<>(theConversation);
 
         final List<ToolSpec> specs = new ArrayList<>();
         for(final IToolExecutor executor : executors.values()) {

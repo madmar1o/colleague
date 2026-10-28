@@ -41,6 +41,8 @@ import com.mad.edt.colleague.agent.LoggingAgentObserver;
 import com.mad.edt.colleague.agent.MemoryTool;
 import com.mad.edt.colleague.agent.PlanBoard;
 import com.mad.edt.colleague.agent.PlanTool;
+import com.mad.edt.colleague.agent.subagent.SubagentRegistry;
+import com.mad.edt.colleague.agent.subagent.SubagentTool;
 import com.mad.edt.colleague.agents.AgentProfile;
 import com.mad.edt.colleague.agents.ToolPolicy;
 import com.mad.edt.colleague.chat.ContextBudget;
@@ -152,6 +154,13 @@ public final class ChatPanel {
      * agent; only meaningful while the edit mode runs the agent loop.
      */
     private String ourProfileName = "";
+
+    /**
+     * Delegates this chat keeps alive across its turns: calling the same
+     * agent name again continues that delegate's own conversation instead of
+     * starting from zero. Bounded, see {@link SubagentRegistry}.
+     */
+    private final SubagentRegistry ourSubagents = new SubagentRegistry();
 
     /**
      * The step plan this chat keeps visible across its turns: the model
@@ -1159,6 +1168,24 @@ public final class ChatPanel {
         if(skills != null && !skills.isEmpty() && policy.allows(profile, "load_skill")) {
             tools.add(new SkillTool(skills));
         }
+        if(policy.allows(profile, "subagent")) {
+            // the delegate hears about its finished turn through this panel so
+            // the page shows a card; the listener thread is the worker thread,
+            // delivery to the page goes through asyncExec as everywhere else
+            // the delegate resolves its own profile model inside the tool, so
+            // the parent hands over just the chat's model as the fallback
+            tools.add(new SubagentTool(ourSession.getProvider(), ourModel, tools,
+                profileCatalog(), 0, theCancellation, ourSubagents,
+                (agent, description, result) -> Display.getDefault().asyncExec(() -> {
+                    if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
+                        final JsonObject card = new JsonObject();
+                        card.addProperty("agent", agent);
+                        card.addProperty("description", description);
+                        card.addProperty("result", result);
+                        pushNow("subagent", card);
+                    }
+                })));
+        }
         final String model = profile != null && profile.getModelName() != null
             && !profile.getModelName().isEmpty() ? profile.getModelName() : ourModel;
         final int maxSteps = profile != null && profile.getMaxSteps() > 0
@@ -1198,6 +1225,12 @@ public final class ChatPanel {
         }
         if(skills != null && !skills.isEmpty()) {
             system.append(new SkillShowcase(skills).catalogSection());
+        }
+        if(policy.allows(profile, "subagent")) {
+            system.append(" For a bounded research task that needs many searches and")
+                .append(" reads, call subagent with a clear prompt: a delegate works the")
+                .append(" task on its own with read-only tools and returns one final")
+                .append(" answer; it cannot change files.");
         }
         String task = theQuestion;
         if(!theContext.isEmpty()) {
