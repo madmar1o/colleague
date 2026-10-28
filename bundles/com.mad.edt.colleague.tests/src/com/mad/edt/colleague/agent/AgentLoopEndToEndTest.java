@@ -20,6 +20,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mad.edt.colleague.agent.subagent.SubagentTool;
 import com.mad.edt.colleague.llm.CancellationFlag;
 import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.ChatRequest;
@@ -343,5 +344,81 @@ class AgentLoopEndToEndTest {
         Assertions.assertTrue(totalMs < 120_000L,
             "the turn took " + totalMs + " ms, over the 120000 ms budget of a warmed"
                 + " model; trace:\n" + trace.get());
+    }
+
+    @Test
+    @DisplayName("a real local model delegates a read-only task and reports the delegate answer")
+    void realModelDelegatesToASubagent(@TempDir final Path theWorkspace) throws Exception {
+        final Path note = theWorkspace.resolve("src/secret.txt");
+        Files.createDirectories(note.getParent());
+        Files.writeString(note, "umbrella", StandardCharsets.UTF_8);
+
+        final OllamaLLMProvider provider = new OllamaLLMProvider(ProviderConfig
+            .builder("e2e", LLMProviderType.OLLAMA)
+            .baseUrl(SERVER_URL)
+            .defaultModel(MODEL)
+            .readTimeoutMs(300_000)
+            .build());
+        Assumptions.assumeTrue(provider.isAvailable(),
+            "COLLEAGUE_E2E=1 but no model server answers at " + SERVER_URL);
+        Assumptions.assumeTrue(provider.listModels().contains(MODEL),
+            "model " + MODEL + " is not installed on the endpoint");
+        warmUpGenerator(provider);
+
+        final RecordingObserver recorder = new RecordingObserver();
+        /*
+         * The parent is offered the writer as well: the delegate must never
+         * see it, so the whole trace staying free of edit_file calls while
+         * the delegate still reads the file is the proof of the read-only
+         * boundary, not just a property of how the tools were wired.
+         */
+        final SubagentTool subagent = new SubagentTool(provider, MODEL,
+            List.of(new ReadFileTool(theWorkspace), new EditFileTool(theWorkspace)),
+            List.of(), 0, new CancellationFlag());
+        final AgentLoop loop = new AgentLoop(provider,
+            List.of(new ReadFileTool(theWorkspace), new EditFileTool(theWorkspace), subagent),
+            MODEL, 6, new CancellationFlag(), recorder);
+
+        final PrintStream originalOut = System.out;
+        final ByteArrayOutputStream console = new ByteArrayOutputStream();
+        final AgentAnswer answer;
+        final long startedAtNanos = System.nanoTime();
+        try {
+            System.setOut(new PrintStream(console, true, StandardCharsets.UTF_8));
+            answer = loop.run(
+                "You answer questions using tools. Always call the tools,"
+                    + " never describe actions in prose.",
+                "The secret word is stored in the workspace file src/secret.txt."
+                    + " Do NOT read it yourself. Call the subagent tool with a prompt"
+                    + " that tells the delegate to call read_file with path"
+                    + " src/secret.txt and answer with the exact word it read."
+                    + " When the subagent result comes back, answer with exactly that"
+                    + " word and nothing else.");
+        } finally {
+            System.setOut(originalOut);
+        }
+        System.out.print(console.toString(StandardCharsets.UTF_8));
+
+        final java.util.function.Supplier<String> trace =
+            () -> String.join("\n", recorder.events);
+        Assertions.assertTrue(recorder.usedTool("subagent"),
+            "the model never delegated; trace:\n" + trace.get());
+        final String delegateResult = recorder.events.stream()
+            .filter(event -> event.contains(RecordingObserver.TOOL_EVENT + "subagent"))
+            .findFirst().orElse("");
+        Assertions.assertTrue(delegateResult.contains("umbrella"),
+            "the delegate answer did not come back as the tool result; trace:\n"
+                + trace.get());
+        Assertions.assertFalse(recorder.usedTool("edit_file"),
+            "a write tool reached the delegate or the parent rewrote the file; trace:\n"
+                + trace.get());
+        Assertions.assertEquals("umbrella", Files.readString(note, StandardCharsets.UTF_8),
+            "the delegate must not change the file it reads");
+        Assertions.assertTrue(answer.getText().contains("umbrella"),
+            "the parent did not report the delegate's answer; trace:\n" + trace.get());
+        final long totalMs = (System.nanoTime() - startedAtNanos) / 1_000_000L;
+        Assertions.assertTrue(totalMs < 180_000L,
+            "the delegation took " + totalMs + " ms, over the 180000 ms budget;"
+                + " trace:\n" + trace.get());
     }
 }
