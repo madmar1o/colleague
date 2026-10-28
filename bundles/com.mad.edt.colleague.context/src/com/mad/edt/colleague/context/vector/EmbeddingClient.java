@@ -67,6 +67,14 @@ public final class EmbeddingClient {
     }
 
     /**
+     * @return runtime root URL this client sends every embedding call to,
+     *         needed to decide whether embedding shares a generator with chat
+     */
+    public String getBaseUrl() {
+        return baseUrl;
+    }
+
+    /**
      * Embeds a batch of texts in one request.
      *
      * @param theTexts texts to embed, non-empty
