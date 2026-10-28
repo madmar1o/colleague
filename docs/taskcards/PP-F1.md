@@ -63,3 +63,24 @@ public final class SkillTool {
 8. В репозиторий не заносить названия чужих продуктов и их внутренность (colleague/AGENTS.md);
    «эталон» = поведение из референсных исходников ВНЕ репозитория.
 9. Не менять Bundle-Version, targets/*.target, версии Tycho/EDT «за компанию» с задачей.
+
+## Итог реализации (2026-10-28)
+Выполнено. Коммиты: `9468fcf` (test, красный) → `c6d0154` (feat: lazy skill loading through a
+showcase catalog) → `c00b02c` (fix двух опечаток в самом красном тесте). done_commit=`c6d0154`.
+
+- `SkillShowcase.catalogSection()` — блок `## available_skills` (name: description, не более),
+  скрывает скилы с `disable-model-invocation: true`, указывает модели способ забрать тело (load_skill).
+- `SkillTool implements IToolExecutor` (контракт реестра AgentLoop, п.5 принципов): `load_skill` с
+  параметром `id`; тело — в `<skill_content name=...>` + список файлов каталога скила (≤10, «(+N more
+  file(s))»); неизвестный id → ERROR со списком доступных.
+- `SkillDefinition`: новые поля sourceDir + autoInvoke (старый 4-арг. конструктор сохранён);
+  `SkillLoader` читает `disable-model-invocation` из frontmatter и помнит директорию скила.
+- Проводка: `ChatPanel.setSkillSupplier` — в edit-mode в tools добавляется `SkillTool`, в системную
+  часть — только каталог (полных тел в промпте нет никогда); `ColleagueView.skillCatalog()` грузит
+  `.colleague/skills` первого открытого проекта один раз за сессию вида.
+- Отклонения: (1) карточка предполагала, что полные тела скилов уже лежат в промпте, — фактической
+  проводки скилов в чате не было вообще, F1 её и построил (только agent-path: load_skill — инструмент);
+  (2) в красном тесте были две собственные опечатки (подсчёт имён файлов по длине `.md`, поиск тега
+  без учёта атрибута name) — исправлены отдельным test-коммитом, поведение продукта не меняли.
+- Экономия токенов подтверждена тестом: каталог не содержит маркер тела, тело появляется только после
+  load_skill.
