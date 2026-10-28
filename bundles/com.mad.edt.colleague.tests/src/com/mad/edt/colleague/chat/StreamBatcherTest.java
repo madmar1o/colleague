@@ -2,6 +2,7 @@ package com.mad.edt.colleague.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -89,5 +90,50 @@ class StreamBatcherTest {
         assertNull(batcher.accept(""));
         clock.advance(151);
         assertEquals("late", batcher.accept("late"));
+    }
+
+    /**
+     * Production policy smoke check: a typical local-model turn streams about
+     * 40 characters every 100 ms for two seconds. With the coarse batch
+     * settings the page must see at most six pushes for that turn, not one
+     * per tick; the coarser timer must not swallow whole chunks either.
+     */
+    @Test
+    void productionPolicyKeepsTwoSecondTurnUnderSixPushes() {
+        final FakeClock clock = new FakeClock();
+        clock.advance(10_000);
+        final StreamBatcher batcher = new StreamBatcher(clock::now);
+        int pushes = 0;
+        int streamed = 0;
+        for(int tick = 0; tick < 20; tick++) {
+            clock.advance(100);
+            final String batch = batcher.accept("x".repeat(40));
+            if(batch != null) {
+                pushes++;
+                streamed += batch.length();
+            }
+        }
+        // one quiet sweep after the turn: whatever is still pending must go out
+        clock.advance(StreamBatcher.DEFAULT_MIN_INTERVAL_MS);
+        final String tail = batcher.accept("");
+        if(tail != null) {
+            streamed += tail.length();
+        }
+        assertTrue(pushes <= 6, "expected at most six pushes for a two second turn, was " + pushes);
+        assertEquals(800, streamed, "every streamed character must reach the page exactly once");
+    }
+
+    /**
+     * The coarser timer must not delay the first visible token: the very
+     * first chunk of a turn goes out immediately, so perceived latency of
+     * the streaming answer stays where it was.
+     */
+    @Test
+    void productionFirstTokenGoesOutImmediately() {
+        final FakeClock clock = new FakeClock();
+        clock.advance(10_000);
+        final StreamBatcher batcher = new StreamBatcher(clock::now);
+        clock.advance(5);
+        assertEquals("first", batcher.accept("first"));
     }
 }

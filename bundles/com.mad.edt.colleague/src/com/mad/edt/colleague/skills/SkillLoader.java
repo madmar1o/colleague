@@ -11,6 +11,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mad.edt.colleague.ext.Frontmatter;
 import com.mad.edt.colleague.llm.ToolSpec;
 
 /**
@@ -52,33 +53,15 @@ public final class SkillLoader {
 
     private SkillDefinition loadOne(final File theSkillFile, final File theToolsFile) throws IOException {
         final String raw = Files.readString(theSkillFile.toPath(), StandardCharsets.UTF_8);
-        String name = theSkillFile.getParentFile().getName();
-        String description = "";
-        String body = raw;
+        final Frontmatter header = Frontmatter.split(raw);
+        final String name = header.fields().getOrDefault("name",
+            theSkillFile.getParentFile().getName());
+        final String description = header.fields().getOrDefault("description", "");
+        final boolean autoInvoke = !"true".equalsIgnoreCase(
+            header.fields().getOrDefault("disable-model-invocation", "false"));
 
-        final String normalized = raw.replace("\r\n", "\n");
-        if(normalized.startsWith("---\n")) {
-            final int end = normalized.indexOf("\n---", 4);
-            if(end > 0) {
-                final String header = normalized.substring(4, end);
-                body = normalized.substring(normalized.indexOf('\n', end + 1) + 1);
-                for(final String line : header.split("\n")) {
-                    final int colon = line.indexOf(':');
-                    if(colon <= 0) {
-                        continue;
-                    }
-                    final String key = line.substring(0, colon).trim();
-                    final String value = line.substring(colon + 1).trim();
-                    if("name".equals(key)) {
-                        name = value;
-                    } else if("description".equals(key)) {
-                        description = value;
-                    }
-                }
-            }
-        }
-
-        return new SkillDefinition(name, description, body.strip(), loadTools(theToolsFile));
+        return new SkillDefinition(name, description, header.body(), loadTools(theToolsFile),
+            theSkillFile.getParentFile().toPath(), autoInvoke);
     }
 
     private List<ToolSpec> loadTools(final File theToolsFile) throws IOException {

@@ -35,6 +35,15 @@ public final class AgentLoop {
      */
     private static final int ROUND_TRIP_OUTPUT_TOKENS = 4_096;
 
+    /**
+     * Generation budget of the repair round. The round it repairs died with
+     * the thinking pass eating the whole ceiling, so repeating that ceiling
+     * would doom the repair to the same silent cut-off; the budget doubles
+     * while the thinking pass is suppressed, so the extra room goes to the
+     * answer itself.
+     */
+    private static final int REPAIR_ROUND_OUTPUT_TOKENS = 8_192;
+
     private final ILLMProvider provider;
     private final Map<String, IToolExecutor> executors;
     private final String model;
@@ -150,6 +159,7 @@ public final class AgentLoop {
                 // chasing it further only burns the budget
                 steps++;
                 request.think(false);
+                request.maxTokens(REPAIR_ROUND_OUTPUT_TOKENS);
                 result = streamedRound(request.build());
             }
             if(!result.wantsToolCall()) {
