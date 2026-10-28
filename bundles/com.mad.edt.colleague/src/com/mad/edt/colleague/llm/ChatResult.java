@@ -123,6 +123,17 @@ public final class ChatResult {
         return !toolCalls.isEmpty();
     }
 
+    /**
+     * @return {@code true} when the runtime stopped the answer because the
+     *         window ran out: the provider reported the stop reason
+     *         {@code length}, which means the oldest prompt text had been
+     *         cut away and the answer is only as complete as the surviving
+     *         tail of the prompt
+     */
+    public boolean truncated() {
+        return "length".equals(finishReason);
+    }
+
     @Override
     public String toString() {
         return "ChatResult[" + model + ", " + completionTokens + " tokens, " + finishReason
