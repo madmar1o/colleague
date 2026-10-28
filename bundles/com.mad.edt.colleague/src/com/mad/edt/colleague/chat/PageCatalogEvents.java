@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.mad.edt.colleague.agents.AgentProfile;
 import com.mad.edt.colleague.commands.CommandDefinition;
 import com.mad.edt.colleague.skills.SkillDefinition;
 import com.mad.edt.colleague.skills.SkillRegistry;
@@ -11,9 +12,9 @@ import com.mad.edt.colleague.skills.SkillRegistry;
 /**
  * Builds the {@code catalog} bridge event a chat page receives when its tab
  * opens: everything the workspace offers - slash commands, project skills and
- * agent profiles - as plain name-plus-description entries. Agent profiles
- * arrive with a later milestone, so their section is published as an empty
- * array today and the page renders the field without any special casing.
+ * agent profiles - as plain name-plus-description entries. Every section is
+ * published as an array even when empty, so the page renders the fields
+ * without any special casing.
  */
 public final class PageCatalogEvents {
 
@@ -27,6 +28,21 @@ public final class PageCatalogEvents {
      */
     public static JsonObject build(final List<CommandDefinition> theCommands,
         final SkillRegistry theSkills) {
+        return build(theCommands, theSkills, List.of());
+    }
+
+    /**
+     * Builds the {@code catalog} payload including the agent profiles the user
+     * can pick from the profile chip; profiles hidden from that list stay out.
+     *
+     * @param theCommands slash commands of the workspace, {@code null} for none
+     * @param theSkills project skills of the workspace, {@code null} for none
+     * @param theProfiles agent profiles of the workspace, {@code null} for none
+     * @return event payload with a commands, skills and profiles array, each
+     *         entry carrying a name and a description
+     */
+    public static JsonObject build(final List<CommandDefinition> theCommands,
+        final SkillRegistry theSkills, final List<AgentProfile> theProfiles) {
         final JsonObject payload = new JsonObject();
         final JsonArray commands = new JsonArray();
         if(theCommands != null) {
@@ -42,9 +58,15 @@ public final class PageCatalogEvents {
             }
         }
         payload.add("skills", skills);
-        // profiles join the catalog when the profile layer lands; the page
-        // already reads this field, an empty array keeps that render simple
-        payload.add("profiles", new JsonArray());
+        final JsonArray profiles = new JsonArray();
+        if(theProfiles != null) {
+            for(final AgentProfile profile : theProfiles) {
+                if(!profile.isHidden()) {
+                    profiles.add(entry(profile.getName(), profile.getDescription()));
+                }
+            }
+        }
+        payload.add("profiles", profiles);
         return payload;
     }
 

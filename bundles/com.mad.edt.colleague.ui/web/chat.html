@@ -210,6 +210,7 @@ button.scrollbottom:hover { border-color: var(--accent); }
     <div class="name" id="hdrname">Colleague</div>
     <div class="sub" id="hdrsub">ассистент по проекту</div>
   </div>
+  <button class="iconbtn" id="btnprofile" title="Профиль агента: клик переключает следующий" hidden>профиль: обычный</button>
   <button class="iconbtn" id="btnmode" title="Дважды ESC или клик — режим правки">&#9881; правка: выкл</button>
   <button class="iconbtn" id="btnnew" title="Новый диалог">новый</button>
 </header>
@@ -705,6 +706,28 @@ function renderSlashHints() {
   slashEl.classList.add("show");
 }
 qEl.addEventListener("input", renderSlashHints);
+/* Profile chip: one click walks the list default -> first profile -> next ->
+   back to default. The picked name travels to Java, which applies that
+   profile's tool policy and step budget to the next edit-mode question. */
+var profileNames = [];
+var profileIdx = -1;
+var profileEl = document.getElementById("btnprofile");
+function paintProfileChip() {
+  if (!profileNames.length) { profileEl.hidden = true; return; }
+  profileEl.hidden = false;
+  profileEl.textContent = "профиль: "
+    + (profileIdx < 0 ? "обычный" : profileNames[profileIdx]);
+}
+function setProfiles(list) {
+  profileNames = (list || []).map(function (p) { return p.name; });
+  if (profileIdx >= profileNames.length) { profileIdx = -1; }
+  paintProfileChip();
+}
+profileEl.addEventListener("click", function () {
+  profileIdx = profileIdx + 1 >= profileNames.length ? -1 : profileIdx + 1;
+  paintProfileChip();
+  apiCall("pickProfile", { name: profileIdx < 0 ? "" : profileNames[profileIdx] });
+});
 /* Catalog line: one compact strip above the composer naming the commands
    and skills this tab found in the workspace; empty sections drop out and
    with nothing installed the strip stays hidden. */
@@ -787,6 +810,7 @@ window.colleaguePush = function (kind, payload) {
     case "input": qEl.value = data.text || ""; qEl.focus(); renderSlashHints(); break;
     case "catalog":
       slashCommands = data.commands || [];
+      setProfiles(data.profiles || []);
       renderSlashHints();
       renderCatalogLine(data);
       break;

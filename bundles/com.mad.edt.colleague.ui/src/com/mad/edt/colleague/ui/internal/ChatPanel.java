@@ -41,6 +41,8 @@ import com.mad.edt.colleague.agent.LoggingAgentObserver;
 import com.mad.edt.colleague.agent.MemoryTool;
 import com.mad.edt.colleague.agent.PlanBoard;
 import com.mad.edt.colleague.agent.PlanTool;
+import com.mad.edt.colleague.agents.AgentProfile;
+import com.mad.edt.colleague.agents.ToolPolicy;
 import com.mad.edt.colleague.chat.ContextBudget;
 import com.mad.edt.colleague.chat.EscapeSequence;
 import com.mad.edt.colleague.chat.PageCatalogEvents;
@@ -138,6 +140,18 @@ public final class ChatPanel {
      * plain or unknown line stays exactly as typed.
      */
     private Supplier<SlashCommands> ourCommandSupplier;
+
+    /**
+     * Agent profiles of the workspace: the profile chip lists them and the
+     * picked one decides which tools the edit-mode agent is offered.
+     */
+    private Supplier<List<AgentProfile>> ourProfileSupplier;
+
+    /**
+     * Profile picked through the chip in this panel, empty for the default
+     * agent; only meaningful while the edit mode runs the agent loop.
+     */
+    private String ourProfileName = "";
 
     /**
      * The step plan this chat keeps visible across its turns: the model
@@ -275,6 +289,15 @@ public final class ChatPanel {
      */
     public void setCommandSupplier(final Supplier<SlashCommands> theCommandSupplier) {
         ourCommandSupplier = theCommandSupplier;
+    }
+
+    /**
+     * @param theProfileSupplier agent profiles loaded from the workspace, used
+     *            for the profile chip and for the per-profile tool policy in
+     *            the edit mode; {@code null} leaves the chat without profiles
+     */
+    public void setProfileSupplier(final Supplier<List<AgentProfile>> theProfileSupplier) {
+        ourProfileSupplier = theProfileSupplier;
     }
 
     /**
@@ -546,6 +569,11 @@ public final class ChatPanel {
                 System.out.println("[colleague] page diag: " + theText);
             }
         }
+
+        @Override
+        public void pickProfile(final String theName) {
+            pickProfileName(theName);
+        }
     }
 
     /** @return {@code true} when the chat page announced itself on the bridge */
@@ -796,7 +824,60 @@ public final class ChatPanel {
         final SkillRegistry skills =
             ourSkillSupplier == null ? null : ourSkillSupplier.get();
         pushNow("catalog", PageCatalogEvents.build(
-            commands == null ? List.of() : commands.catalog(), skills));
+            commands == null ? List.of() : commands.catalog(), skills, profileCatalog()));
+    }
+
+    /**
+     * @return agent profiles of the workspace, empty when none are loaded
+     */
+    private List<AgentProfile> profileCatalog() {
+        final List<AgentProfile> profiles =
+            ourProfileSupplier == null ? null : ourProfileSupplier.get();
+        return profiles == null ? List.of() : profiles;
+    }
+
+    /**
+     * Resolves the profile picked through the chip: an unknown or sub-agent
+     * only name falls back to the default agent, so a stale chip state can
+     * never run a helper profile as the chat itself.
+     *
+     * @return the picked profile, {@code null} for the default agent
+     */
+    private AgentProfile pickedProfile() {
+        if(ourProfileName.isEmpty()) {
+            return null;
+        }
+        for(final AgentProfile profile : profileCatalog()) {
+            if(profile.getName().equals(ourProfileName)
+                && profile.getMode() != AgentProfile.Mode.SUBAGENT) {
+                return profile;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Switches the chat to one of the workspace profiles and tells the page
+     * what the agent will get under it.
+     *
+     * @param theName profile name picked by the chip, empty for the default agent
+     */
+    private void pickProfileName(final String theName) {
+        ourProfileName = theName == null ? "" : theName.trim();
+        final AgentProfile profile = pickedProfile();
+        if(profile == null) {
+            ourProfileName = "";
+            setStatus("Профиль: обычный ассистент");
+            return;
+        }
+        final StringBuilder note = new StringBuilder("Профиль: ").append(profile.getName());
+        if(!profile.getToolNames().isEmpty()) {
+            note.append(", инструменты: ").append(String.join(", ", profile.getToolNames()));
+        }
+        if(profile.getMaxSteps() > 0) {
+            note.append(", шагов: ").append(profile.getMaxSteps());
+        }
+        setStatus(note.toString());
     }
     /** Plain styled-text conversation used when no browser backend is available. */
     private void createFallback(final Composite theParent) {
@@ -1060,17 +1141,30 @@ public final class ChatPanel {
     private String runAgent(final String theQuestion, final String theContext,
         final CancellationFlag theCancellation)
         throws com.mad.edt.colleague.llm.LLMException {
-        final List<IToolExecutor> tools = new ArrayList<>(ourToolSupplier.get());
-        tools.add(new PlanTool(ourPlanBoard));
-        if(ourLessonMemory != null) {
+        final AgentProfile profile = pickedProfile();
+        final ToolPolicy policy = new ToolPolicy();
+        final List<IToolExecutor> tools = new ArrayList<>();
+        for(final IToolExecutor tool : ourToolSupplier.get()) {
+            if(policy.allows(profile, tool.getName())) {
+                tools.add(tool);
+            }
+        }
+        if(policy.allows(profile, "update_plan")) {
+            tools.add(new PlanTool(ourPlanBoard));
+        }
+        if(ourLessonMemory != null && policy.allows(profile, "remember")) {
             tools.add(new MemoryTool(ourLessonMemory));
         }
         final SkillRegistry skills = ourSkillSupplier == null ? null : ourSkillSupplier.get();
-        if(skills != null && !skills.isEmpty()) {
+        if(skills != null && !skills.isEmpty() && policy.allows(profile, "load_skill")) {
             tools.add(new SkillTool(skills));
         }
+        final String model = profile != null && profile.getModelName() != null
+            && !profile.getModelName().isEmpty() ? profile.getModelName() : ourModel;
+        final int maxSteps = profile != null && profile.getMaxSteps() > 0
+            ? profile.getMaxSteps() : AGENT_MAX_STEPS;
         final AgentLoop loop = new AgentLoop(ourSession.getProvider(),
-            tools, ourModel, AGENT_MAX_STEPS, theCancellation,
+            tools, model, maxSteps, theCancellation,
             new LoggingAgentObserver());
         final StringBuilder system = new StringBuilder();
         if(ourSession.getSystemPrompt() != null && !ourSession.getSystemPrompt().isEmpty()) {
@@ -1088,6 +1182,12 @@ public final class ChatPanel {
             .append(" is confirmed by the user. Keep your approach visible: before a")
             .append(" multi-step task call update_plan with the steps, and call it again")
             .append(" each time a step finishes. Answer in the language of the question.");
+        if(profile != null && !profile.getSystem().isEmpty()) {
+            // the profile body speaks for the agent: it arrives as extra
+            // instructions on top of the shared workspace rules
+            system.append(" Profile \"").append(profile.getName()).append("\": ")
+                .append(profile.getSystem());
+        }
         if(ourLessonMemory != null) {
             system.append(" When you learn something worth keeping for later sessions on")
                 .append(" this project - a quirk, a rule the user corrected you on, an")

@@ -31,6 +31,8 @@ import org.osgi.framework.FrameworkUtil;
 
 import com.mad.edt.colleague.agent.AgentMemory;
 import com.mad.edt.colleague.agent.AgentMode;
+import com.mad.edt.colleague.agents.AgentProfile;
+import com.mad.edt.colleague.agents.AgentProfileLoader;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
 import com.mad.edt.colleague.context.ContextSource;
@@ -120,6 +122,13 @@ public class ColleagueView extends ViewPart {
      * tab expands matching input lines through the same catalog.
      */
     private SlashCommands ourCommandsCatalog;
+
+    /**
+     * Agent profiles of the workspace, loaded once per view session from
+     * {@code .colleague/agents} of the first open project; the profile chip of
+     * every chat tab lists the same set.
+     */
+    private List<AgentProfile> ourProfileCatalog;
 
     private String ourLastAnswer = "";
     private ChatPanel ourLastAnsweredPanel;
@@ -563,6 +572,31 @@ public class ColleagueView extends ViewPart {
     }
 
     /**
+     * Agent profiles the profile chip offers: loaded once per view session
+     * from {@code .colleague/agents} under the first open workspace project.
+     * A missing or unreadable directory leaves the list empty, so the chats
+     * simply run without profiles instead of failing the view.
+     *
+     * @return shared profile list, never {@code null}
+     */
+    private List<AgentProfile> profileCatalog() {
+        if(ourProfileCatalog == null) {
+            final java.io.File agentsDir = colleagueDirectory("agents");
+            final List<AgentProfile> profiles = new ArrayList<>();
+            if(agentsDir != null) {
+                try {
+                    profiles.addAll(new AgentProfileLoader().loadAll(agentsDir));
+                } catch (final java.io.IOException ex) {
+                    System.err.println("[colleague] agents directory unreadable: "
+                        + ex.getMessage());
+                }
+            }
+            ourProfileCatalog = profiles;
+        }
+        return ourProfileCatalog;
+    }
+
+    /**
      * Finds the workspace-local folder {@code .colleague/<theName>} under the
      * first open project of the workspace; the same place skills, commands and
      * other project extensions of the plugin live.
@@ -728,6 +762,7 @@ public class ColleagueView extends ViewPart {
         panel.setLessonMemory(lessonMemory());
         panel.setSkillSupplier(this::skillCatalog);
         panel.setCommandSupplier(this::commandsCatalog);
+        panel.setProfileSupplier(this::profileCatalog);
         panel.setAutoContextSupplier(this::collectAutoContext);
         panel.setOnBack(() -> showMobilePage(ourContactsArea));
         theTab.setData(panel);
