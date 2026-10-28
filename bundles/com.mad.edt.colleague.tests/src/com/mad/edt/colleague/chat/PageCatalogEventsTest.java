@@ -24,8 +24,8 @@ class PageCatalogEventsTest {
     @DisplayName("the catalog event lists commands and skills with descriptions")
     void catalogCarriesCommandsAndSkills() {
         final SkillRegistry skills = new SkillRegistry();
-        skills.register(new SkillDefinition("reporter", "print a report", "body", null));
-        skills.register(new SkillDefinition("quiet", "hidden helper", "body", null,
+        skills.register(new SkillDefinition("reporter", "print a report", "body", List.of()));
+        skills.register(new SkillDefinition("quiet", "hidden helper", "body", List.of(),
             null, false));
 
         final JsonObject payload = PageCatalogEvents.build(

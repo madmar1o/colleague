@@ -137,6 +137,12 @@ div.slashhints b { color: var(--accent); font-weight: 600; }
 div.slashhints span { color: var(--muted); margin-left: 8px; }
 div.slashhints div { padding: 4px 12px; cursor: pointer; }
 div.slashhints div:hover { background: var(--panel); }
+div.catalogline {
+  display: none; flex: none; padding: 2px 12px 0; font-size: 11px;
+  color: var(--muted); background: var(--panel);
+}
+div.catalogline.show { display: block; }
+div.catalogline b { color: var(--accent); font-weight: 600; }
 textarea#q {
   flex: 1 1 auto; resize: none; min-height: 46px; max-height: 140px;
   background: var(--panel2); color: var(--text); border: 1px solid var(--line);
@@ -217,6 +223,7 @@ button.scrollbottom:hover { border-color: var(--accent); }
 </main>
 <button class="scrollbottom" id="btnbottom" title="К концу переписки">&#8595;</button>
 <div class="statusline" id="status"></div>
+<div class="catalogline" id="catalogline"></div>
 <form class="composer" id="composer">
   <div class="slashhints" id="slashhints"></div>
   <textarea id="q" placeholder="Спросите о проекте… (Ctrl+Enter — отправить)"></textarea>
@@ -698,6 +705,34 @@ function renderSlashHints() {
   slashEl.classList.add("show");
 }
 qEl.addEventListener("input", renderSlashHints);
+/* Catalog line: one compact strip above the composer naming the commands
+   and skills this tab found in the workspace; empty sections drop out and
+   with nothing installed the strip stays hidden. */
+function renderCatalogLine(data) {
+  var el = document.getElementById("catalogline");
+  var parts = [];
+  var names = function (list) {
+    return (list || []).map(function (c) { return "/" + c.name; }).join(" ");
+  };
+  var skillNames = (data.skills || []).map(function (s) { return s.name; }).join(" ");
+  if ((data.commands || []).length) {
+    parts.push("<b>команды:</b> " + names(data.commands));
+  }
+  if ((data.skills || []).length) {
+    parts.push("<b>скилы:</b> " + skillNames);
+  }
+  if ((data.profiles || []).length) {
+    parts.push("<b>профили:</b> " + (data.profiles || [])
+      .map(function (p) { return p.name; }).join(" "));
+  }
+  if (!parts.length) { el.classList.remove("show"); return; }
+  var tips = (data.commands || []).concat(data.skills || [])
+    .filter(function (c) { return c.description; })
+    .map(function (c) { return c.name + " — " + c.description; }).join("\n");
+  el.title = tips;
+  el.innerHTML = parts.join(" · ");
+  el.classList.add("show");
+}
 /* Java -> JS entry point. */
 function applyPalette(p) {
   var map = {
@@ -750,9 +785,10 @@ window.colleaguePush = function (kind, payload) {
       if (data.busy) { showTyping(); } else { hideTyping(); endStream(true); endThinking(); }
       break;
     case "input": qEl.value = data.text || ""; qEl.focus(); renderSlashHints(); break;
-    case "commands":
+    case "catalog":
       slashCommands = data.commands || [];
       renderSlashHints();
+      renderCatalogLine(data);
       break;
   }
 };
