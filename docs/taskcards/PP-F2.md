@@ -77,3 +77,26 @@ public final class SlashCommands {
 8. В репозиторий не заносить названия чужих продуктов и их внутренность (colleague/AGENTS.md);
    «эталон» = поведение из референсных исходников ВНЕ репозитория.
 9. Не менять Bundle-Version, targets/*.target, версии Tycho/EDT «за компанию» с задачей.
+
+## Итог реализации (2026-10-28)
+Выполнено. Коммиты: `dd4d9d5` (test, красный: CommandLoaderTest + SlashCommandParseTest) →
+`e8144ad` (feat: user slash commands from project markdown files). done_commit=`e8144ad`.
+
+- Пакет `com.mad.edt.colleague.commands` (core, добавлен в Export-Package): `CommandDefinition`
+  (name/description/template/agentName/subagent), `CommandLoader` (`.colleague/commands/*.md`,
+  frontmatter через общий парсер PP-F0 `Frontmatter`, тело — шаблон с `$ARGUMENTS`),
+  `SlashCommands.match(line) -> Invocation` с подставленным шаблоном или null.
+- `SlashCommands`: имя — до первого пробела, кириллические имена работают; нет плейсхолдера —
+  аргументы дописываются хвостом через перенос строки; команда с обязательным `$ARGUMENTS` при
+  пустом хвосте НЕ срабатывает (неполная строка остаётся текстом чата).
+- UI: `ChatPanel.setCommandSupplier` — `sendQuestion` матчит строку перед отправкой, в модель
+  уходит раскрытый промпт, в пузыре чата — исходный текст пользователя; неизвестная слэш-строка
+  остаётся текстом. `chat.html` — подсказки по слэшу: каталог приходит bridge-событием `commands`
+  при открытии вкладки (`pushCommandCatalog` в `bridgeReady`), панель подсказок над композером,
+  клик дописывает имя.
+- Проводка: `ColleagueView.commandsCatalog()` грузит каталог один раз за сессию вида из
+  `.colleague/commands` первого открытого проекта; общий хелпер `colleagueDirectory(name)`
+  для `.colleague/skills` и `.colleague/commands` (убрал дублирование из F1).
+- Отклонения: (1) поля `agentName`/`subagent` загружаются и прокинуты в модель данных, но
+  проводка агента-профиля под команду — вне рамок F2 (в карточке шага UI-проведки профиля нет);
+  (2) вместо отдельного прохода по проектам в каждом каталоге — общий `colleagueDirectory`.
