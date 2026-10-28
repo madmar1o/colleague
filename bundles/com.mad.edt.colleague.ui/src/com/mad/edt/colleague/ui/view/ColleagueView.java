@@ -40,6 +40,7 @@ import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
 import com.mad.edt.colleague.ui.internal.ChatSession;
 import com.mad.edt.colleague.ui.internal.ContactsPanel;
+import com.mad.edt.colleague.ui.internal.StartupDeferral;
 import com.mad.edt.colleague.ui.internal.WorkspaceTools;
 
 /**
@@ -181,7 +182,10 @@ public class ColleagueView extends ViewPart {
                 + SemanticSettings.getStoreUrl() + ", model "
                 + SemanticSettings.getModel());
         }
-        Job.create("Colleague: project index", (monitor) -> {
+        // the whole-project index waits out its grace period as a system job:
+        // reindexing competes with the user's builds, so it must not crowd
+        // out the first minutes of the session (see StartupDeferral)
+        StartupDeferral.scheduleIndexJob((monitor) -> {
             final int files = ourCodeSearch.reindex(monitor);
             System.err.println("[colleague] context index ready: " + files + " files");
             if(ourSemantic != null) {
@@ -208,7 +212,7 @@ public class ColleagueView extends ViewPart {
                 }
             }
             return Status.OK_STATUS;
-        }).schedule();
+        });
 
         com.mad.edt.colleague.llm.ProviderStore.loadIntoSettings();
         ourContacts.reload();
@@ -390,12 +394,15 @@ public class ColleagueView extends ViewPart {
         }
         final ContactsPanel.Contact preferred = ourDefaultContactCache;
         if(preferred != null) {
-            return openContact(preferred);
+            return openContactNow(preferred);
         }
         return null;
     }
 
     private ContactsPanel.Contact ourDefaultContactCache;
+
+    /** Startup budget seam: heavy builds move off the first-paint path. */
+    private final StartupDeferral ourStartup = StartupDeferral.forDisplay();
 
     private void onContactsLoaded(final List<ContactsPanel.Contact> theAvailable) {
         if(ourTabFolder.isDisposed()) {
@@ -479,22 +486,83 @@ public class ColleagueView extends ViewPart {
         return ourLessonMemory;
     }
 
-    private ChatPanel openContact(final ContactsPanel.Contact theContact) {
+    /**
+     * Opens a contact the way the ordinary UI paths do (list click, cold
+     * start auto-open): the tab itself appears right away, but the heavy
+     * chat page - the embedded browser and its controls - is queued behind
+     * the first paint of the tab, so switching to the chat never waits on
+     * the browser widget initialization.
+     *
+     * @param theContact provider and model pair to open
+     */
+    private void openContact(final ContactsPanel.Contact theContact) {
+        if(ourTabFolder.isDisposed()) {
+            return;
+        }
+        if(existingTabFor(theContact) != null) {
+            return;
+        }
+        final CTabItem tab = createTabFor(theContact);
+        final Composite body = createTabBody(tab);
+        final ChatSession session = sessionFor(theContact);
+        ourStartup.defer(() -> {
+            // the tab may have been closed while its build waited for the
+            // paint tick: building into a disposed shell would only throw
+            if(!tab.isDisposed() && !body.isDisposed() && !ourTabFolder.isDisposed()) {
+                buildChatPanel(tab, body, session, theContact);
+            }
+        });
+    }
+
+    /**
+     * Opens a contact and builds the chat page inline. Only for the paths
+     * that keep using the returned panel right away: staged questions and
+     * the selftests.
+     *
+     * @param theContact provider and model pair to open
+     * @return the chat panel of the contact's tab, {@code null} when the
+     *         tab exists but its build is still queued from an earlier
+     *         deferred open
+     */
+    private ChatPanel openContactNow(final ContactsPanel.Contact theContact) {
         if(ourTabFolder.isDisposed()) {
             return null;
         }
+        final CTabItem existing = existingTabFor(theContact);
+        if(existing != null) {
+            return existing.getData() instanceof ChatPanel ? (ChatPanel)existing.getData() : null;
+        }
+        final CTabItem tab = createTabFor(theContact);
+        final Composite body = createTabBody(tab);
+        return buildChatPanel(tab, body, sessionFor(theContact), theContact);
+    }
+
+    /**
+     * Selects the tab of this model when the folder already has one. The
+     * text check alone is enough: a tab is created only by these open paths,
+     * one per model, and its panel build never runs twice for one tab.
+     *
+     * @param theContact provider and model pair
+     * @return the existing tab, {@code null} when there is none
+     */
+    private CTabItem existingTabFor(final ContactsPanel.Contact theContact) {
         for(final CTabItem item : ourTabFolder.getItems()) {
-            if(theContact.getModel().equals(item.getText())
-                && item.getData() instanceof ChatPanel) {
+            if(theContact.getModel().equals(item.getText())) {
                 ourTabFolder.setSelection(item);
                 showMobilePage(ourTabsArea);
-                return (ChatPanel)item.getData();
+                return item;
             }
         }
-        final ChatSession session = ourSessions.computeIfAbsent(theContact.getKey(), key ->
-            new ChatSession(
-                LLMProviderFactory.create(LLMSettings.getConfig(theContact.getProviderId())),
-                SYSTEM_PROMPT));
+        return null;
+    }
+
+    /**
+     * Creates the closed-able tab shell for one contact.
+     *
+     * @param theContact provider and model pair
+     * @return the new tab item
+     */
+    private CTabItem createTabFor(final ContactsPanel.Contact theContact) {
         final CTabItem tab = new CTabItem(ourTabFolder, SWT.CLOSE);
         tab.setText(theContact.getModel());
         // closing the last chat tab must not leave the empty tab page on
@@ -504,13 +572,56 @@ public class ColleagueView extends ViewPart {
         // "now empty" event, so the item's own dispose is the trigger
         tab.addDisposeListener((final DisposeEvent theEvent) ->
             Display.getDefault().asyncExec(this::fallBackToContactsIfEmpty));
+        return tab;
+    }
+
+    /**
+     * Puts the empty page body under the tab and switches the stack to the
+     * chat page.
+     *
+     * @param theTab tab to attach the body to
+     * @return the body composite the chat panel will live in
+     */
+    private Composite createTabBody(final CTabItem theTab) {
         // switch the page over before the browser is created: at cold start the
         // preferred contact opens automatically, and a browser created in a
         // hidden zero-sized page paints nothing
         showMobilePage(ourTabsArea);
         final Composite body = new Composite(ourTabFolder, SWT.NONE);
         body.setLayout(new FillLayout());
-        final ChatPanel panel = new ChatPanel(body, session, theContact.getModel());
+        theTab.setControl(body);
+        ourTabFolder.setSelection(theTab);
+        return body;
+    }
+
+    /**
+     * Session for one contact, shared by all tabs of the same provider and
+     * model pair so a conversation survives closing and reopening a tab.
+     *
+     * @param theContact provider and model pair
+     * @return the live session of this contact
+     */
+    private ChatSession sessionFor(final ContactsPanel.Contact theContact) {
+        return ourSessions.computeIfAbsent(theContact.getKey(), key ->
+            new ChatSession(
+                LLMProviderFactory.create(LLMSettings.getConfig(theContact.getProviderId())),
+                SYSTEM_PROMPT));
+    }
+
+    /**
+     * The heavy half of opening a contact: builds the chat panel with its
+     * embedded browser and wires the view into it. Kept out of the tab
+     * shell creation so the deferred open can run it after the first paint.
+     *
+     * @param theTab tab shell to fill
+     * @param theBody body composite for the panel
+     * @param theSession conversation session of this contact
+     * @param theContact provider and model pair
+     * @return the built chat panel
+     */
+    private ChatPanel buildChatPanel(final CTabItem theTab, final Composite theBody,
+        final ChatSession theSession, final ContactsPanel.Contact theContact) {
+        final ChatPanel panel = new ChatPanel(theBody, theSession, theContact.getModel());
         panel.attachThemeAnchor(ourRoot);
         panel.setToolSupplier(() -> AgentMode.isOn()
             ? WorkspaceTools.withWrite(ourCodeSearch, ourOverview)
@@ -518,8 +629,7 @@ public class ColleagueView extends ViewPart {
         panel.setLessonMemory(lessonMemory());
         panel.setAutoContextSupplier(this::collectAutoContext);
         panel.setOnBack(() -> showMobilePage(ourContactsArea));
-        tab.setControl(body);
-        tab.setData(panel);
+        theTab.setData(panel);
         panel.setAnswerListener(answer -> {
             ourLastAnswer = answer;
             ourLastAnsweredPanel = panel;
@@ -535,7 +645,6 @@ public class ColleagueView extends ViewPart {
                         Math.min(120, answer.replace('\n', ' ').length())) + "]");
             }
         });
-        ourTabFolder.setSelection(tab);
         return panel;
     }
 
@@ -618,7 +727,7 @@ public class ColleagueView extends ViewPart {
         }
         ourSelfTestDone = true;
         ourSelfTestPending = true;
-        final ChatPanel panel = openContact(preferred);
+        final ChatPanel panel = openContactNow(preferred);
         if(panel == null) {
             return;
         }
