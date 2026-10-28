@@ -124,7 +124,19 @@ table.mdtable th { background: var(--panel2); font-weight: 600; }
 form.composer {
   flex: none; display: flex; gap: 8px; padding: 8px 12px 10px; align-items: stretch;
   border-top: 1px solid var(--line); background: var(--panel);
+  position: relative;
 }
+div.slashhints {
+  position: absolute; left: 12px; right: 12px; bottom: 100%; display: none;
+  max-height: 160px; overflow-y: auto; background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 10px; padding: 4px 0;
+  font-size: 12px;
+}
+div.slashhints.show { display: block; }
+div.slashhints b { color: var(--accent); font-weight: 600; }
+div.slashhints span { color: var(--muted); margin-left: 8px; }
+div.slashhints div { padding: 4px 12px; cursor: pointer; }
+div.slashhints div:hover { background: var(--panel); }
 textarea#q {
   flex: 1 1 auto; resize: none; min-height: 46px; max-height: 140px;
   background: var(--panel2); color: var(--text); border: 1px solid var(--line);
@@ -206,6 +218,7 @@ button.scrollbottom:hover { border-color: var(--accent); }
 <button class="scrollbottom" id="btnbottom" title="К концу переписки">&#8595;</button>
 <div class="statusline" id="status"></div>
 <form class="composer" id="composer">
+  <div class="slashhints" id="slashhints"></div>
   <textarea id="q" placeholder="Спросите о проекте… (Ctrl+Enter — отправить)"></textarea>
   <button class="send" id="btnsend" type="submit">Спросить</button>
 </form>
@@ -648,6 +661,43 @@ qEl.addEventListener("paste", function (e) {
     }
   }
 });
+/* Slash command hints: Java pushes the catalog once the tab opens, the
+   panel below the composer lists the commands whose name matches what the
+   user typed so far; clicking an entry completes the name in the box. */
+var slashCommands = [];
+var slashEl = document.getElementById("slashhints");
+function renderSlashHints() {
+  var value = qEl.value;
+  if (!slashCommands.length || value.charAt(0) !== "/" || value.indexOf(" ") >= 0) {
+    slashEl.classList.remove("show");
+    return;
+  }
+  var typed = value.slice(1).toLowerCase();
+  var shown = slashCommands.filter(function (c) {
+    return c.name.toLowerCase().indexOf(typed) === 0;
+  });
+  if (!shown.length) { slashEl.classList.remove("show"); return; }
+  slashEl.innerHTML = "";
+  shown.forEach(function (c) {
+    var row = document.createElement("div");
+    var name = document.createElement("b");
+    name.textContent = "/" + c.name;
+    row.appendChild(name);
+    if (c.description) {
+      var desc = document.createElement("span");
+      desc.textContent = c.description;
+      row.appendChild(desc);
+    }
+    row.addEventListener("click", function () {
+      qEl.value = "/" + c.name + " ";
+      qEl.focus();
+      slashEl.classList.remove("show");
+    });
+    slashEl.appendChild(row);
+  });
+  slashEl.classList.add("show");
+}
+qEl.addEventListener("input", renderSlashHints);
 /* Java -> JS entry point. */
 function applyPalette(p) {
   var map = {
@@ -699,7 +749,11 @@ window.colleaguePush = function (kind, payload) {
       setStatus(data.text || "");
       if (data.busy) { showTyping(); } else { hideTyping(); endStream(true); endThinking(); }
       break;
-    case "input": qEl.value = data.text || ""; qEl.focus(); break;
+    case "input": qEl.value = data.text || ""; qEl.focus(); renderSlashHints(); break;
+    case "commands":
+      slashCommands = data.commands || [];
+      renderSlashHints();
+      break;
   }
 };
 /* Announce the page: on some backends the host function only becomes

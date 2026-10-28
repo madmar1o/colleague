@@ -2,6 +2,7 @@ package com.mad.edt.colleague.ui.view;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +37,9 @@ import com.mad.edt.colleague.context.ContextSource;
 import com.mad.edt.colleague.context.KeywordContextSource;
 import com.mad.edt.colleague.context.SemanticIndex;
 import com.mad.edt.colleague.context.SemanticSettings;
+import com.mad.edt.colleague.commands.CommandDefinition;
+import com.mad.edt.colleague.commands.CommandLoader;
+import com.mad.edt.colleague.commands.SlashCommands;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
 import com.mad.edt.colleague.llm.LLMSettings;
 import com.mad.edt.colleague.skills.SkillDefinition;
@@ -109,6 +113,13 @@ public class ColleagueView extends ViewPart {
      * tab advertises the same catalog through load_skill.
      */
     private SkillRegistry ourSkillCatalog;
+
+    /**
+     * User slash commands of the workspace, loaded once per view session
+     * from {@code .colleague/commands} of the first open project; every chat
+     * tab expands matching input lines through the same catalog.
+     */
+    private SlashCommands ourCommandsCatalog;
 
     private String ourLastAnswer = "";
     private ChatPanel ourLastAnsweredPanel;
@@ -510,12 +521,8 @@ public class ColleagueView extends ViewPart {
     private SkillRegistry skillCatalog() {
         if(ourSkillCatalog == null) {
             final SkillRegistry registry = new SkillRegistry();
-            for(final IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
-                if(!project.isOpen()) {
-                    continue;
-                }
-                final java.io.File skillsDir = project.getLocation()
-                    .append(".colleague/skills").toFile();
+            final java.io.File skillsDir = colleagueDirectory("skills");
+            if(skillsDir != null) {
                 try {
                     for(final SkillDefinition skill : new SkillLoader().loadAll(skillsDir)) {
                         registry.register(skill);
@@ -524,11 +531,58 @@ public class ColleagueView extends ViewPart {
                     System.err.println("[colleague] skills directory unreadable: "
                         + ex.getMessage());
                 }
-                break;
             }
             ourSkillCatalog = registry;
         }
         return ourSkillCatalog;
+    }
+
+    /**
+     * User slash commands advertised in the chat line: loaded once per view
+     * session from {@code .colleague/commands} under the first open workspace
+     * project. A missing or unreadable directory leaves the catalog empty, so
+     * slash lines stay ordinary chat text instead of failing the view.
+     *
+     * @return shared command catalog, never {@code null}
+     */
+    private SlashCommands commandsCatalog() {
+        if(ourCommandsCatalog == null) {
+            final java.io.File commandsDir = colleagueDirectory("commands");
+            final List<CommandDefinition> commands = new ArrayList<>();
+            if(commandsDir != null) {
+                try {
+                    commands.addAll(new CommandLoader().loadAll(commandsDir));
+                } catch (final java.io.IOException ex) {
+                    System.err.println("[colleague] commands directory unreadable: "
+                        + ex.getMessage());
+                }
+            }
+            ourCommandsCatalog = new SlashCommands(commands);
+        }
+        return ourCommandsCatalog;
+    }
+
+    /**
+     * Finds the workspace-local folder {@code .colleague/<theName>} under the
+     * first open project of the workspace; the same place skills, commands and
+     * other project extensions of the plugin live.
+     *
+     * @param theName folder name below {@code .colleague}
+     * @return existing directory, {@code null} when no open project has one
+     */
+    private java.io.File colleagueDirectory(final String theName) {
+        for(final IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
+            if(!project.isOpen()) {
+                continue;
+            }
+            final java.io.File dir = project.getLocation()
+                .append(".colleague/" + theName).toFile();
+            if(dir.isDirectory()) {
+                return dir;
+            }
+            break;
+        }
+        return null;
     }
 
     /**
@@ -673,6 +727,7 @@ public class ColleagueView extends ViewPart {
             : WorkspaceTools.readOnly(ourCodeSearch, ourOverview));
         panel.setLessonMemory(lessonMemory());
         panel.setSkillSupplier(this::skillCatalog);
+        panel.setCommandSupplier(this::commandsCatalog);
         panel.setAutoContextSupplier(this::collectAutoContext);
         panel.setOnBack(() -> showMobilePage(ourContactsArea));
         theTab.setData(panel);
