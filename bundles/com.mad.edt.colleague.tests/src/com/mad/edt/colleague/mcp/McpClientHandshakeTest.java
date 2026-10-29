@@ -132,9 +132,10 @@ class McpClientHandshakeTest {
      * Stand-in tool server on stdin/stdout, written out as a single-file
      * source and launched straight by the JDK: the same fake protocol as the
      * HTTP one, line-delimited. Source launch needs no classpath, which is
-     * what keeps the fake working inside the OSGi test runtime.
+     * what keeps the fake working inside the OSGi test runtime. Shared with
+     * {@code McpAgentIntegrationTest}, which drives it through a real agent.
      */
-    private static final String STDIO_FAKE_SOURCE = """
+    static final String STDIO_FAKE_SOURCE = """
         import java.io.BufferedReader;
         import java.io.BufferedWriter;
         import java.io.InputStreamReader;
