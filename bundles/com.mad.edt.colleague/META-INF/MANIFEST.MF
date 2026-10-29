@@ -20,4 +20,5 @@ Export-Package: com.mad.edt.colleague;x-internal:=false,
  com.mad.edt.colleague.ext;x-internal:=false,
  com.mad.edt.colleague.http;x-internal:=true,
  com.mad.edt.colleague.llm;x-internal:=false,
+ com.mad.edt.colleague.mcp;x-internal:=false,
  com.mad.edt.colleague.skills;x-internal:=false
