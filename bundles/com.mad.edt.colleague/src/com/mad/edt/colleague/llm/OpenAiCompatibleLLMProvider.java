@@ -35,9 +35,24 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
         super(theConfig, theTransport);
     }
 
+    /**
+     * A gateway-style endpoint answers 404 to {@code /chat/completions} when
+     * the saved address stopped short of the API version segment - the path
+     * itself is part of the contract, so an address like {@code host:port}
+     * alone is the single most common way to misconfigure this dialect. The
+     * hint spells out the address that would work.
+     */
     @Override
-    public ChatResult chat(final ChatRequest theRequest) throws LLMException {
-        if(theRequest.getCancellation().isCancelled()) {
+    protected String failureHint(final int theStatus) {
+        if(theStatus != 404 || getConfig().getBaseUrl().contains("/v1")) {
+            return "";
+        }
+        return " — у OpenAI-совместимого эндпоинта адрес сервиса должен включать"
+            + " путь версии API, например " + getConfig().getBaseUrl() + "/v1";
+    }
+
+    @Override
+    public ChatResult chat(final ChatRequest theRequest) throws LLMException {        if(theRequest.getCancellation().isCancelled()) {
             throw new LLMException("generation turn cancelled");
         }
         final JsonObject response =
