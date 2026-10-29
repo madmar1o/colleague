@@ -41,6 +41,7 @@ import com.mad.edt.colleague.agent.LoggingAgentObserver;
 import com.mad.edt.colleague.agent.MemoryTool;
 import com.mad.edt.colleague.agent.PlanBoard;
 import com.mad.edt.colleague.agent.PlanTool;
+import com.mad.edt.colleague.agent.ToolUsageStats;
 import com.mad.edt.colleague.agent.subagent.SubagentRegistry;
 import com.mad.edt.colleague.agent.subagent.SubagentTool;
 import com.mad.edt.colleague.agents.AgentProfile;
@@ -78,6 +79,12 @@ public final class ChatPanel {
 
     /** Model round-trips allowed for one edit-mode question. */
     private static final int AGENT_MAX_STEPS = 8;
+    /**
+     * Finished runs an offered tool may go uncalled before it leaves the
+     * advertised catalog; a call inside a run resets the streak, so a pruned
+     * name returns the moment the model wants it again.
+     */
+    private static final int PRUNE_AFTER_IDLE_RUNS = 3;
     /**
      * Preloaded context an agent turn may carry: the loop has its own search
      * tools, so a big dump only buys prompt processing and cut-off rounds.
@@ -161,6 +168,13 @@ public final class ChatPanel {
      * starting from zero. Bounded, see {@link SubagentRegistry}.
      */
     private final SubagentRegistry ourSubagents = new SubagentRegistry();
+
+    /**
+     * Call counter of this chat across its edit-mode runs: feeds the pruning
+     * of never-called tools out of the advertised catalog, see
+     * {@link ToolUsageStats} and {@link #PRUNE_AFTER_IDLE_RUNS}.
+     */
+    private final ToolUsageStats ourToolUsage = new ToolUsageStats();
 
     /**
      * The step plan this chat keeps visible across its turns: the model
@@ -1151,24 +1165,27 @@ public final class ChatPanel {
         final CancellationFlag theCancellation)
         throws com.mad.edt.colleague.llm.LLMException {
         final AgentProfile profile = pickedProfile();
-        final ToolPolicy policy = new ToolPolicy();
+        final ToolPolicy policy = new ToolPolicy().excludeUnused(PRUNE_AFTER_IDLE_RUNS);
         final List<IToolExecutor> tools = new ArrayList<>();
         for(final IToolExecutor tool : ourToolSupplier.get()) {
-            if(policy.allows(profile, tool.getName())) {
+            if(policy.allows(profile, tool.getName())
+                && policy.shouldOffer(ourToolUsage, tool.getName())) {
                 tools.add(tool);
             }
         }
-        if(policy.allows(profile, "update_plan")) {
+        if(policy.allows(profile, "update_plan") && policy.shouldOffer(ourToolUsage, "update_plan")) {
             tools.add(new PlanTool(ourPlanBoard));
         }
-        if(ourLessonMemory != null && policy.allows(profile, "remember")) {
+        if(ourLessonMemory != null && policy.allows(profile, "remember")
+            && policy.shouldOffer(ourToolUsage, "remember")) {
             tools.add(new MemoryTool(ourLessonMemory));
         }
         final SkillRegistry skills = ourSkillSupplier == null ? null : ourSkillSupplier.get();
-        if(skills != null && !skills.isEmpty() && policy.allows(profile, "load_skill")) {
+        if(skills != null && !skills.isEmpty() && policy.allows(profile, "load_skill")
+            && policy.shouldOffer(ourToolUsage, "load_skill")) {
             tools.add(new SkillTool(skills));
         }
-        if(policy.allows(profile, "subagent")) {
+        if(policy.allows(profile, "subagent") && policy.shouldOffer(ourToolUsage, "subagent")) {
             // the delegate hears about its finished turn through this panel so
             // the page shows a card; the listener thread is the worker thread,
             // delivery to the page goes through asyncExec as everywhere else
@@ -1190,9 +1207,17 @@ public final class ChatPanel {
             && !profile.getModelName().isEmpty() ? profile.getModelName() : ourModel;
         final int maxSteps = profile != null && profile.getMaxSteps() > 0
             ? profile.getMaxSteps() : AGENT_MAX_STEPS;
+        final List<String> offered = new ArrayList<>();
+        for(final IToolExecutor tool : tools) {
+            offered.add(tool.getName());
+        }
+        // the counter sees the exact list this run advertises, so a name the
+        // model keeps ignoring ages toward pruning while a fresh call
+        // resets its streak the same run it happens
+        ourToolUsage.noteOffered(offered);
         final AgentLoop loop = new AgentLoop(ourSession.getProvider(),
             tools, model, maxSteps, theCancellation,
-            new LoggingAgentObserver());
+            new LoggingAgentObserver(ourToolUsage));
         final StringBuilder system = new StringBuilder();
         if(ourSession.getSystemPrompt() != null && !ourSession.getSystemPrompt().isEmpty()) {
             system.append(ourSession.getSystemPrompt()).append(' ');
@@ -1226,7 +1251,7 @@ public final class ChatPanel {
         if(skills != null && !skills.isEmpty()) {
             system.append(new SkillShowcase(skills).catalogSection());
         }
-        if(policy.allows(profile, "subagent")) {
+        if(policy.allows(profile, "subagent") && policy.shouldOffer(ourToolUsage, "subagent")) {
             system.append(" For a bounded research task that needs many searches and")
                 .append(" reads, call subagent with a clear prompt: a delegate works the")
                 .append(" task on its own with read-only tools and returns one final")
@@ -1241,7 +1266,14 @@ public final class ChatPanel {
                 + ourPlanBoard.render();
         }
         final long startedAt = System.nanoTime();
-        final AgentAnswer answer = loop.run(system.toString(), task);
+        final AgentAnswer answer;
+        try {
+            answer = loop.run(system.toString(), task);
+        } finally {
+            // the run is over whatever the outcome: offered-but-uncalled names
+            // age here, and the pruning decision of the next run reads that
+            ourToolUsage.finishRun();
+        }
         if(!answer.getText().isEmpty()) {
             ourSession.noteExchange(theQuestion, answer.getText());
         }
