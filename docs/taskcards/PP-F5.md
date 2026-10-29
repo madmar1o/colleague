@@ -69,3 +69,38 @@ public final class McpClient {
 8. В репозиторий не заносить названия чужих продуктов и их внутренность (colleague/AGENTS.md);
    «эталон» = поведение из референсных исходников ВНЕ репозитория.
 9. Не менять Bundle-Version, targets/*.target, версии Tycho/EDT «за компанию» с задачей.
+
+## Итог реализации (2026-10-29)
+Выполнено. Коммиты: `5459420` (test, красный: McpClientHandshakeTest + McpToolAdapterTest) →
+`91b0d76` (feat: mcp client for external tool servers — core пакет) → `3482323` (feat: секция
+MCP-серверов на странице провайдеров + удалённые инструменты в каталоге агента) → `e0f48c5`
+(test: приёмка — живой stdio-сервер кормит настоящий AgentLoop). done_commit=`91b0d76`
+(коммит с сообщением из карточки).
+
+- core пакет `com.mad.edt.colleague.mcp` (экспортирован в MANIFEST): `McpServerConfig`
+  (имя, command[] или url, enabled + `sameSettings` для перезагрузки), `McpSettings`
+  (Preferences-нода `com.mad.edt.colleague.mcp`, ключ `servers.json`, upsert/remove/load),
+  `McpClient` (JSON-RPC initialize→initialized→tools/list→tools/call; stdio — спавн процесса,
+  HTTP — POST; без resources/sampling/oauth), `McpToolInfo` (record, readOnly из
+  `annotations.readOnlyHint`, иначе write), `McpToolAdapter` (имя `mcp_<server>_<tool>`,
+  write-подобные требуют подтверждения `Confirmation`, `isParallelSafe` = readOnly),
+  `McpCatalog` (один источник на все серверы; перезагрузка при смене значений настроек;
+  недоступный сервер молча выпадает, громкая ошибка — на кнопке «Проверить»; конфликт имени
+  со встроенным — MCP пропускается, не переименовывается), `McpException`, `ToolBridge`.
+- UI: секция «MCP-серверы» в оверлее страницы провайдеров (таблица, вкл/выкл, изменить/удалить,
+  форма имя+url+команда, кнопка «Проверить» с показом инструментов); bridge-методы
+  `listMcp`/`saveMcp`/`removeMcp`/`testMcp`; `settingsData` теперь несёт `mcpServers`.
+  Врезка в `ChatPanel.runAgent`: каталог спрашивается на каждый прогон после локальных
+  инструментов (имя встроенного всегда побеждает конфликт), проходит через `ToolPolicy`
+  (профиль + прунинг), попадает и в делегата-субагента; подтверждение write-подобного вызова —
+  модалка `MessageDialog` на UI-потоке (тот же паттерн, что у файловых инструментов).
+- Отклонения: (1) `ToolBridge` — отдельный top-level интерфейс: Java запрещает классу
+  реализовывать собственный вложенный интерфейс (ошибка компилятора «cycle detected»);
+  (2) reload-политика каталога — сравнение значений списка серверов (`sameSettings` вместо
+  счётчика версий: нет лишнего состояния, тесты не требуют Preferences); (3) write-подобные
+  удалённые инструменты предлагаются только в прогоне, где есть локальные write-инструменты
+  (read-only прогон получает только readOnly-инструменты сервера); (4) test-fake HTTP-сервера —
+  голый `ServerSocket` (пакет `com.sun.net.httpserver` недоступен OSGi-фрагменту тестов),
+  stdio-fake — single-file запуск `java <файл>.java` (в OSGi-тест рантайме `java.class.path`
+  не содержит классы тестов); (5) у HTTP-транспорта `notifications/initialized` отправляется
+  POST-ом без id, fake отвечает ошибкой — клиент её игнорирует, протокол этого не запрещает.
