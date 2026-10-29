@@ -44,6 +44,7 @@ import com.mad.edt.colleague.commands.CommandLoader;
 import com.mad.edt.colleague.commands.SlashCommands;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
 import com.mad.edt.colleague.llm.LLMSettings;
+import com.mad.edt.colleague.mcp.McpCatalog;
 import com.mad.edt.colleague.skills.SkillDefinition;
 import com.mad.edt.colleague.skills.SkillLoader;
 import com.mad.edt.colleague.skills.SkillRegistry;
@@ -99,6 +100,13 @@ public class ColleagueView extends ViewPart {
     private CTabFolder ourTabFolder;
     private CodeSearch ourCodeSearch;
     private ConfigurationOverview ourOverview;
+
+    /**
+     * Remote tool catalog shared by every chat tab of this view: one set of
+     * open MCP server channels for the whole workbench session, rebuilt when
+     * the settings page changes the server list.
+     */
+    private final McpCatalog ourMcpCatalog = McpCatalog.live();
 
     /**
      * Lesson memory shared by every chat tab of this workbench session: the
@@ -760,6 +768,7 @@ public class ColleagueView extends ViewPart {
             ? WorkspaceTools.withWrite(ourCodeSearch, ourOverview)
             : WorkspaceTools.readOnly(ourCodeSearch, ourOverview));
         panel.setLessonMemory(lessonMemory());
+        panel.setMcpCatalog(ourMcpCatalog);
         panel.setSkillSupplier(this::skillCatalog);
         panel.setCommandSupplier(this::commandsCatalog);
         panel.setProfileSupplier(this::profileCatalog);

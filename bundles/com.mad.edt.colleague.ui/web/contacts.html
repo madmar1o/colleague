@@ -128,6 +128,32 @@ input[type=text]:focus, input[type=password]:focus, select:focus { border-color:
       <button id="btnaddprov">+ Добавить провайдера</button>
       <button id="btnClose">Закрыть</button>
     </div>
+    <h2>MCP-серверы</h2>
+    <div class="hintline">внешние серверы инструментов: их имена попадут агенту
+      с префиксом mcp_имя_инструмента; записывающие вызовы требуют подтверждения</div>
+    <table class="plist">
+      <thead><tr><th>сервер</th><th>адрес / команда</th><th>вкл.</th><th></th></tr></thead>
+      <tbody id="mrows"></tbody>
+    </table>
+    <div id="meditbox" style="display:none">
+      <div class="fieldrow"><label>имя (латиница, цифры, _)</label>
+        <input type="text" id="m_name" placeholder="например qdb"></div>
+      <div class="fieldrow"><label>адрес HTTP (пусто — процесс по команде)</label>
+        <input type="text" id="m_url" placeholder="http://хост:порт/путь"></div>
+      <div class="fieldrow"><label>команда запуска процесса</label>
+        <input type="text" id="m_cmd" placeholder="java -jar mcp-server.jar"></div>
+      <div class="fieldrow"><label><input type="checkbox" id="m_enabled" checked>
+        использовать инструменты сервера в диалогах правки</label></div>
+      <div class="hintline" id="mhint"></div>
+      <div class="btnrow">
+        <button id="btnMTest">Проверить</button>
+        <button class="primary" id="btnMSave">Сохранить</button>
+        <button id="btnMCancel">Отменить</button>
+      </div>
+    </div>
+    <div class="btnrow">
+      <button id="btnaddmcp">+ Добавить MCP-сервер</button>
+    </div>
   </div>
 </div>
 
@@ -193,6 +219,9 @@ var prows = document.getElementById("prows");
 var editbox = document.getElementById("editbox");
 var modelSel = document.getElementById("f_model");
 var thint = document.getElementById("thint");
+var mrows = document.getElementById("mrows");
+var meditbox = document.getElementById("meditbox");
+var mhint = document.getElementById("mhint");
 
 function setStatus(s) { statusEl.textContent = s || ""; }
 
@@ -265,6 +294,54 @@ function renderSettings(data) {
     tr.appendChild(n); tr.appendChild(u); tr.appendChild(r); tr.appendChild(a);
     prows.appendChild(tr);
   });
+  renderMcp(data.mcpServers || []);
+}
+
+function renderMcp(servers) {
+  mrows.textContent = "";
+  servers.forEach(function (s) {
+    var tr = document.createElement("tr");
+    var n = document.createElement("td"); n.textContent = s.name;
+    var u = document.createElement("td"); u.textContent = s.url || s.command;
+    u.title = s.url || s.command;
+    var r = document.createElement("td");
+    var cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = !!s.enabled;
+    cb.onchange = function () {
+      apiCall("saveMcp", { name: s.name, url: s.url, command: s.command,
+        enabled: cb.checked });
+    };
+    r.appendChild(cb);
+    var a = document.createElement("td"); a.className = "act";
+    var ed = document.createElement("button"); ed.textContent = "изменить";
+    ed.onclick = function () { showMForm(); fillMForm(s); };
+    var rm = document.createElement("button"); rm.textContent = "удалить";
+    rm.onclick = function () { apiCall("removeMcp", { name: s.name }); };
+    a.appendChild(ed); a.appendChild(rm);
+    tr.appendChild(n); tr.appendChild(u); tr.appendChild(r); tr.appendChild(a);
+    mrows.appendChild(tr);
+  });
+}
+
+function showMForm() { meditbox.style.display = ""; }
+function hideMForm() { meditbox.style.display = "none"; }
+
+function fillMForm(s) {
+  document.getElementById("m_name").value = s.name;
+  document.getElementById("m_name").disabled = true;
+  document.getElementById("m_url").value = s.url || "";
+  document.getElementById("m_cmd").value = s.command || "";
+  document.getElementById("m_enabled").checked = !!s.enabled;
+  mhint.textContent = ""; mhint.className = "hintline";
+}
+
+function clearMForm() {
+  document.getElementById("m_name").value = "";
+  document.getElementById("m_name").disabled = false;
+  document.getElementById("m_url").value = "";
+  document.getElementById("m_cmd").value = "";
+  document.getElementById("m_enabled").checked = true;
+  mhint.textContent = ""; mhint.className = "hintline";
 }
 
 function showForm() { editbox.style.display = ""; }
@@ -338,6 +415,28 @@ document.getElementById("btnSave").onclick = function () {
     isDefault: document.getElementById("f_default").checked
   });
 };
+document.getElementById("btnaddmcp").onclick = function () {
+  showMForm(); clearMForm();
+};
+document.getElementById("btnMCancel").onclick = function () {
+  hideMForm();
+};
+document.getElementById("btnMTest").onclick = function () {
+  mhint.textContent = "Проверяю связность…"; mhint.className = "hintline";
+  apiCall("testMcp", {
+    name: document.getElementById("m_name").value.trim(),
+    url: document.getElementById("m_url").value.trim(),
+    command: document.getElementById("m_cmd").value.trim()
+  });
+};
+document.getElementById("btnMSave").onclick = function () {
+  apiCall("saveMcp", {
+    name: document.getElementById("m_name").value.trim(),
+    url: document.getElementById("m_url").value.trim(),
+    command: document.getElementById("m_cmd").value.trim(),
+    enabled: document.getElementById("m_enabled").checked
+  });
+};
 
 window.colleaguePush = function (kind, payload) {
   var data = {};
@@ -351,6 +450,61 @@ window.colleaguePush = function (kind, payload) {
     case "readyPalette": applyPalette(data); break;
     case "contactsData": renderContacts(data); break;
     case "settingsData": renderSettings(data); break;
+    case "mcpData": renderMcp(data.servers || []); break;
+    case "mcpTestResult":
+      if (data.ok) {
+        var ts = data.tools || [];
+        mhint.textContent = ts.length
+          ? "связь есть, инструментов: " + ts.map(function (t) {
+              return t.name + (t.readOnly ? " (только чтение)" : " (подтверждение)");
+            }).join(", ")
+          : "связь есть, но инструментов сервер не даёт";
+        mhint.className = "hintline ok";
+      } else {
+        mhint.textContent = "ошибка: " + (
+
+I have thought about this long enough; time to give my answer.
+</think>
+
+<tool_call>
+<function=edit>
+<parameter=newString>
+    case "settingsData": renderSettings(data); break;
+    case "mcpData": renderMcp(data.servers || []); break;
+    case "mcpTestResult":
+      if (data.ok) {
+        var ts = data.tools || [];
+        mhint.textContent = ts.length
+          ? "связь есть, инструментов: " + ts.map(function (t) {
+              return t.name + (t.readOnly ? " (только чтение)" : " (потребует подтверждения)");
+            }).join(", ")
+          : "связь есть, но инструментов сервер не даёт";
+        mhint.className = "hintline ok";
+      } else {
+        mhint.textContent = "ошибка: " + (
+
+I have thought about this long enough; time to give my answer.
+</think>
+
+<tool_call>
+<function=edit>
+<parameter=newString>
+    case "settingsData": renderSettings(data); break;
+    case "mcpData": renderMcp(data.servers || []); break;
+    case "mcpTestResult":
+      if (data.ok) {
+        var ts = data.tools || [];
+        mhint.textContent = ts.length
+          ? "связь есть, инструментов: " + ts.map(function (t) {
+              return t.name + (t.readOnly ? " (чтение)" : " (запись, подтверждение)");
+            }).join(", ")
+          : "связь есть, но инструментов у сервера нет";
+        mhint.className = "hintline ok";
+      } else {
+        mhint.textContent = "ошибка: " + (data.error || "не удалось связаться");
+        mhint.className = "hintline bad";
+      }
+      break;
     case "testResult":
       if (data.ok) {
         var current = modelSel.value;
@@ -370,10 +524,14 @@ window.colleaguePush = function (kind, payload) {
         /* the form did its job; the fresh list arrives through loadSettings
            below, so the edit box closes on its own */
         hideForm();
+        hideMForm();
         setStatus("сохранено");
       } else if (editbox.style.display !== "none") {
         thint.textContent = "не сохранено: " + (data.error || "");
         thint.className = "hintline bad";
+      } else if (meditbox.style.display !== "none") {
+        mhint.textContent = "не сохранено: " + (data.error || "");
+        mhint.className = "hintline bad";
       } else {
         setStatus(data.error || "не сохранено");
       }
