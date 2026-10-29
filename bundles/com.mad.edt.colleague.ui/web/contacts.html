@@ -461,46 +461,6 @@ window.colleaguePush = function (kind, payload) {
           : "связь есть, но инструментов сервер не даёт";
         mhint.className = "hintline ok";
       } else {
-        mhint.textContent = "ошибка: " + (
-
-I have thought about this long enough; time to give my answer.
-</think>
-
-<tool_call>
-<function=edit>
-<parameter=newString>
-    case "settingsData": renderSettings(data); break;
-    case "mcpData": renderMcp(data.servers || []); break;
-    case "mcpTestResult":
-      if (data.ok) {
-        var ts = data.tools || [];
-        mhint.textContent = ts.length
-          ? "связь есть, инструментов: " + ts.map(function (t) {
-              return t.name + (t.readOnly ? " (только чтение)" : " (потребует подтверждения)");
-            }).join(", ")
-          : "связь есть, но инструментов сервер не даёт";
-        mhint.className = "hintline ok";
-      } else {
-        mhint.textContent = "ошибка: " + (
-
-I have thought about this long enough; time to give my answer.
-</think>
-
-<tool_call>
-<function=edit>
-<parameter=newString>
-    case "settingsData": renderSettings(data); break;
-    case "mcpData": renderMcp(data.servers || []); break;
-    case "mcpTestResult":
-      if (data.ok) {
-        var ts = data.tools || [];
-        mhint.textContent = ts.length
-          ? "связь есть, инструментов: " + ts.map(function (t) {
-              return t.name + (t.readOnly ? " (чтение)" : " (запись, подтверждение)");
-            }).join(", ")
-          : "связь есть, но инструментов у сервера нет";
-        mhint.className = "hintline ok";
-      } else {
         mhint.textContent = "ошибка: " + (data.error || "не удалось связаться");
         mhint.className = "hintline bad";
       }
