@@ -499,10 +499,16 @@ public class ColleagueView extends ViewPart {
         final Composite body = new Composite(ourTabFolder, SWT.NONE);
         body.setLayout(new FillLayout());
         final org.eclipse.swt.widgets.Label hint = new org.eclipse.swt.widgets.Label(body, SWT.WRAP);
+        final StringBuilder where = new StringBuilder();
+        for(final String id : LLMSettings.getProviderIds()) {
+            final com.mad.edt.colleague.llm.ProviderConfig config = LLMSettings.getConfig(id);
+            if(config != null) {
+                where.append('\n').append(id).append(": ").append(config.getBaseUrl());
+            }
+        }
         hint.setText(
-            "Ни один LLM-провайдер недоступен.\nЛокальный рантайм: "
-                + LLMSettings.LOCAL_RUNTIME_URL + "\nПроверьте его запуск и нажмите «Обновить» "
-                + "в панели контактов.");
+            "Ни один LLM-провайдер недоступен." + where
+                + "\nПроверьте их запуск и нажмите «Обновить» в панели контактов.");
         notice.setControl(body);
         ourTabFolder.setSelection(notice);
     }
@@ -912,10 +918,19 @@ public class ColleagueView extends ViewPart {
             if(ourTabFolder.isDisposed() || thePanel == null) {
                 return;
             }
+            final com.mad.edt.colleague.llm.ProviderConfig local =
+                LLMSettings.getConfig(LLMSettings.LOCAL_PROVIDER_ID);
+            final String secondModel =
+                local == null ? null : local.getDefaultModel();
+            if(secondModel == null || secondModel.isEmpty()) {
+                System.err.println("[colleague] browser selftest phase2: skipped, the "
+                    + "provider has no saved default model to open a second tab with");
+                return;
+            }
             System.err.println("[colleague] browser selftest phase2: opening a second "
                 + "model tab (the switch-model path that used to hang)");
             openContact(new ContactsPanel.Contact(
-                LLMSettings.LOCAL_PROVIDER_ID, "llama3.1:8b"));
+                LLMSettings.LOCAL_PROVIDER_ID, secondModel));
             System.err.println("[colleague] browser selftest phase2: second tab open, "
                 + "UI thread alive");
         });

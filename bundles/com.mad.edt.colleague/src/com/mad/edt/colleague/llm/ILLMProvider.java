@@ -87,6 +87,19 @@ public interface ILLMProvider {
     }
 
     /**
+     * Whether the model completes prompts, i.e. belongs in a list of chat
+     * contacts. Endpoints keep other kinds of models - embedding-only ones
+     * answer a different call entirely - and describe them, so the list is
+     * filtered by that description rather than by name patterns.
+     *
+     * @param theModel model name, {@code null} for the provider default
+     * @return {@code true} when the model may be used for chat
+     */
+    default boolean supportsChatCapability(final String theModel) {
+        return true;
+    }
+
+    /**
      * @return model names available at the endpoint
      * @throws LLMException when the endpoint is unreachable or rejects the call
      */

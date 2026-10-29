@@ -8,14 +8,20 @@ import java.util.Map;
 
 /**
  * Built-in endpoint defaults and the current (volatile, session-scoped)
- * provider registry. M4 will persist user settings through Eclipse
- * Preferences and supply keys from secure storage; until then callers may
- * register configurations programmatically.
+ * provider registry. Every field of the built-in provider is a user setting:
+ * once the provider is saved from the settings page, {@link ProviderStore}
+ * keeps the stored values and they override what is seeded here. The values
+ * below are only the first-run fallback for a workspace that never configured
+ * anything; no code may treat them as fixed.
  */
 public final class LLMSettings {
 
-    /** Root URL of the local model runtime as exposed on this machine. */
-    public static final String LOCAL_RUNTIME_URL = "http://127.0.0.1:11435";
+    /**
+     * First-run address of the local model runtime, before the user saved a
+     * provider of their own. Read it from {@link #getConfig(String)} instead:
+     * that answers with whatever is configured now.
+     */
+    public static final String LOCAL_RUNTIME_URL = "http://127.0.0.1:11434";
 
     /** Identifier of the built-in local runtime provider. */
     public static final String LOCAL_PROVIDER_ID = "local";
@@ -87,10 +93,12 @@ public final class LLMSettings {
 
     private static Map<String, ProviderConfig> createDefaultConfigs() {
         final Map<String, ProviderConfig> configs = new LinkedHashMap<>();
+        // no model is seeded: which model to use is the user's choice, and
+        // the endpoint itself lists what it has; the first chat therefore
+        // asks the user to pick one in the settings
         configs.put(LOCAL_PROVIDER_ID, ProviderConfig
             .builder(LOCAL_PROVIDER_ID, LLMProviderType.OLLAMA)
             .baseUrl(LOCAL_RUNTIME_URL)
-            .defaultModel("qwen3:8b")
             .build());
         return configs;
     }

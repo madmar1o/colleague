@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mad.edt.colleague.chat.Conversation;
 import com.mad.edt.colleague.http.HttpCallResult;
 import com.mad.edt.colleague.http.HttpCallSpec;
 
@@ -168,5 +169,38 @@ class OllamaThinkFallbackContractTest {
         Assertions.assertTrue(provider.supportsThinking("older-model"),
             "a failed description probe must not suppress the pass: the round itself "
                 + "stays the source of truth");
+    }
+
+    @Test
+    @DisplayName("the description keeps an embedding model out of the chat list")
+    void theDescriptionDecidesWhichModelsAreOfferedForChat() {
+        final RecordingHttpTransport transport = RecordingHttpTransport.sequence(
+            describes("embedding"), describes("completion", "tools", "thinking"));
+        final OllamaLLMProvider provider = new OllamaLLMProvider(config(), transport);
+
+        Assertions.assertFalse(provider.supportsChatCapability("embedding-model"),
+            "a model the endpoint describes as embedding-only must not be offered "
+                + "as a chat contact");
+        Assertions.assertTrue(provider.supportsChatCapability("chat-model"),
+            "a model described as completing prompts belongs in the list");
+        Assertions.assertEquals(2, transport.getCallCount(),
+            "each model is described once, both decisions come from those answers");
+    }
+
+    @Test
+    @DisplayName("a provider without a saved model names the provider, not a guessed model")
+    void aProviderWithoutASavedModelSaysSo() {
+        final RecordingHttpTransport transport =
+            RecordingHttpTransport.sequence(answer("never sent"));
+        final OllamaLLMProvider provider = new OllamaLLMProvider(config(), transport);
+        final Conversation conversation = new Conversation(provider, null);
+
+        final LLMException error = Assertions.assertThrows(LLMException.class,
+            () -> conversation.ask(null, null, "hi"));
+        Assertions.assertTrue(error.getMessage().contains("test"),
+            "the message must name the provider whose settings need the model: "
+                + error.getMessage());
+        Assertions.assertEquals(0, transport.getCallCount(),
+            "nothing may go to the network until the user picked a model");
     }
 }

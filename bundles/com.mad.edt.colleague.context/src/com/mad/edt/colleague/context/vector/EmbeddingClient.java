@@ -35,7 +35,7 @@ public final class EmbeddingClient {
     private final int readTimeoutMs;
 
     /**
-     * @param theBaseUrl runtime root, e.g. {@code http://127.0.0.1:11435}
+     * @param theBaseUrl runtime root, e.g. {@code http://127.0.0.1:11434}
      * @param theModel embedding model name, e.g. {@code bge-m3}
      * @param theReadTimeoutMs timeout for one embedding batch
      */

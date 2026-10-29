@@ -136,8 +136,16 @@ public final class Conversation {
     public String ask(final String theModel, final String theContext, final String theQuestion,
         final Consumer<String> theOnDelta, final Consumer<String> theOnThinking,
         final CancellationFlag theCancellation) throws LLMException {
-        final ChatRequest.Builder request = ChatRequest
-            .builder(theModel != null ? theModel : provider.getConfig().getDefaultModel());
+        final String model = theModel != null ? theModel : provider.getConfig().getDefaultModel();
+        if(model == null || model.isEmpty()) {
+            // the model is a user setting, not a guess: without a saved one
+            // the request would carry a made-up name and the endpoint would
+            // answer with an error the user cannot connect to their settings
+            throw new LLMException("No model selected for provider '"
+                + provider.getConfig().getId()
+                + "': pick one in the settings and save the provider");
+        }
+        final ChatRequest.Builder request = ChatRequest.builder(model);
         if(systemPrompt != null && !systemPrompt.isEmpty()) {
             request.addMessage(ChatMessage.system(systemPrompt));
         }

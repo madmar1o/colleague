@@ -28,6 +28,9 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
      */
     private static final String THINKING_CAPABILITY = "thinking";
 
+    /** Capability name the runtime reports for a prompt-completing model. */
+    private static final String COMPLETION_CAPABILITY = "completion";
+
     /** Budget for one warm-up call: loading a model into memory is slow. */
     private static final int WARM_TIMEOUT_MS = 120_000;
 
@@ -48,7 +51,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
 
     /**
      * @param theConfig endpoint configuration; base URL must point at the
-     *        server root, e.g. {@code http://127.0.0.1:11435}
+     *        server root, e.g. {@code http://127.0.0.1:11434}
      */
     public OllamaLLMProvider(final ProviderConfig theConfig) {
         this(theConfig, HttpTransport.createDefault());
@@ -215,10 +218,34 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
         if(ourNoThinking.contains(model)) {
             return false;
         }
-        final Set<String> capabilities = capabilities(model);
-        // a runtime that describes nothing stays on the optimistic answer:
-        // the rejection of the round itself is what teaches us otherwise
-        return capabilities.isEmpty() || capabilities.contains(THINKING_CAPABILITY);
+        return hasCapability(model, THINKING_CAPABILITY);
+    }
+
+    /**
+     * Whether the endpoint describes the model as completing prompts. An
+     * embedding-only model answers a different call and would fail every
+     * chat round, so the description - not the model's name - decides
+     * whether it is offered as a chat contact.
+     *
+     * @param theModel model name, {@code null} for the configured default
+     * @return {@code false} when the endpoint describes the model as unable
+     *         to complete prompts
+     */
+    @Override
+    public boolean supportsChatCapability(final String theModel) {
+        return hasCapability(modelKey(theModel), COMPLETION_CAPABILITY);
+    }
+
+    /**
+     * @param theModel model name as this endpoint would call it
+     * @param theCapability capability name to look for
+     * @return {@code true} when the endpoint reports it or describes nothing
+     *         (an endpoint that cannot describe its model is not evidence
+     *         against it)
+     */
+    private boolean hasCapability(final String theModel, final String theCapability) {
+        final Set<String> capabilities = capabilities(theModel);
+        return capabilities.isEmpty() || capabilities.contains(theCapability);
     }
 
     /**

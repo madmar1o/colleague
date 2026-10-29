@@ -210,13 +210,26 @@ class ConversationTest {
 
     @Test
     void missingModelFallsBackToTheProviderDefault() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("qwen3:8b");
+        final ScriptedProvider provider = new ScriptedProvider("saved-default-model");
         final Conversation conversation = new Conversation(provider, null);
         conversation.ask(null, null, "q1");
         final ChatRequest sent = provider.requests().get(0);
-        assertEquals("qwen3:8b", sent.getModel());
+        assertEquals("saved-default-model", sent.getModel());
         // the default name decides the reasoning flag as well
         assertEquals(Boolean.TRUE, sent.getThink());
+    }
+
+    @Test
+    void aProviderWithoutASavedModelRefusesToSendAGuess() {
+        final ScriptedProvider provider = new ScriptedProvider(null);
+        final Conversation conversation = new Conversation(provider, null);
+        final LLMException error =
+            assertThrows(LLMException.class, () -> conversation.ask(null, null, "q1"));
+        assertTrue(error.getMessage().contains("test"),
+            "the message must point at the provider whose settings need a model: "
+                + error.getMessage());
+        assertTrue(provider.requests().isEmpty(),
+            "a request with a made-up model name must never leave for the endpoint");
     }
 
     @Test

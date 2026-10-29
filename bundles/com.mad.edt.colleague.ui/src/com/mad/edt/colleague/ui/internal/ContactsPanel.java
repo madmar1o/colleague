@@ -158,7 +158,7 @@ public final class ContactsPanel {
                 final ILLMProvider provider =
                     LLMProviderFactory.create(LLMSettings.getConfig(id));
                 final List<String> models = provider.listModels().stream()
-                    .filter(name -> !name.contains("embed") && !name.startsWith("bge"))
+                    .filter(name -> provider.supportsChatCapability(name))
                     .collect(Collectors.toList());
                 providers.add(new Object[] {Boolean.TRUE, id,
                     provider.getConfig().getBaseUrl(), models});
@@ -306,9 +306,10 @@ public final class ContactsPanel {
                     .baseUrl(url)
                     .apiKey(BridgeBrowser.optString(theArguments, "key"))
                     .build();
-                final List<String> models = LLMProviderFactory.create(config).listModels()
+                final ILLMProvider probed = LLMProviderFactory.create(config);
+                final List<String> models = probed.listModels()
                     .stream()
-                    .filter(name -> !name.contains("embed") && !name.startsWith("bge"))
+                    .filter(name -> probed.supportsChatCapability(name))
                     .collect(Collectors.toList());
                 final JsonArray array = new JsonArray();
                 models.forEach(array::add);

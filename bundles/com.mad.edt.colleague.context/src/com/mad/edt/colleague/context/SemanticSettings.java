@@ -9,7 +9,7 @@ import org.osgi.service.prefs.Preferences;
  * workspace instance preferences once per session. Semantic search stays off
  * until a vector store URL is registered - by {@link #configure(String,String,String)}
  * or through the stored preferences - and the embedding endpoint falls back
- * to the local model runtime URL when not set separately.
+ * to the address of the default provider when not set separately.
  */
 public final class SemanticSettings {
 
@@ -94,15 +94,20 @@ public final class SemanticSettings {
     }
 
     /**
-     * @return the configured embedding endpoint or the fallback URL when the
-     *         endpoint was not set separately
+     * @return the configured embedding endpoint or the address of the default
+     *         provider when the endpoint was not set separately - the local
+     *         runtime answers both chat and embedding calls, and its address
+     *         is a stored setting, not a constant
      */
     public static String resolveEmbedUrl() {
         return ourEmbedUrl.isEmpty() ? defaultEmbedUrl() : ourEmbedUrl;
     }
 
     private static String defaultEmbedUrl() {
-        return com.mad.edt.colleague.llm.LLMSettings.LOCAL_RUNTIME_URL;
+        final com.mad.edt.colleague.llm.ProviderConfig configured =
+            com.mad.edt.colleague.llm.LLMSettings.getConfig(
+                com.mad.edt.colleague.llm.LLMSettings.getDefaultProviderId());
+        return configured == null ? "" : configured.getBaseUrl();
     }
 
     private static Preferences node() {
