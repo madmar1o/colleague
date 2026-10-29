@@ -25,8 +25,9 @@ import com.mad.edt.colleague.llm.ProviderConfig;
  * Pins how a conversation builds each request and grows its memory: system
  * instructions first, replayed history, the per-turn workspace context right
  * before the question, the assistant history keeping only final answers and
- * never the reasoning pass, the reasoning request flag following the model
- * name, and the history cap trimming from the oldest end.
+ * never the reasoning pass, the reasoning request flag following what the
+ * provider reports about the model, and the history cap trimming from the
+ * oldest end.
  */
 class ConversationTest {
 
@@ -38,12 +39,25 @@ class ConversationTest {
         private ChatResult myNext = new ChatResult("a", "model", "stop", 7, 12);
         private List<String> myStreamChunks = List.of();
         private LLMException myStreamFailure;
+        private boolean myThinking = true;
 
         ScriptedProvider(final String theDefaultModel) {
             myConfig = ProviderConfig.builder("test", LLMProviderType.OLLAMA)
                 .baseUrl("http://runtime.test")
                 .defaultModel(theDefaultModel)
                 .build();
+        }
+
+        /**
+         * @param theThinking what the provider reports about its models
+         */
+        void thinking(final boolean theThinking) {
+            myThinking = theThinking;
+        }
+
+        @Override
+        public boolean supportsThinking(final String theModel) {
+            return myThinking;
         }
 
         void script(final ChatResult theResult) {
@@ -184,12 +198,13 @@ class ConversationTest {
     }
 
     @Test
-    void reasoningModelsAreRequestedToStreamTheirThinking() throws LLMException {
+    void thinkingIsRequestedOnlyWhereTheProviderReportsTheCapability() throws LLMException {
         final ScriptedProvider provider = new ScriptedProvider("base-model");
         final Conversation conversation = new Conversation(provider, null);
-        conversation.ask("qwen3:4b", null, "q1");
+        conversation.ask("thinking-model", null, "q1");
         assertEquals(Boolean.TRUE, provider.requests().get(0).getThink());
-        conversation.ask("some-other-model", null, "q2");
+        provider.thinking(false);
+        conversation.ask("plain-model", null, "q2");
         assertEquals(Boolean.FALSE, provider.requests().get(1).getThink());
     }
 

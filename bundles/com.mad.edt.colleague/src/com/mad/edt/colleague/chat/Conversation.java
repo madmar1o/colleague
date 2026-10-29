@@ -258,14 +258,15 @@ public final class Conversation {
      * Reasoning-capable models produce their chain of thought in a separate
      * stream field; the assistant history keeps only the final answer, so the
      * reasoning pass is requested and shown to the user collapsed apart from
-     * the answer.
+     * the answer. The provider is the only side that knows the capability:
+     * model names say nothing reliable about it.
      *
      * @param theModel model name, may be {@code null}
      * @return {@code true} when the reasoning pass must be requested
      */
     private boolean wantsVisibleReasoning(final String theModel) {
         final String name = theModel == null ? provider.getConfig().getDefaultModel() : theModel;
-        return name != null && name.contains("qwen3");
+        return name != null && provider.supportsThinking(name);
     }
 
     /**

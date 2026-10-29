@@ -1,7 +1,12 @@
 package com.mad.edt.colleague.llm;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 import com.google.gson.JsonArray;
@@ -16,8 +21,30 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
 
     private static final int PING_TIMEOUT_MS = 5_000;
 
+    /**
+     * Capability name the runtime reports for a model that can run a
+     * separate reasoning pass. Read from the endpoint's own description of
+     * the model, never guessed from the model name.
+     */
+    private static final String THINKING_CAPABILITY = "thinking";
+
     /** Budget for one warm-up call: loading a model into memory is slow. */
     private static final int WARM_TIMEOUT_MS = 120_000;
+
+    /**
+     * Models this endpoint rejected the reasoning pass for. The rejection is
+     * permanent for the model, so the answer is remembered once per provider
+     * and every later round starts without asking.
+     */
+    private final Set<String> ourNoThinking = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Capabilities the endpoint reports for a model, cached per model. The
+     * runtime describes its models itself ({@code /api/show}), which is the
+     * only reliable source: a model name says nothing about whether it can
+     * run a reasoning pass.
+     */
+    private final Map<String, Set<String>> ourCapabilities = new ConcurrentHashMap<>();
 
     /**
      * @param theConfig endpoint configuration; base URL must point at the
@@ -40,7 +67,30 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
         if(theRequest.getCancellation().isCancelled()) {
             throw new LLMException("generation turn cancelled");
         }
-        final JsonObject body = buildBody(theRequest, false);
+        try {
+            return bufferedRound(theRequest, effectiveThink(theRequest));
+        } catch (final LLMException ex) {
+            if(!isThinkingRejected(ex, effectiveThink(theRequest))) {
+                throw ex;
+            }
+            forgetThinking(theRequest);
+            return bufferedRound(theRequest, Boolean.FALSE);
+        }
+    }
+
+    /**
+     * One buffered round over the given reasoning setting.
+     *
+     * @param theRequest the request
+     * @param theThink whether the reasoning pass is requested, {@code null}
+     *            leaves the field out of the body
+     * @return the parsed answer
+     * @throws LLMException when the endpoint is unreachable, rejects or
+     *             returns an unexpected body
+     */
+    private ChatResult bufferedRound(final ChatRequest theRequest, final Boolean theThink)
+        throws LLMException {
+        final JsonObject body = buildBody(theRequest, false, theThink);
         final JsonObject response =
             postJson("/api/chat", body, getConfig().getReadTimeoutMs());
 
@@ -64,7 +114,33 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
     @Override
     public ChatResult chatStream(final ChatRequest theRequest, final Consumer<String> theOnContent,
         final Consumer<String> theOnThinking) throws LLMException {
-        final JsonObject body = buildBody(theRequest, true);
+        try {
+            return streamedRound(theRequest, theOnContent, theOnThinking, effectiveThink(theRequest));
+        } catch (final LLMException ex) {
+            if(!isThinkingRejected(ex, effectiveThink(theRequest))) {
+                throw ex;
+            }
+            forgetThinking(theRequest);
+            return streamedRound(theRequest, theOnContent, theOnThinking, Boolean.FALSE);
+        }
+    }
+
+    /**
+     * One streamed round over the given reasoning setting.
+     *
+     * @param theRequest the request
+     * @param theOnContent receives answer chunks
+     * @param theOnThinking receives reasoning chunks
+     * @param theThink whether the reasoning pass is requested, {@code null}
+     *            leaves the field out of the body
+     * @return the assembled answer
+     * @throws LLMException when the endpoint is unreachable, rejects or
+     *             returns an unexpected body
+     */
+    private ChatResult streamedRound(final ChatRequest theRequest,
+        final Consumer<String> theOnContent, final Consumer<String> theOnThinking,
+        final Boolean theThink) throws LLMException {
+        final JsonObject body = buildBody(theRequest, true, theThink);
         final StringBuilder content = new StringBuilder();
         final StringBuilder thinking = new StringBuilder();
         final String[] modelName = new String[1];
@@ -123,6 +199,127 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
         appendKeepAlive(body);
         appendWarmWindow(body);
         postJson("/api/generate", body, WARM_TIMEOUT_MS);
+    }
+
+    /**
+     * Whether the endpoint model accepts the reasoning pass. The runtime
+     * describes its own models, so that description answers first; a model
+     * the endpoint rejected once is remembered and never asked again.
+     *
+     * @param theModel model name, {@code null} for the configured default
+     * @return {@code true} when the reasoning pass may be requested
+     */
+    @Override
+    public boolean supportsThinking(final String theModel) {
+        final String model = modelKey(theModel);
+        if(ourNoThinking.contains(model)) {
+            return false;
+        }
+        final Set<String> capabilities = capabilities(model);
+        // a runtime that describes nothing stays on the optimistic answer:
+        // the rejection of the round itself is what teaches us otherwise
+        return capabilities.isEmpty() || capabilities.contains(THINKING_CAPABILITY);
+    }
+
+    /**
+     * @param theModel model name as this endpoint would call it
+     * @return capability names the endpoint reports for the model, empty when
+     *         the endpoint does not describe models
+     */
+    private Set<String> capabilities(final String theModel) {
+        final Set<String> cached = ourCapabilities.get(theModel);
+        if(cached != null) {
+            return cached;
+        }
+        final Set<String> fresh = readCapabilities(theModel);
+        ourCapabilities.put(theModel, fresh);
+        return fresh;
+    }
+
+    /**
+     * Asks the endpoint once for what its model can do.
+     *
+     * @param theModel model name
+     * @return immutable capability names, empty when nothing was reported
+     */
+    private Set<String> readCapabilities(final String theModel) {
+        final JsonObject body = new JsonObject();
+        body.addProperty("model", theModel);
+        try {
+            final JsonObject answer = postJson("/api/show", body, PING_TIMEOUT_MS);
+            final JsonArray reported = answer.getAsJsonArray("capabilities");
+            if(reported == null || reported.isEmpty()) {
+                return Set.of();
+            }
+            final Set<String> found = new HashSet<>();
+            for(final JsonElement entry : reported) {
+                found.add(entry.getAsString());
+            }
+            return Set.copyOf(found);
+        } catch (final LLMException | RuntimeException ex) {
+            // an endpoint that cannot describe its model is no reason to drop
+            // the reasoning pass: the round itself stays the source of truth
+            return Set.of();
+        }
+    }
+
+    /**
+     * Recognizes the endpoint's rejection of a reasoning request. The status
+     * alone is not enough: an ordinary bad request must surface instead of
+     * being retried, so the body has to name the thinking capability.
+     *
+     * @param theError failure of the round
+     * @param theThink reasoning setting of the rejected round
+     * @return {@code true} when one retry without the pass is worth it
+     */
+    private static boolean isThinkingRejected(final LLMException theError, final Boolean theThink) {
+        if(theThink == null || !theThink.booleanValue() || theError.getStatusCode() != 400) {
+            return false;
+        }
+        final String message = theError.getMessage();
+        return message != null && message.toLowerCase(Locale.ROOT).contains("thinking");
+    }
+
+    /**
+     * Remembers that this request's model has no reasoning pass.
+     *
+     * @param theRequest the rejected request
+     */
+    private void forgetThinking(final ChatRequest theRequest) {
+        final String key = modelKey(theRequest.getModel());
+        ourNoThinking.add(key);
+        System.err.println("[colleague] model " + key
+            + " has no thinking pass: the round is retried without it");
+    }
+
+    /**
+     * @param theModel model name, {@code null} for the configured default
+     * @return stable key of the model this endpoint would call
+     */
+    private String modelKey(final String theModel) {
+        try {
+            return resolveModel(theModel);
+        } catch (final LLMException ex) {
+            return String.valueOf(theModel);
+        }
+    }
+
+    /**
+     * Reasoning setting to actually send for this request. Once the endpoint
+     * rejected the pass for the model, every later round of that model is
+     * built without it, so the session pays the failed round-trip once.
+     *
+     * @param theRequest the request about to go out
+     * @return the reasoning setting for the body, {@code null} leaves the
+     *         field out
+     */
+    private Boolean effectiveThink(final ChatRequest theRequest) {
+        final Boolean asked = theRequest.getThink();
+        if(asked == null || !asked.booleanValue()) {
+            return asked;
+        }
+        return ourNoThinking.contains(modelKey(theRequest.getModel()))
+            ? Boolean.FALSE : asked;
     }
 
     /**
@@ -197,14 +394,14 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
         return characters * 3 / 5 + 256;
     }
 
-    private JsonObject buildBody(final ChatRequest theRequest, final boolean theStreaming)
-        throws LLMException {
+    private JsonObject buildBody(final ChatRequest theRequest, final boolean theStreaming,
+        final Boolean theThink) throws LLMException {
         final JsonObject body = new JsonObject();
         body.addProperty("model", resolveModel(theRequest.getModel()));
         body.addProperty("stream", Boolean.valueOf(theStreaming));
         appendKeepAlive(body);
-        if(theRequest.getThink() != null) {
-            body.addProperty("think", theRequest.getThink().booleanValue());
+        if(theThink != null) {
+            body.addProperty("think", theThink.booleanValue());
         }
         if(theRequest.getTemperature() != null) {
             body.addProperty("temperature", theRequest.getTemperature().doubleValue());

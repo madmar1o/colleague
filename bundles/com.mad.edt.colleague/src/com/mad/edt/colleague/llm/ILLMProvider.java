@@ -74,6 +74,19 @@ public interface ILLMProvider {
     }
 
     /**
+     * Whether the model can run a separate reasoning pass and still answer.
+     * A local runtime rejects the whole call for a model without that
+     * capability, so the caller must ask before requesting it. A provider
+     * that learns the answer from a rejection reports it here.
+     *
+     * @param theModel model name, {@code null} for the provider default
+     * @return {@code true} when the reasoning pass may be requested
+     */
+    default boolean supportsThinking(final String theModel) {
+        return true;
+    }
+
+    /**
      * @return model names available at the endpoint
      * @throws LLMException when the endpoint is unreachable or rejects the call
      */

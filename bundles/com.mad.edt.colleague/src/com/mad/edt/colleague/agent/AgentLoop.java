@@ -140,16 +140,19 @@ public final class AgentLoop {
             if(cancellation.isCancelled()) {
                 return new AgentAnswer("", steps, executed, false);
             }
-            final ChatRequest.Builder request = ChatRequest.builder(
-                model != null ? model : defaultModel());
+            final String roundModel = model != null ? model : defaultModel();
+            final ChatRequest.Builder request = ChatRequest.builder(roundModel);
             for(final ChatMessage message : messages) {
                 request.addMessage(message);
             }
             request.tools(specs);
             // the reasoning pass is where the tool-call syntax of local
             // reasoning models reliably appears; suppressing it on these
-            // models makes them describe calls in prose instead of making them
-            request.think(true);
+            // models makes them describe calls in prose instead of making
+            // them. a model without the capability rejects the whole round,
+            // so the provider - the side that learns from that rejection -
+            // answers whether the pass may be requested at all
+            request.think(Boolean.valueOf(provider.supportsThinking(roundModel)));
             request.maxTokens(ROUND_TRIP_OUTPUT_TOKENS);
             request.cancellation(cancellation);
 
