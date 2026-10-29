@@ -3,7 +3,9 @@ package com.mad.edt.colleague.ui.internal;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -13,6 +15,7 @@ import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.IJobFunction;
 import org.eclipse.core.runtime.jobs.Job;
+import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.StyleRange;
 import org.eclipse.swt.custom.StyledText;
@@ -58,6 +61,7 @@ import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.CancellationFlag;
 import com.mad.edt.colleague.llm.GeneratorGate;
 import com.mad.edt.colleague.llm.ILLMProvider;
+import com.mad.edt.colleague.mcp.McpCatalog;
 import com.mad.edt.colleague.skills.SkillRegistry;
 import com.mad.edt.colleague.skills.SkillShowcase;
 import com.mad.edt.colleague.skills.SkillTool;
@@ -177,6 +181,13 @@ public final class ChatPanel {
     private final ToolUsageStats ourToolUsage = new ToolUsageStats();
 
     /**
+     * Remote tool catalog shared by the workbench session, {@code null} when
+     * no MCP servers were ever configured; each edit run asks it for the
+     * current adapters, see {@link McpCatalog}.
+     */
+    private McpCatalog ourMcpCatalog;
+
+    /**
      * The step plan this chat keeps visible across its turns: the model
      * replaces it through the update_plan tool, and an unfinished board is
      * carried into the next task so a long job survives turn boundaries.
@@ -293,6 +304,15 @@ public final class ChatPanel {
      */
     public void setToolSupplier(final Supplier<List<IToolExecutor>> theToolSupplier) {
         ourToolSupplier = theToolSupplier;
+    }
+
+    /**
+     * @param theMcpCatalog remote tool catalog shared by the workbench
+     *            session, {@code null} to offer no remote tools; the same
+     *            instance across panels keeps one set of open server channels
+     */
+    public void setMcpCatalog(final McpCatalog theMcpCatalog) {
+        ourMcpCatalog = theMcpCatalog;
     }
 
     /**
@@ -1185,6 +1205,28 @@ public final class ChatPanel {
             && policy.shouldOffer(ourToolUsage, "load_skill")) {
             tools.add(new SkillTool(skills));
         }
+        if(ourMcpCatalog != null) {
+            // remote tools join after the local ones so a built-in name always
+            // wins the collision check, and they reach the subagent delegate
+            // through the same list below
+            final Set<String> reserved = new LinkedHashSet<>();
+            boolean localWrites = false;
+            for(final IToolExecutor tool : tools) {
+                reserved.add(tool.getName());
+                localWrites |= "write_file".equals(tool.getName())
+                    || "edit_file".equals(tool.getName());
+            }
+            for(final IToolExecutor remote
+                : ourMcpCatalog.tools(reserved, this::confirmRemoteCall)) {
+                if(!remote.isParallelSafe() && !localWrites) {
+                    continue; // a read-only run keeps read-only remote tools only
+                }
+                if(policy.allows(profile, remote.getName())
+                    && policy.shouldOffer(ourToolUsage, remote.getName())) {
+                    tools.add(remote);
+                }
+            }
+        }
         if(policy.allows(profile, "subagent") && policy.shouldOffer(ourToolUsage, "subagent")) {
             // the delegate hears about its finished turn through this panel so
             // the page shows a card; the listener thread is the worker thread,
@@ -1282,6 +1324,31 @@ public final class ChatPanel {
             "%n--- режим правки: %d шагов, %d вызовов инструментов, %d мс",
             Integer.valueOf(answer.getSteps()), Integer.valueOf(answer.getExecutedToolCalls()),
             Long.valueOf(elapsedMs));
+    }
+
+    /**
+     * Modal yes/no gate for one write-like remote call, asked on the UI
+     * thread exactly like the workspace file tools ask before a write.
+     *
+     * @param theQuestion the full call description to show the user
+     * @return {@code "yes"} when the user allowed the call, {@code "denied"}
+     *         otherwise; a vanished shell denies so nothing hangs
+     */
+    private String confirmRemoteCall(final String theQuestion) {
+        final Display display = ourRoot.isDisposed() ? null : ourRoot.getDisplay();
+        if(display == null || display.isDisposed()) {
+            return "denied";
+        }
+        final Boolean[] answer = new Boolean[1];
+        display.syncExec(() -> {
+            if(ourRoot.isDisposed() || ourRoot.getShell() == null) {
+                answer[0] = Boolean.FALSE;
+                return;
+            }
+            answer[0] = Boolean.valueOf(MessageDialog.openConfirm(ourRoot.getShell(),
+                "Colleague: вызов удалённого инструмента", theQuestion));
+        });
+        return answer[0] != null && answer[0].booleanValue() ? "yes" : "denied";
     }
 
     /**
