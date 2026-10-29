@@ -158,4 +158,25 @@ class OllamaContextWindowContractTest {
         Assertions.assertEquals(ProviderConfig.MAX_LOCAL_CONTEXT_TOKENS,
             local().getContextWindowCeiling());
     }
+
+    @Test
+    @DisplayName("a turn cut by the window is known as truncation, a finished one is not")
+    void truncationIsReported() throws LLMException {
+        // done_reason=length means the runtime ran out of window and dropped
+        // the oldest prompt text in silence: the caller can only learn about
+        // it through this flag, so the UI can say the answer is incomplete
+        final RecordingHttpTransport cut = RecordingHttpTransport.streaming(200,
+            "{\"message\":{\"content\":\"half\"},\"done\":true,\"done_reason\":\"length\"}");
+        final ChatResult cutResult = new OllamaLLMProvider(local(), cut)
+            .chatStream(askingAbout("hi"), piece -> { }, piece -> { });
+        Assertions.assertTrue(cutResult.truncated(),
+            "done_reason=length must surface as truncated()");
+
+        final RecordingHttpTransport calm = RecordingHttpTransport.streaming(200,
+            "{\"message\":{\"content\":\"ok\"},\"done\":true,\"done_reason\":\"stop\"}");
+        final ChatResult calmResult = new OllamaLLMProvider(local(), calm)
+            .chatStream(askingAbout("hi"), piece -> { }, piece -> { });
+        Assertions.assertFalse(calmResult.truncated(),
+            "a normally finished answer is not truncated");
+    }
 }
