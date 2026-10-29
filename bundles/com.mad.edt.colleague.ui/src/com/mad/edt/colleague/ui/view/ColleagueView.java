@@ -52,6 +52,7 @@ import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
 import com.mad.edt.colleague.ui.internal.ChatSession;
 import com.mad.edt.colleague.ui.internal.ContactsPanel;
+import com.mad.edt.colleague.ui.internal.PageSwitchNote;
 import com.mad.edt.colleague.ui.internal.StartupDeferral;
 import com.mad.edt.colleague.ui.internal.WorkspaceTools;
 
@@ -356,13 +357,23 @@ public class ColleagueView extends ViewPart {
         }
     }
 
-    private void showMobilePage(final Composite thePage) {
+    /**
+     * Brings one page of the shared stack to the front and traces the switch.
+     *
+     * @param thePage page to show
+     * @param theCause call site requesting the switch, short and stable
+     * @param theDetail extra context for the log, blank when there is none
+     */
+    private void showMobilePage(final Composite thePage, final String theCause,
+        final String theDetail) {
         if(!thePage.isDisposed()) {
             ourMobileStackLayout.topControl = thePage;
             ourMobileStack.layout(true);
             ourRoot.layout(true);
-            System.err.println("[colleague] mobile page -> "
-                + (thePage == ourTabsArea ? "chat tabs" : "contacts")
+            final int tabs = ourTabFolder == null || ourTabFolder.isDisposed()
+                ? -1 : ourTabFolder.getItemCount();
+            System.err.println("[colleague] mobile page -> " + PageSwitchNote.describe(
+                thePage == ourTabsArea ? "chat tabs" : "contacts", theCause, tabs, theDetail)
                 + " stack=" + ourMobileStack.getSize() + " page=" + thePage.getSize());
         }
     }
@@ -506,7 +517,7 @@ public class ColleagueView extends ViewPart {
         if(ourTabFolder.isDisposed() || ourTabFolder.getItemCount() > 0) {
             return;
         }
-        showMobilePage(ourContactsArea);
+        showMobilePage(ourContactsArea, "tabs empty", "");
     }
 
     /**
@@ -690,7 +701,7 @@ public class ColleagueView extends ViewPart {
         for(final CTabItem item : ourTabFolder.getItems()) {
             if(theContact.getModel().equals(item.getText())) {
                 ourTabFolder.setSelection(item);
-                showMobilePage(ourTabsArea);
+                showMobilePage(ourTabsArea, "existing tab", theContact.getModel());
                 return item;
             }
         }
@@ -727,7 +738,7 @@ public class ColleagueView extends ViewPart {
         // switch the page over before the browser is created: at cold start the
         // preferred contact opens automatically, and a browser created in a
         // hidden zero-sized page paints nothing
-        showMobilePage(ourTabsArea);
+        showMobilePage(ourTabsArea, "tab body", theTab.getText());
         final Composite body = new Composite(ourTabFolder, SWT.NONE);
         body.setLayout(new FillLayout());
         theTab.setControl(body);
@@ -773,7 +784,8 @@ public class ColleagueView extends ViewPart {
         panel.setCommandSupplier(this::commandsCatalog);
         panel.setProfileSupplier(this::profileCatalog);
         panel.setAutoContextSupplier(this::collectAutoContext);
-        panel.setOnBack(() -> showMobilePage(ourContactsArea));
+        panel.setOnBack(() -> showMobilePage(ourContactsArea, "back arrow",
+            theContact.getModel()));
         theTab.setData(panel);
         panel.setAnswerListener(answer -> {
             ourLastAnswer = answer;
