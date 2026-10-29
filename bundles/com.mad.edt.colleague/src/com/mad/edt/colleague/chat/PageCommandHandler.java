@@ -64,6 +64,14 @@ public final class PageCommandHandler {
          * @param theText measured text, empty when the page sent none
          */
         void diagnose(String theText);
+
+        /**
+         * The profile chip picked one of the workspace agent profiles.
+         *
+         * @param theName profile name to switch to, empty to drop back to the
+         *            default agent
+         */
+        void pickProfile(String theName);
     }
 
     private static final String[] FOCUS_STATE_FIELDS = {"ae", "hf", "kd", "qvlen", "ch",
@@ -122,6 +130,9 @@ public final class PageCommandHandler {
                 return;
             case "diag":
                 actions.diagnose(argument(theArgument, "txt"));
+                return;
+            case "pickProfile":
+                actions.pickProfile(argument(theArgument, "name"));
                 return;
             default:
                 return;

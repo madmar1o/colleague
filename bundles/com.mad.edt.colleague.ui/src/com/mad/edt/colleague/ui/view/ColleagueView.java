@@ -2,10 +2,13 @@ package com.mad.edt.colleague.ui.view;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.eclipse.core.resources.IProject;
+import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
@@ -28,18 +31,27 @@ import org.osgi.framework.FrameworkUtil;
 
 import com.mad.edt.colleague.agent.AgentMemory;
 import com.mad.edt.colleague.agent.AgentMode;
+import com.mad.edt.colleague.agents.AgentProfile;
+import com.mad.edt.colleague.agents.AgentProfileLoader;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
 import com.mad.edt.colleague.context.ContextSource;
 import com.mad.edt.colleague.context.KeywordContextSource;
 import com.mad.edt.colleague.context.SemanticIndex;
 import com.mad.edt.colleague.context.SemanticSettings;
+import com.mad.edt.colleague.commands.CommandDefinition;
+import com.mad.edt.colleague.commands.CommandLoader;
+import com.mad.edt.colleague.commands.SlashCommands;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
 import com.mad.edt.colleague.llm.LLMSettings;
+import com.mad.edt.colleague.skills.SkillDefinition;
+import com.mad.edt.colleague.skills.SkillLoader;
+import com.mad.edt.colleague.skills.SkillRegistry;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
 import com.mad.edt.colleague.ui.internal.ChatSession;
 import com.mad.edt.colleague.ui.internal.ContactsPanel;
+import com.mad.edt.colleague.ui.internal.StartupDeferral;
 import com.mad.edt.colleague.ui.internal.WorkspaceTools;
 
 /**
@@ -96,6 +108,27 @@ public class ColleagueView extends ViewPart {
     private AgentMemory ourLessonMemory;
     private SemanticIndex ourSemantic;
     private volatile boolean ourOverviewStale;
+
+    /**
+     * Project-local skills of the workspace, loaded once per view session
+     * from {@code .colleague/skills} of the first open project; every chat
+     * tab advertises the same catalog through load_skill.
+     */
+    private SkillRegistry ourSkillCatalog;
+
+    /**
+     * User slash commands of the workspace, loaded once per view session
+     * from {@code .colleague/commands} of the first open project; every chat
+     * tab expands matching input lines through the same catalog.
+     */
+    private SlashCommands ourCommandsCatalog;
+
+    /**
+     * Agent profiles of the workspace, loaded once per view session from
+     * {@code .colleague/agents} of the first open project; the profile chip of
+     * every chat tab lists the same set.
+     */
+    private List<AgentProfile> ourProfileCatalog;
 
     private String ourLastAnswer = "";
     private ChatPanel ourLastAnsweredPanel;
@@ -181,7 +214,10 @@ public class ColleagueView extends ViewPart {
                 + SemanticSettings.getStoreUrl() + ", model "
                 + SemanticSettings.getModel());
         }
-        Job.create("Colleague: project index", (monitor) -> {
+        // the whole-project index waits out its grace period as a system job:
+        // reindexing competes with the user's builds, so it must not crowd
+        // out the first minutes of the session (see StartupDeferral)
+        StartupDeferral.scheduleIndexJob((monitor) -> {
             final int files = ourCodeSearch.reindex(monitor);
             System.err.println("[colleague] context index ready: " + files + " files");
             if(ourSemantic != null) {
@@ -208,7 +244,7 @@ public class ColleagueView extends ViewPart {
                 }
             }
             return Status.OK_STATUS;
-        }).schedule();
+        });
 
         com.mad.edt.colleague.llm.ProviderStore.loadIntoSettings();
         ourContacts.reload();
@@ -390,12 +426,15 @@ public class ColleagueView extends ViewPart {
         }
         final ContactsPanel.Contact preferred = ourDefaultContactCache;
         if(preferred != null) {
-            return openContact(preferred);
+            return openContactNow(preferred);
         }
         return null;
     }
 
     private ContactsPanel.Contact ourDefaultContactCache;
+
+    /** Startup budget seam: heavy builds move off the first-paint path. */
+    private final StartupDeferral ourStartup = StartupDeferral.forDisplay();
 
     private void onContactsLoaded(final List<ContactsPanel.Contact> theAvailable) {
         if(ourTabFolder.isDisposed()) {
@@ -479,22 +518,184 @@ public class ColleagueView extends ViewPart {
         return ourLessonMemory;
     }
 
-    private ChatPanel openContact(final ContactsPanel.Contact theContact) {
+    /**
+     * Project-local skills advertised to every agent turn: loaded once per
+     * view session from {@code .colleague/skills} under the first open
+     * workspace project. A missing or unreadable directory leaves the catalog
+     * empty, which simply runs the chats without the skill layer instead of
+     * failing the view.
+     *
+     * @return shared skill catalog, never {@code null}
+     */
+    private SkillRegistry skillCatalog() {
+        if(ourSkillCatalog == null) {
+            final SkillRegistry registry = new SkillRegistry();
+            final java.io.File skillsDir = colleagueDirectory("skills");
+            if(skillsDir != null) {
+                try {
+                    for(final SkillDefinition skill : new SkillLoader().loadAll(skillsDir)) {
+                        registry.register(skill);
+                    }
+                } catch (final java.io.IOException ex) {
+                    System.err.println("[colleague] skills directory unreadable: "
+                        + ex.getMessage());
+                }
+            }
+            ourSkillCatalog = registry;
+        }
+        return ourSkillCatalog;
+    }
+
+    /**
+     * User slash commands advertised in the chat line: loaded once per view
+     * session from {@code .colleague/commands} under the first open workspace
+     * project. A missing or unreadable directory leaves the catalog empty, so
+     * slash lines stay ordinary chat text instead of failing the view.
+     *
+     * @return shared command catalog, never {@code null}
+     */
+    private SlashCommands commandsCatalog() {
+        if(ourCommandsCatalog == null) {
+            final java.io.File commandsDir = colleagueDirectory("commands");
+            final List<CommandDefinition> commands = new ArrayList<>();
+            if(commandsDir != null) {
+                try {
+                    commands.addAll(new CommandLoader().loadAll(commandsDir));
+                } catch (final java.io.IOException ex) {
+                    System.err.println("[colleague] commands directory unreadable: "
+                        + ex.getMessage());
+                }
+            }
+            ourCommandsCatalog = new SlashCommands(commands);
+        }
+        return ourCommandsCatalog;
+    }
+
+    /**
+     * Agent profiles the profile chip offers: loaded once per view session
+     * from {@code .colleague/agents} under the first open workspace project.
+     * A missing or unreadable directory leaves the list empty, so the chats
+     * simply run without profiles instead of failing the view.
+     *
+     * @return shared profile list, never {@code null}
+     */
+    private List<AgentProfile> profileCatalog() {
+        if(ourProfileCatalog == null) {
+            final java.io.File agentsDir = colleagueDirectory("agents");
+            final List<AgentProfile> profiles = new ArrayList<>();
+            if(agentsDir != null) {
+                try {
+                    profiles.addAll(new AgentProfileLoader().loadAll(agentsDir));
+                } catch (final java.io.IOException ex) {
+                    System.err.println("[colleague] agents directory unreadable: "
+                        + ex.getMessage());
+                }
+            }
+            ourProfileCatalog = profiles;
+        }
+        return ourProfileCatalog;
+    }
+
+    /**
+     * Finds the workspace-local folder {@code .colleague/<theName>} under the
+     * first open project of the workspace; the same place skills, commands and
+     * other project extensions of the plugin live.
+     *
+     * @param theName folder name below {@code .colleague}
+     * @return existing directory, {@code null} when no open project has one
+     */
+    private java.io.File colleagueDirectory(final String theName) {
+        for(final IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
+            if(!project.isOpen()) {
+                continue;
+            }
+            final java.io.File dir = project.getLocation()
+                .append(".colleague/" + theName).toFile();
+            if(dir.isDirectory()) {
+                return dir;
+            }
+            break;
+        }
+        return null;
+    }
+
+    /**
+     * Opens a contact the way the ordinary UI paths do (list click, cold
+     * start auto-open): the tab itself appears right away, but the heavy
+     * chat page - the embedded browser and its controls - is queued behind
+     * the first paint of the tab, so switching to the chat never waits on
+     * the browser widget initialization.
+     *
+     * @param theContact provider and model pair to open
+     */
+    private void openContact(final ContactsPanel.Contact theContact) {
+        if(ourTabFolder.isDisposed()) {
+            return;
+        }
+        if(existingTabFor(theContact) != null) {
+            return;
+        }
+        final CTabItem tab = createTabFor(theContact);
+        final Composite body = createTabBody(tab);
+        final ChatSession session = sessionFor(theContact);
+        ourStartup.defer(() -> {
+            // the tab may have been closed while its build waited for the
+            // paint tick: building into a disposed shell would only throw
+            if(!tab.isDisposed() && !body.isDisposed() && !ourTabFolder.isDisposed()) {
+                buildChatPanel(tab, body, session, theContact);
+            }
+        });
+    }
+
+    /**
+     * Opens a contact and builds the chat page inline. Only for the paths
+     * that keep using the returned panel right away: staged questions and
+     * the selftests.
+     *
+     * @param theContact provider and model pair to open
+     * @return the chat panel of the contact's tab, {@code null} when the
+     *         tab exists but its build is still queued from an earlier
+     *         deferred open
+     */
+    private ChatPanel openContactNow(final ContactsPanel.Contact theContact) {
         if(ourTabFolder.isDisposed()) {
             return null;
         }
+        final CTabItem existing = existingTabFor(theContact);
+        if(existing != null) {
+            return existing.getData() instanceof ChatPanel ? (ChatPanel)existing.getData() : null;
+        }
+        final CTabItem tab = createTabFor(theContact);
+        final Composite body = createTabBody(tab);
+        return buildChatPanel(tab, body, sessionFor(theContact), theContact);
+    }
+
+    /**
+     * Selects the tab of this model when the folder already has one. The
+     * text check alone is enough: a tab is created only by these open paths,
+     * one per model, and its panel build never runs twice for one tab.
+     *
+     * @param theContact provider and model pair
+     * @return the existing tab, {@code null} when there is none
+     */
+    private CTabItem existingTabFor(final ContactsPanel.Contact theContact) {
         for(final CTabItem item : ourTabFolder.getItems()) {
-            if(theContact.getModel().equals(item.getText())
-                && item.getData() instanceof ChatPanel) {
+            if(theContact.getModel().equals(item.getText())) {
                 ourTabFolder.setSelection(item);
                 showMobilePage(ourTabsArea);
-                return (ChatPanel)item.getData();
+                return item;
             }
         }
-        final ChatSession session = ourSessions.computeIfAbsent(theContact.getKey(), key ->
-            new ChatSession(
-                LLMProviderFactory.create(LLMSettings.getConfig(theContact.getProviderId())),
-                SYSTEM_PROMPT));
+        return null;
+    }
+
+    /**
+     * Creates the closed-able tab shell for one contact.
+     *
+     * @param theContact provider and model pair
+     * @return the new tab item
+     */
+    private CTabItem createTabFor(final ContactsPanel.Contact theContact) {
         final CTabItem tab = new CTabItem(ourTabFolder, SWT.CLOSE);
         tab.setText(theContact.getModel());
         // closing the last chat tab must not leave the empty tab page on
@@ -504,22 +705,67 @@ public class ColleagueView extends ViewPart {
         // "now empty" event, so the item's own dispose is the trigger
         tab.addDisposeListener((final DisposeEvent theEvent) ->
             Display.getDefault().asyncExec(this::fallBackToContactsIfEmpty));
+        return tab;
+    }
+
+    /**
+     * Puts the empty page body under the tab and switches the stack to the
+     * chat page.
+     *
+     * @param theTab tab to attach the body to
+     * @return the body composite the chat panel will live in
+     */
+    private Composite createTabBody(final CTabItem theTab) {
         // switch the page over before the browser is created: at cold start the
         // preferred contact opens automatically, and a browser created in a
         // hidden zero-sized page paints nothing
         showMobilePage(ourTabsArea);
         final Composite body = new Composite(ourTabFolder, SWT.NONE);
         body.setLayout(new FillLayout());
-        final ChatPanel panel = new ChatPanel(body, session, theContact.getModel());
+        theTab.setControl(body);
+        ourTabFolder.setSelection(theTab);
+        return body;
+    }
+
+    /**
+     * Session for one contact, shared by all tabs of the same provider and
+     * model pair so a conversation survives closing and reopening a tab.
+     *
+     * @param theContact provider and model pair
+     * @return the live session of this contact
+     */
+    private ChatSession sessionFor(final ContactsPanel.Contact theContact) {
+        return ourSessions.computeIfAbsent(theContact.getKey(), key ->
+            new ChatSession(
+                LLMProviderFactory.create(LLMSettings.getConfig(theContact.getProviderId())),
+                SYSTEM_PROMPT));
+    }
+
+    /**
+     * The heavy half of opening a contact: builds the chat panel with its
+     * embedded browser and wires the view into it. Kept out of the tab
+     * shell creation so the deferred open can run it after the first paint.
+     *
+     * @param theTab tab shell to fill
+     * @param theBody body composite for the panel
+     * @param theSession conversation session of this contact
+     * @param theContact provider and model pair
+     * @return the built chat panel
+     */
+    private ChatPanel buildChatPanel(final CTabItem theTab, final Composite theBody,
+        final ChatSession theSession, final ContactsPanel.Contact theContact) {
+        final ChatPanel panel = new ChatPanel(theBody, theSession, theContact.getModel());
         panel.attachThemeAnchor(ourRoot);
         panel.setToolSupplier(() -> AgentMode.isOn()
             ? WorkspaceTools.withWrite(ourCodeSearch, ourOverview)
             : WorkspaceTools.readOnly(ourCodeSearch, ourOverview));
         panel.setLessonMemory(lessonMemory());
+        panel.setSkillSupplier(this::skillCatalog);
+        panel.setCommandSupplier(this::commandsCatalog);
+        panel.setProfileSupplier(this::profileCatalog);
         panel.setAutoContextSupplier(this::collectAutoContext);
         panel.setOnBack(() -> showMobilePage(ourContactsArea));
-        tab.setControl(body);
-        tab.setData(panel);
+        theTab.setData(panel);
         panel.setAnswerListener(answer -> {
             ourLastAnswer = answer;
             ourLastAnsweredPanel = panel;
@@ -535,7 +781,6 @@ public class ColleagueView extends ViewPart {
                         Math.min(120, answer.replace('\n', ' ').length())) + "]");
             }
         });
-        ourTabFolder.setSelection(tab);
         return panel;
     }
 
@@ -618,7 +863,7 @@ public class ColleagueView extends ViewPart {
         }
         ourSelfTestDone = true;
         ourSelfTestPending = true;
-        final ChatPanel panel = openContact(preferred);
+        final ChatPanel panel = openContactNow(preferred);
         if(panel == null) {
             return;
         }
