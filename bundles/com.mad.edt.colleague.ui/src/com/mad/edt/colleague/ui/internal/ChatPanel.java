@@ -360,6 +360,15 @@ public final class ChatPanel {
         ourAutoContextSupplier = theSupplier;
     }
 
+    /**
+     * @return the conversation session this panel talks through; the view
+     *         consults it when a provider's saved configuration moves and a
+     *         tab would otherwise keep asking the endpoint the user corrected
+     */
+    public ChatSession getSession() {
+        return ourSession;
+    }
+
     /** Clears the conversation and the stored session history. */
     private void reset() {
         ourSession.reset();

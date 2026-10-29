@@ -78,6 +78,7 @@ public final class ContactsPanel {
 
     private final Consumer<Contact> ourOnContactSelected;
     private final Consumer<List<Contact>> ourOnLoaded;
+    private final Runnable ourOnProvidersChanged;
 
     private Composite ourRoot;
     private BridgeBrowser ourBridge;
@@ -92,11 +93,15 @@ public final class ContactsPanel {
      * @param theOnContactSelected invoked on the UI thread for model selection
      * @param theOnLoaded invoked on the UI thread after each reload with the
      *            contacts that answered
+     * @param theOnProvidersChanged invoked on the UI thread after the saved
+     *            provider list moved (saved, corrected or removed), so the
+     *            view can retire conversations built on the old configuration
      */
     public ContactsPanel(final Composite theParent, final Consumer<Contact> theOnContactSelected,
-        final Consumer<List<Contact>> theOnLoaded) {
+        final Consumer<List<Contact>> theOnLoaded, final Runnable theOnProvidersChanged) {
         ourOnContactSelected = theOnContactSelected;
         ourOnLoaded = theOnLoaded;
+        ourOnProvidersChanged = theOnProvidersChanged;
         createControls(theParent);
     }
 
@@ -277,6 +282,7 @@ public final class ContactsPanel {
             LLMSettings.setDefaultProviderId(LLMSettings.LOCAL_PROVIDER_ID);
         }
         ProviderStore.saveFromSettings();
+        ourOnProvidersChanged.run();
         pushSaved(true, "");
         reload();
     }
@@ -363,6 +369,7 @@ public final class ContactsPanel {
             LLMSettings.setDefaultProviderId(id);
         }
         ProviderStore.saveFromSettings();
+        ourOnProvidersChanged.run();
         pushSaved(true, "");
         reload();
     }

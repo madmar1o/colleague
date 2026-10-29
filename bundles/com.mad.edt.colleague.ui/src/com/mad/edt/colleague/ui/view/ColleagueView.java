@@ -44,6 +44,7 @@ import com.mad.edt.colleague.commands.CommandLoader;
 import com.mad.edt.colleague.commands.SlashCommands;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
 import com.mad.edt.colleague.llm.LLMSettings;
+import com.mad.edt.colleague.llm.ProviderConfig;
 import com.mad.edt.colleague.mcp.McpCatalog;
 import com.mad.edt.colleague.skills.SkillDefinition;
 import com.mad.edt.colleague.skills.SkillLoader;
@@ -51,6 +52,7 @@ import com.mad.edt.colleague.skills.SkillRegistry;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
 import com.mad.edt.colleague.ui.internal.ChatSession;
+import com.mad.edt.colleague.ui.internal.ChatSessionRegistry;
 import com.mad.edt.colleague.ui.internal.ContactsPanel;
 import com.mad.edt.colleague.ui.internal.PageSwitchNote;
 import com.mad.edt.colleague.ui.internal.StartupDeferral;
@@ -89,7 +91,8 @@ public class ColleagueView extends ViewPart {
     /** The single visible instance (the view is not multiplicable). */
     private static volatile ColleagueView ourInstance;
 
-    private final Map<String, ChatSession> ourSessions = new HashMap<>();
+    /** Conversations keyed by contact; rebuilt when a saved endpoint moves. */
+    private final ChatSessionRegistry ourSessions = new ChatSessionRegistry();
     private final Map<String, ChatPanel> ourPanels = new HashMap<>();
 
     private Composite ourRoot;
@@ -195,7 +198,8 @@ public class ColleagueView extends ViewPart {
 
         ourContactsArea = new Composite(ourMobileStack, SWT.NONE);
         ourContactsArea.setLayout(new FillLayout());
-        ourContacts = new ContactsPanel(ourContactsArea, this::openContact, this::onContactsLoaded);
+        ourContacts = new ContactsPanel(ourContactsArea, this::openContact,
+            this::onContactsLoaded, this::onProvidersChanged);
 
         ourTabsArea = new Composite(ourMobileStack, SWT.NONE);
         ourTabsArea.setLayout(new FillLayout());
@@ -754,16 +758,46 @@ public class ColleagueView extends ViewPart {
 
     /**
      * Session for one contact, shared by all tabs of the same provider and
-     * model pair so a conversation survives closing and reopening a tab.
+     * model pair so a conversation survives closing and reopening a tab. A
+     * session whose captured configuration no longer matches the saved one
+     * (the user corrected the address or key) is replaced, not reused.
      *
      * @param theContact provider and model pair
      * @return the live session of this contact
      */
     private ChatSession sessionFor(final ContactsPanel.Contact theContact) {
-        return ourSessions.computeIfAbsent(theContact.getKey(), key ->
-            new ChatSession(
-                LLMProviderFactory.create(LLMSettings.getConfig(theContact.getProviderId())),
-                SYSTEM_PROMPT));
+        final ProviderConfig current = LLMSettings.getConfig(theContact.getProviderId());
+        return ourSessions.sessionFor(theContact.getKey(), current, () -> new ChatSession(
+            LLMProviderFactory.create(current != null ? current
+                : LLMSettings.getConfig(LLMSettings.getDefaultProviderId())),
+            SYSTEM_PROMPT));
+    }
+
+    /**
+     * The saved provider list moved: a provider was corrected or removed.
+     * Every tab whose session captured the previous endpoint is retired -
+     * that conversation belonged to an address the user has left behind, and
+     * keeping the tab open would replay the failure the correction was meant
+     * to fix. The next open of the contact builds against the saved address.
+     */
+    private void onProvidersChanged() {
+        if(ourTabFolder == null || ourTabFolder.isDisposed()) {
+            return;
+        }
+        final List<CTabItem> stale = new ArrayList<>();
+        for(final CTabItem item : ourTabFolder.getItems()) {
+            final Object data = item.getData();
+            if(data instanceof ChatPanel) {
+                final ChatSession session = ((ChatPanel)data).getSession();
+                if(!ourSessions.isCurrent(session,
+                    LLMSettings.getConfig(session.getProvider().getId()))) {
+                    stale.add(item);
+                }
+            }
+        }
+        for(final CTabItem item : stale) {
+            item.dispose();
+        }
     }
 
     /**
