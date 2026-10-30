@@ -117,6 +117,9 @@ public final class ChatPanel {
 
     private Composite ourRoot;
     private BridgeBrowser ourBridge;
+
+    /** Second transport watching this conversation, set only by the debug bridge. */
+    private volatile PageTransport ourMirrorTransport;
     private Control ourThemeAnchor;
     private Color ourPageBackground;
 
@@ -908,6 +911,42 @@ public final class ChatPanel {
             payload.addProperty("mode", AgentMode.current().wireName());
         }
         ourBridge.push(theKind, payload);
+        final PageTransport mirror = ourMirrorTransport;
+        if(mirror != null) {
+            mirror.push(theKind, payload);
+        }
+    }
+
+    /**
+     * Attaches a second transport that watches the same conversation, used by
+     * the debug web bridge: the workbench tab and a browser tab then show one
+     * and the same chat. Page calls from that transport have to arrive through
+     * {@link #pageCall(String, JsonObject)}, which moves them onto this panel's
+     * UI thread.
+     *
+     * @param theMirror transport to receive the same events, {@code null} to
+     *            detach the one that was attached
+     */
+    public void attachMirrorTransport(final PageTransport theMirror) {
+        ourMirrorTransport = theMirror;
+    }
+
+    /**
+     * Enters a page call that arrived outside the embedded browser (the debug
+     * web bridge) into the same routing table the browser channel uses.
+     *
+     * @param theMethod page method name
+     * @param theArguments page arguments, may be {@code null}
+     */
+    public void pageCall(final String theMethod, final JsonObject theArguments) {
+        if(ourRoot == null || ourRoot.isDisposed()) {
+            return;
+        }
+        ourRoot.getDisplay().asyncExec(() -> {
+            if(ourRoot != null && !ourRoot.isDisposed()) {
+                handleBridge(theMethod, theArguments);
+            }
+        });
     }
 
     /**
@@ -924,6 +963,11 @@ public final class ChatPanel {
         // the queue is the single source of truth for delivery, so the batch
         // argument stays empty; pushEvents drains everything queued before it
         ourBridge.pushEvents(java.util.Collections.<Object[]>emptyList());
+        final PageTransport mirror = ourMirrorTransport;
+        if(mirror != null) {
+            mirror.push(theKind, thePayload);
+            mirror.pushEvents(java.util.Collections.<Object[]>emptyList());
+        }
     }
 
     /**

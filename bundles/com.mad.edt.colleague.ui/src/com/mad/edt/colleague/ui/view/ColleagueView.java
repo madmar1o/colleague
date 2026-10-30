@@ -153,6 +153,9 @@ public class ColleagueView extends ViewPart {
      */
     private List<AgentProfile> ourProfileCatalog;
 
+    /** Debug-only HTTP transport for the chat page, open only by start-up flag. */
+    private com.mad.edt.colleague.ui.internal.WebBridge ourWebBridge;
+
     private String ourLastAnswer = "";
     private ChatPanel ourLastAnsweredPanel;
     private boolean ourSelfTestDone;
@@ -216,6 +219,9 @@ public class ColleagueView extends ViewPart {
         ourAgents = new AgentsPanel(ourAgentsArea, this::profileCatalog,
             this::openAgent, () -> showMobilePage(ourContactsArea, "gear", "settings"),
             this::agentsLevelDirectory, this::refreshAgentCatalog);
+        // a debugging door, not a feature: the socket only exists when the
+        // start-up flag named a port for it
+        openWebBridgeIfAsked();
 
         ourContactsArea = new Composite(ourMobileStack, SWT.NONE);
         ourContactsArea.setLayout(new FillLayout());
@@ -435,6 +441,11 @@ public class ColleagueView extends ViewPart {
     public void dispose() {
         if(ourInstance == this) {
             ourInstance = null;
+        }
+        if(ourWebBridge != null) {
+            // the port belongs to the view: closing the view closes the door
+            ourWebBridge.close();
+            ourWebBridge = null;
         }
         if(ourAgents != null) {
             ourAgents.dispose();
@@ -1026,6 +1037,42 @@ public class ColleagueView extends ViewPart {
      * @param theContact provider and model pair
      * @return the built chat panel
      */
+    /**
+     * Opens the debug web bridge when the start-up flag asked for a port. The
+     * bridge is a debugging door for an agent or a browser test: it serves the
+     * same chat page over the loopback interface and guards every data request
+     * with a generated token. Without the flag nothing listens at all.
+     */
+    private void openWebBridgeIfAsked() {
+        final int port = com.mad.edt.colleague.ui.internal.WebBridge.requestedPort();
+        if(port == 0) {
+            return;
+        }
+        try {
+            ourWebBridge = com.mad.edt.colleague.ui.internal.WebBridge.start(port);
+            System.out.println("[colleague] web bridge (debug): http://"
+                + ourWebBridge.host() + ":" + ourWebBridge.port() + "/");
+        } catch (final java.io.IOException ex) {
+            System.err.println("[colleague] web bridge not started: " + ex.getMessage());
+        }
+    }
+
+    /**
+     * Lets the debug bridge watch and drive one chat tab: its pushes mirror the
+     * panel's events, its page calls enter the panel's own routing table. The
+     * bridge answers whichever tab attached last, which is what a person
+     * watching a browser tab expects.
+     *
+     * @param thePanel chat tab just built
+     */
+    private void attachWebBridge(final ChatPanel thePanel) {
+        if(ourWebBridge == null) {
+            return;
+        }
+        ourWebBridge.setPageCallSink(thePanel::pageCall);
+        thePanel.attachMirrorTransport(ourWebBridge);
+    }
+
     private ChatPanel buildChatPanel(final CTabItem theTab, final Composite theBody,
         final ChatSession theSession, final ContactsPanel.Contact theContact) {
         final ChatPanel panel = new ChatPanel(theBody, theSession, theContact.getModel());
@@ -1050,6 +1097,7 @@ public class ColleagueView extends ViewPart {
         // an agent tab speaks as its agent from the first turn, not only
         // after the chip was touched
         panel.setInitialAgent(theContact.getAgentName());
+        attachWebBridge(panel);
         theTab.setData(panel);
         panel.setAnswerListener(answer -> {
             ourLastAnswer = answer;
