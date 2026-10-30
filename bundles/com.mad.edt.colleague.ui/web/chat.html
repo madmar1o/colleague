@@ -291,6 +291,7 @@ function apiCall(method, obj) {
 var __kdCount = 0;
 var __pollSeq = 0;
 var __pushCount = 0;
+var __orderReports = 0;
 var __lastUserAt = 0;
 function userActivity() { __lastUserAt = Date.now(); }
 document.addEventListener("keydown", function () { __kdCount++; userActivity(); }, true);
@@ -829,7 +830,17 @@ window.colleaguePush = function (kind, payload) {
     case "user": addOutgoing(data.text || "", data.time); break;
     case "delta": streamDelta(data.text || ""); break;
     case "thinking": thinkingDelta(data.text || ""); break;
-    case "answer": endStream(); endThinking(); setTools(data.tools || []); addIncoming("answer", data.text || "", data.time); break;
+    case "answer": endStream(); endThinking(); setTools(data.tools || []); addIncoming("answer", data.text || "", data.time);
+      /* Order census for the first few answers: the transcript order is the
+         one thing the page can lie about while every event looked right in
+         the Java log (a late user echo puts the answer above its question). */
+      if (__orderReports < 3) {
+        __orderReports++;
+        reportDiag("order: " + Array.prototype.map.call(msgs.children, function (c) {
+          return (c.className || "?") + "=" + (c.textContent || "").slice(0, 12).replace(/\s+/g, " ");
+        }).join(" | "));
+      }
+      break;
     case "error": endStream(); addIncoming("error", data.text || "", data.time); break;
     case "tool": addTool(data); break;
     case "subagent": addSubagent(data); break;
