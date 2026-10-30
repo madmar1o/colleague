@@ -439,10 +439,19 @@ public final class ChatPanel {
                 warmth.cancel();
             }
         });
+        // the parent may already have its final size when this panel is built
+        // (the deferred open adds the panel after the tab body was laid out):
+        // adding a child to a laid-out composite does not resize it, so without
+        // this pass ourRoot stays 0x0, the browser inside it paints nothing and
+        // the chat tab shows a blank page while the webview runs fine. The
+        // pass runs after the children exist: one layout cascade then sizes
+        // body -> ourRoot -> browser in a single pass
         if(createBrowser()) {
+            theParent.layout(true);
             return;
         }
         createFallback(ourRoot);
+        theParent.layout(true);
     }
 
     /**
@@ -489,6 +498,19 @@ public final class ChatPanel {
             if(ourRoot.isDisposed() || control.isDisposed()) {
                 return;
             }
+            // walk the parent chain: the blank-page failure is a collapsed
+            // composite somewhere between the browser and the view pane, and
+            // only per-level sizes can say which level collapses
+            final StringBuilder chain = new StringBuilder();
+            for(Control walk = control; walk != null; walk = walk.getParent()) {
+                chain.append(walk.getClass().getSimpleName())
+                    .append(' ').append(walk.getSize().x).append('x')
+                    .append(walk.getSize().y).append(walk.isVisible() ? "" : "!vis")
+                    .append(walk.getLayoutData() == null ? "" : " ld="
+                        + walk.getLayoutData().getClass().getSimpleName())
+                    .append(" <- ");
+            }
+            System.out.println("[colleague] browser chain: " + chain);
             final org.eclipse.swt.graphics.Point topLeft = control.toDisplay(0, 0);
             final org.eclipse.swt.graphics.Point bottom =
                 control.toDisplay(control.getSize().x, control.getSize().y);
