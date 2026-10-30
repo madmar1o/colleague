@@ -1,6 +1,6 @@
 # AG-3 — Список агентов-контактов в чате и перенос провайдеров/моделей в шестерёнку
 
-Ветка: `feature/ag3-agent-contacts` | Борд: Qdrant `oc_plans`, id=`3ceda6b8-674e-4b67-8769-85c57fab3e0c`
+Ветка: `feature/ag3-agent-contacts` | Борд: Qdrant `oc_plans`, id=`6f294f7b-5d20-4812-ab6f-bc3ae20462d9`
 Зависимости: AG-2 (режимы), `fix/m26-chat-no-blocking`
 
 ## Статус
