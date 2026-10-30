@@ -292,6 +292,8 @@ var __kdCount = 0;
 var __pollSeq = 0;
 var __pushCount = 0;
 var __orderReports = 0;
+var __eventLog = [];
+var __EVENT_LOG_LIMIT = 40;
 var __lastUserAt = 0;
 function userActivity() { __lastUserAt = Date.now(); }
 document.addEventListener("keydown", function () { __kdCount++; userActivity(); }, true);
@@ -538,6 +540,10 @@ function addOutgoing(text, time) {
 /* Streaming answer bubble: grows with every delta batch from Java and is
    replaced by the final rendered bubble on "answer". */
 var streamRow = null, streamText = null;
+/* A partial stream kept by the end of a busy turn must not survive the final
+   answer: the answer bubble carries the same text again, and the page then
+   shows the reply twice. */
+var keptStream = null;
 var pageBusy = false;
 /* Reasoning pass goes to its own collapsed block, like separate "reasoning
    parts" of terminal chat UIs: the user sees the header and can expand it,
@@ -603,6 +609,7 @@ function endStream(keepPartial) {
           '<span class="meta">' + now() +
           ' <span class="copylink" onclick="copyBubble(this)">копир.</span></span>';
       }
+      keptStream = streamRow;
     } else {
       streamRow.remove();
     }
@@ -805,6 +812,8 @@ function applyPalette(p) {
 }
 window.colleaguePush = function (kind, payload) {
   __pushCount++;
+  __eventLog.push(kind);
+  if (__eventLog.length > __EVENT_LOG_LIMIT) { __eventLog.shift(); }
   var data = {};
   try { data = payload ? JSON.parse(payload) : {}; } catch (e) { data = { text: String(payload || "") }; }
   switch (kind) {
@@ -820,6 +829,7 @@ window.colleaguePush = function (kind, payload) {
     case "history":
       endStream();
       endThinking();
+      keptStream = null;
       msgs.textContent = "";
       if (!(data.items || []).length) { restoreWelcome(); }
       (data.items || []).forEach(function (m) {
@@ -830,7 +840,9 @@ window.colleaguePush = function (kind, payload) {
     case "user": addOutgoing(data.text || "", data.time); break;
     case "delta": streamDelta(data.text || ""); break;
     case "thinking": thinkingDelta(data.text || ""); break;
-    case "answer": endStream(); endThinking(); setTools(data.tools || []); addIncoming("answer", data.text || "", data.time);
+    case "answer": endStream(); endThinking();
+      if (keptStream) { keptStream.remove(); keptStream = null; }
+      setTools(data.tools || []); addIncoming("answer", data.text || "", data.time);
       /* Order census for the first few answers: the transcript order is the
          one thing the page can lie about while every event looked right in
          the Java log (a late user echo puts the answer above its question). */
@@ -838,7 +850,7 @@ window.colleaguePush = function (kind, payload) {
         __orderReports++;
         reportDiag("order: " + Array.prototype.map.call(msgs.children, function (c) {
           return (c.className || "?") + "=" + (c.textContent || "").slice(0, 12).replace(/\s+/g, " ");
-        }).join(" | "));
+        }).join(" | ") + " || events=" + __eventLog.join(","));
       }
       break;
     case "error": endStream(); addIncoming("error", data.text || "", data.time); break;
@@ -851,7 +863,7 @@ window.colleaguePush = function (kind, payload) {
       sendEl.textContent = pageBusy ? "Стоп" : "Спросить";
       sendEl.classList.toggle("stop", pageBusy);
       setStatus(data.text || "");
-      if (data.busy) { showTyping(); } else { hideTyping(); endStream(true); endThinking(); }
+      if (data.busy) { keptStream = null; showTyping(); } else { hideTyping(); endStream(true); endThinking(); }
       break;
     case "input": qEl.value = data.text || ""; qEl.focus(); renderSlashHints(); break;
     case "catalog":
