@@ -80,3 +80,13 @@
 
 Примечание: карточки задач лежат в соответствующих feature-ветках (коммит `docs: task card ...`)
 и появятся здесь после мерджа вех. Статусы в таблице — снапшот на дату генерации.
+
+---
+
+## Параллельная пачка AG-* (UX агента в чате) — план 2026-10-30, статус: планирование
+
+Карточки: `docs/taskcards/AGENT-UX-PLAN.md` (общие факты и порядок), `AG-4-step-budget.md`,
+`AG-1-tool-trace.md`, `AG-2-modes.md`, `AG-3-agent-contacts.md`.
+Борд: Qdrant `oc_plans` (project=Colleague, status=pending), ids в AGENT-UX-PLAN.md.
+Порядок выполнения: AG-4 -> AG-1 -> AG-2 -> AG-3a/AG-3b. Зависимость от вливания
+`fix/m26-chat-no-blocking`.
