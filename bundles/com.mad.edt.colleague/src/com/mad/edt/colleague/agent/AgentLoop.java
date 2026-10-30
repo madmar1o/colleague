@@ -22,7 +22,14 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 public final class AgentLoop {
 
-    private static final int DEFAULT_MAX_STEPS = 8;
+    /**
+     * Round-trips one task gets by default. Twelve, not eight: a reasoning
+     * local model spends two or three calls just to locate the files a task
+     * names, and at eight the budget dies before the interesting half of the
+     * work starts. The ceiling costs nothing early - a model that answers
+     * soon pays only for the rounds it used.
+     */
+    private static final int DEFAULT_MAX_STEPS = 12;
     private static final int MAX_TOOL_RESULT_CHARS = 4_000;
 
     /**
@@ -189,8 +196,35 @@ public final class AgentLoop {
             messages.add(ChatMessage.assistantToolCalls(result.getContent(), result.getToolCalls()));
             executed += runToolRound(result.getToolCalls(), steps, messages);
         }
-        return new AgentAnswer("Step budget exhausted after " + steps + " round-trips",
-            steps, executed, false);
+        // the budget died mid-work: one closing round-trip without tools
+        // turns the executed-but-unanswered tool results into a summary the
+        // user can read, instead of a bare exhaustion note. The interrupted
+        // conversation travels with the answer: the caller can offer a
+        // continuation over exactly this history, where the loop left off
+        String closing = "";
+        if(!cancellation.isCancelled()) {
+            try {
+                final ChatRequest.Builder wrap =
+                    ChatRequest.builder(model != null ? model : defaultModel());
+                for(final ChatMessage message : messages) {
+                    wrap.addMessage(message);
+                }
+                wrap.think(Boolean.FALSE);
+                wrap.maxTokens(Integer.valueOf(REPAIR_ROUND_OUTPUT_TOKENS));
+                wrap.cancellation(cancellation);
+                final ChatResult wrapResult = streamedRound(wrap.build());
+                observer.onRound(steps + 1, 0);
+                if(!wrapResult.wantsToolCall()) {
+                    closing = finalText(wrapResult);
+                }
+            } catch (final LLMException ex) {
+                // the summary is a bonus over the note: an endpoint failing
+                // here must not lose the partial work already executed
+            }
+        }
+        return new AgentAnswer(closing.isEmpty()
+            ? "Step budget exhausted after " + steps + " round-trips" : closing,
+            steps, executed, false, messages);
     }
 
     /**

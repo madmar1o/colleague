@@ -84,6 +84,11 @@ class PageCommandHandlerTest {
         public void pickProfile(final String theName) {
             calls.add("pickProfile|" + theName);
         }
+
+        @Override
+        public void continueTurn() {
+            calls.add("continueTurn");
+        }
     }
 
     /** page arguments as name-value pairs, missing name arrives as null */
@@ -160,6 +165,14 @@ class PageCommandHandlerTest {
         final PageCommandHandler handler = handlerWith(actions);
         handler.handle("pickProfile", args("name", "reviewer"));
         assertEquals(List.of("pickProfile|reviewer"), actions.calls);
+    }
+
+    @Test
+    void continueButtonPicksTheInterruptedTurnBackUp() {
+        final RecordingActions actions = new RecordingActions();
+        final PageCommandHandler handler = handlerWith(actions);
+        handler.handle("continueTurn", args());
+        assertEquals(List.of("continueTurn"), actions.calls);
     }
 
     @Test
