@@ -254,6 +254,21 @@ function unwrap(v) {
   return v;
 }
 window.colleagueEvents = function (list) { applyEvents(unwrap(list)); };
+/* A page-side exception is invisible on the embedded webview: nothing renders
+   and the host learns nothing. Report every uncaught error and rejected
+   promise through the existing diag channel, and add a one-shot DOM census
+   after the load so a blank page is attributable: no events applied, an error
+   before rendering, or a missing root element. */
+function reportDiag(txt) {
+  try { apiCall("diag", { txt: txt }); } catch (e) { /* the bridge is the patient */ }
+}
+window.addEventListener("error", function (e) {
+  reportDiag("js-error: " + (e.message || "?") + " @" +
+    String(e.filename || "").slice(-40) + ":" + (e.lineno || 0));
+});
+window.addEventListener("unhandledrejection", function (e) {
+  reportDiag("js-reject: " + String((e.reason && e.reason.message) || e.reason || "?"));
+});
 function apiCall(method, obj) {
   var json;
   try { json = JSON.stringify(obj || {}); } catch (e) { json = "{}"; }
@@ -275,6 +290,7 @@ function apiCall(method, obj) {
 }
 var __kdCount = 0;
 var __pollSeq = 0;
+var __pushCount = 0;
 var __lastUserAt = 0;
 function userActivity() { __lastUserAt = Date.now(); }
 document.addEventListener("keydown", function () { __kdCount++; userActivity(); }, true);
@@ -787,6 +803,7 @@ function applyPalette(p) {
   if (p.theme) { document.body.dataset.theme = p.theme; }
 }
 window.colleaguePush = function (kind, payload) {
+  __pushCount++;
   var data = {};
   try { data = payload ? JSON.parse(payload) : {}; } catch (e) { data = { text: String(payload || "") }; }
   switch (kind) {
@@ -843,6 +860,16 @@ window.__colleagueWarmed = false;
 var __warmTimer = setTimeout(function () {
   if (!window.__bridgeReady) { apiCall("bridgeReady", {}); }
 }, 2500);
+/* One census three seconds in: it separates "no events reached the page"
+   (push=0) from "events applied but nothing rendered" (push>0, msgs=0) and
+   shows whether the polling loop is alive (polls keeps growing). */
+setTimeout(function () {
+  reportDiag("census: push=" + __pushCount + " msgs=" + msgs.childElementCount +
+    " hdr=" + document.getElementById("hdrname").textContent +
+    " q=" + (qEl ? "ok" : "gone") + " ch=" + CHANNEL +
+    " polls=" + __pollSeq + " kd=" + __kdCount +
+    " focus=" + document.hasFocus());
+}, 3000);
 window.addEventListener("load", function () {
   apiCall("noop", {});
   apiCall("bridgeReady", {});

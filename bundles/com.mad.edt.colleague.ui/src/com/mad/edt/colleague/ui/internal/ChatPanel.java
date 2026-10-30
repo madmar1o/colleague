@@ -615,9 +615,12 @@ public final class ChatPanel {
 
         @Override
         public void diagnose(final String theText) {
-            // page-side measurements for layout regression proofs; only the
-            // selftest scripts ever call this, keep the noise out of normal runs
-            if(Boolean.getBoolean("colleague.browser.selftest")) {
+            // page-side health reports (js-error, js-reject, census) are logged
+            // always: they are the only window into what happened inside the
+            // embedded webview when the page goes blank. The selftest layout
+            // measurements stay gated to keep normal runs quiet.
+            if(Boolean.getBoolean("colleague.browser.selftest")
+                || theText.startsWith("js-") || theText.startsWith("census:")) {
                 System.out.println("[colleague] page diag: " + theText);
             }
         }
