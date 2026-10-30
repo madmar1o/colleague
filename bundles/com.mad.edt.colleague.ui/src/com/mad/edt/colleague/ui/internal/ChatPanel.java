@@ -1110,6 +1110,14 @@ public final class ChatPanel {
                             : chunk -> { },
                         turn.cancellation());
                 }
+                if(browser) {
+                    // the model call returned: flush the stream tails the
+                    // batch timer never released, in production order and
+                    // ahead of the answer event, so the page closes the
+                    // reasoning block before it paints the final bubble
+                    pushTail(thinkingBatcher, "thinking");
+                    pushTail(deltaBatcher, "delta");
+                }
                 final int split = answer.lastIndexOf("\n--- ");
                 final String body = split > 0 ? answer.substring(0, split).strip() : answer;
                 final String baseStats = split > 0 ? answer.substring(split + 1).strip() : "";
@@ -1128,19 +1136,23 @@ public final class ChatPanel {
                         + ourTurns.stopLatencyMs() + " ms");
                 }
                 if(!body.isEmpty() && ourTurns.isCurrent(turn)) {
-                    Display.getDefault().asyncExec(() -> {
-                        if(browser) {
-                            final JsonObject payload = new JsonObject();
-                            payload.addProperty("text", body);
-                            payload.addProperty("time", timeLabel());
-                            pushNow("answer", payload);
-                        } else {
-                            appendLine("Colleague: " + body);
-                        }
-                        if(ourAnswerListener != null) {
-                            ourAnswerListener.accept(body);
-                        }
-                    });
+                    if(browser) {
+                        final JsonObject payload = new JsonObject();
+                        payload.addProperty("text", body);
+                        payload.addProperty("time", timeLabel());
+                        // pushed from this worker on purpose: the bridge
+                        // queue is the delivery order, and an asyncExec hop
+                        // here could overtake the streamed batches already
+                        // queued ahead of the answer
+                        pushNow("answer", payload);
+                    } else {
+                        Display.getDefault().asyncExec(
+                            () -> appendLine("Colleague: " + body));
+                    }
+                    if(ourAnswerListener != null) {
+                        Display.getDefault().asyncExec(
+                            () -> ourAnswerListener.accept(body));
+                    }
                 }
                 setStatus(stats);
                 return Status.OK_STATUS;
@@ -1215,13 +1227,36 @@ public final class ChatPanel {
         if(batch == null) {
             return;
         }
-        Display.getDefault().asyncExec(() -> {
-            if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
-                final JsonObject payload = new JsonObject();
-                payload.addProperty("text", batch);
-                pushNow(theKind, payload);
-            }
-        });
+        // pushed straight from the provider thread: the bridge queue is the
+        // delivery order, and an asyncExec hop here could land this batch
+        // after the final answer that the same worker pushes next, which the
+        // page would then paint above the text it streamed
+        if(ourBridge.isReady()) {
+            final JsonObject payload = new JsonObject();
+            payload.addProperty("text", batch);
+            pushNow(theKind, payload);
+        }
+    }
+
+    /**
+     * Ends one stream: hands the batch timer's leftover tail to the page
+     * under the given event kind. Called when the model call returns, before
+     * the answer event, so the reasoning block and the partial answer text
+     * finish rendering before the final bubble replaces them.
+     *
+     * @param theBatcher the stream whose tail is due
+     * @param theKind event kind the tail belongs to ({@code delta} or
+     *            {@code thinking})
+     */
+    private void pushTail(final StreamBatcher theBatcher, final String theKind) {
+        final String tail = theBatcher.drain();
+        if(tail == null || ourBridge == null || ourRoot.isDisposed()
+            || !ourBridge.isReady()) {
+            return;
+        }
+        final JsonObject payload = new JsonObject();
+        payload.addProperty("text", tail);
+        pushNow(theKind, payload);
     }
 
     /**

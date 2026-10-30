@@ -92,6 +92,21 @@ class StreamBatcherTest {
         assertEquals("late", batcher.accept("late"));
     }
 
+    @Test
+    void drainHandsOverTheTailTheIntervalNeverFlushed() {
+        final FakeClock clock = new FakeClock();
+        clock.advance(10_000);
+        final StreamBatcher batcher = batcher(clock);
+        assertEquals("a", batcher.accept("a"));
+        // the turn ends 50 ms after the last push: the interval never fires
+        // again, and without a drain the page loses the tail of the stream
+        clock.advance(50);
+        assertNull(batcher.accept("tail"));
+        assertEquals("tail", batcher.drain());
+        // a drained batcher starts over: nothing duplicates on the next drain
+        assertNull(batcher.drain());
+    }
+
     /**
      * Production policy smoke check: a typical local-model turn streams about
      * 40 characters every 100 ms for two seconds. With the coarse batch

@@ -89,4 +89,21 @@ public final class StreamBatcher {
         myBuffer.setLength(0);
         return batch;
     }
+
+    /**
+     * Ends the stream: hands over whatever the size cap and the interval
+     * never released, so the last chunks of a turn still reach the page.
+     * The caller invokes this once the model call returned, before pushing
+     * the final answer event, which keeps the tail in front of the answer.
+     *
+     * @return the pending text, {@code null} when nothing was pending
+     */
+    public synchronized String drain() {
+        if(myBuffer.length() == 0) {
+            return null;
+        }
+        final String batch = myBuffer.toString();
+        myBuffer.setLength(0);
+        return batch;
+    }
 }
