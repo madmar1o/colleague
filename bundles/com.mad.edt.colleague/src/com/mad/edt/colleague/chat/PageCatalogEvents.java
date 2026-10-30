@@ -67,7 +67,54 @@ public final class PageCatalogEvents {
             }
         }
         payload.add("profiles", profiles);
+        payload.add("contacts", contacts(theProfiles));
         return payload;
+    }
+
+    /**
+     * The contacts the chat lists on its left rail: the built-in default
+     * colleague first, then every workspace profile allowed to run as the
+     * chat itself (profiles marked sub-agent only, and hidden ones, stay out
+     * - they just serve delegates). Picking a contact is the existing
+     * {@code pickProfile} call, so the default contact travels under the
+     * empty profile name exactly like dropping the chip back to default.
+     *
+     * @param theProfiles agent profiles of the workspace, {@code null} for none
+     * @return ordered contact entries, each with name, label, description and mode
+     */
+    private static JsonArray contacts(final List<AgentProfile> theProfiles) {
+        final JsonArray contacts = new JsonArray();
+        contacts.add(contact("", "Колега по умолчанию",
+            "обычный ассистент по проекту, без ограничений профиля", "default"));
+        if(theProfiles != null) {
+            for(final AgentProfile profile : theProfiles) {
+                if(profile.isHidden() || profile.getMode() == AgentProfile.Mode.SUBAGENT) {
+                    continue;
+                }
+                contacts.add(contact(profile.getName(), profile.getName(),
+                    profile.getDescription(), profile.getMode().name().toLowerCase(java.util.Locale.ROOT)));
+            }
+        }
+        return contacts;
+    }
+
+    /**
+     * One contact rail entry as the page sees it.
+     *
+     * @param theName profile name to pick, empty for the built-in colleague
+     * @param theLabel display name on the rail
+     * @param theDescription one-line summary, may be empty
+     * @param theMode where the contact runs, as the page reads it
+     * @return payload entry for the page
+     */
+    private static JsonObject contact(final String theName, final String theLabel,
+        final String theDescription, final String theMode) {
+        final JsonObject contact = new JsonObject();
+        contact.addProperty("name", theName);
+        contact.addProperty("label", theLabel);
+        contact.addProperty("description", theDescription == null ? "" : theDescription);
+        contact.addProperty("mode", theMode);
+        return contact;
     }
 
     /**

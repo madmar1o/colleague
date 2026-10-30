@@ -83,6 +83,12 @@ public final class PageCommandHandler {
         void setMode(String theName);
 
         /**
+         * The gear in the chat header was clicked: the view shows the page
+         * where providers and their models are configured.
+         */
+        void openSettings();
+
+        /**
          * The page asked to pick an interrupted agent turn back up: the
          * carried conversation continues over the same history instead of a
          * fresh question.
@@ -155,6 +161,9 @@ public final class PageCommandHandler {
                 return;
             case "setMode":
                 actions.setMode(argument(theArgument, "mode"));
+                return;
+            case "openSettings":
+                actions.openSettings();
                 return;
             default:
                 return;

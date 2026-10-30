@@ -645,6 +645,17 @@ public final class ChatPanel {
         }
 
         @Override
+        public void openSettings() {
+            // the view's provider list page is where providers and their
+            // models get configured, so the gear lands on the same page the
+            // back arrow opens; the chat header itself keeps no provider
+            // pickers, only the read-only model line
+            if(ourOnBack != null) {
+                ourOnBack.run();
+            }
+        }
+
+        @Override
         public void escape() {
             registerEscape();
         }
