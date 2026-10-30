@@ -94,11 +94,17 @@ public final class PageCatalogEvents {
                 if(profile.isHidden() || profile.getMode() == AgentProfile.Mode.SUBAGENT) {
                     continue;
                 }
-                final JsonObject card = contact(profile.getName(), profile.getName(),
+                final JsonObject card = contact(profile.getName(), profile.getDisplayName(),
                     profile.getDescription(),
                     profile.getMode().name().toLowerCase(java.util.Locale.ROOT));
                 card.addProperty("model",
                     profile.getModelName() == null ? "" : profile.getModelName());
+                // the edit form repopulates straight from the card, so what
+                // the writer needs to rewrite the file travels with it
+                card.addProperty("title", profile.getTitle());
+                card.addProperty("maxSteps", Integer.valueOf(profile.getMaxSteps()));
+                card.addProperty("tools", String.join(", ", profile.getToolNamesInOrder()));
+                card.addProperty("system", profile.getSystem());
                 cards.add(card);
             }
         }
@@ -125,8 +131,9 @@ public final class PageCatalogEvents {
                 if(profile.isHidden() || profile.getMode() == AgentProfile.Mode.SUBAGENT) {
                     continue;
                 }
-                contacts.add(contact(profile.getName(), profile.getName(),
-                    profile.getDescription(), profile.getMode().name().toLowerCase(java.util.Locale.ROOT)));
+                contacts.add(contact(profile.getName(), profile.getDisplayName(),
+                    profile.getDescription(),
+                    profile.getMode().name().toLowerCase(java.util.Locale.ROOT)));
             }
         }
         return contacts;

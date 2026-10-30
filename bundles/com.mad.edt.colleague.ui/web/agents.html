@@ -53,16 +53,81 @@ main { flex: 1 1 auto; overflow-y: auto; padding: 10px; }
 }
 .statusline { color: var(--muted); font-size: 11px; padding: 2px 12px; flex: none;
   min-height: 16px; }
+.agent .acts { flex: none; align-self: center; display: flex; gap: 6px; }
+.agent .acts button { font-size: 11px; padding: 3px 9px; }
+.overlay {
+  position: fixed; left: 0; top: 0; right: 0; bottom: 0; display: none;
+  background: rgba(0, 0, 0, 0.45); z-index: 40;
+}
+.overlay.shown { display: flex; align-items: center; justify-content: center; }
+.sheet {
+  width: min(560px, 94%); max-height: 92%; overflow-y: auto;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px;
+}
+.sheet h2 { margin: 0 0 10px; font-size: 15px; }
+input[type=text], select, textarea {
+  width: 100%; background: var(--panel2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px;
+  font: inherit; outline: none;
+}
+input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accent); }
+textarea { min-height: 90px; resize: vertical; }
+.fieldrow { margin-bottom: 8px; }
+.fieldrow label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+.hintline { color: var(--muted); font-size: 11px; min-height: 15px; margin: 4px 0; }
+.hintline.ok { color: #4caf7d; }
+.hintline.bad { color: #e08585; }
+.btnrow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
 <header>
   <div class="title">Агенты</div>
+  <button id="btnadd" title="Добавить агента">+ агент</button>
   <button id="btnrefresh" title="Перечитать агентов">⟳</button>
   <button id="btngear" title="Провайдеры и модели">⚙</button>
 </header>
 <main id="list"></main>
 <div class="statusline" id="status">Загружаю агентов…</div>
+
+<div class="overlay" id="overlay">
+  <div class="sheet">
+    <h2 id="formtitle">Новый агент</h2>
+    <div class="fieldrow"><label>id файла (строчные латинские, цифры, «-», «_»)</label>
+      <input type="text" id="f_id" placeholder="например my-agent"></div>
+    <div class="fieldrow"><label>уровень хранения</label>
+      <select id="f_level">
+        <option value="project">проект (.colleague/agents — в git проекта)</option>
+        <option value="personal">личный (home/.colleague/agents — для всех проектов)</option>
+      </select></div>
+    <div class="fieldrow"><label>имя для показа</label>
+      <input type="text" id="f_title" placeholder="например Аналитик 1С"></div>
+    <div class="fieldrow"><label>описание в одну строку</label>
+      <input type="text" id="f_desc"></div>
+    <div class="fieldrow"><label>модель (пусто — провайдер по умолчанию)</label>
+      <input type="text" id="f_model" placeholder="например qwen3:8b"></div>
+    <div class="fieldrow"><label>лимит шагов агента (0 — без лимита)</label>
+      <input type="text" id="f_steps" value="0"></div>
+    <div class="fieldrow"><label>где может работать</label>
+      <select id="f_mode">
+        <option value="all">и сам чат, и помощником</option>
+        <option value="primary">только чат с пользователем</option>
+        <option value="subagent">только помощником другого агента</option>
+      </select></div>
+    <div class="fieldrow"><label>разрешённые инструменты (пусто — все; через запятую)</label>
+      <input type="text" id="f_tools" placeholder="read_file, search_code"></div>
+    <div class="fieldrow"><label>системный промпт</label>
+      <textarea id="f_sys" placeholder="Кто ты и как отвечаешь"></textarea></div>
+    <div class="hintline" id="thint"></div>
+    <div class="btnrow">
+      <button class="primary" id="btnSave">Сохранить</button>
+      <button id="btnDelete" style="display:none">Удалить</button>
+      <button id="btnCancel">Отменить</button>
+    </div>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -121,8 +186,12 @@ function applyPalette(p) {
 }
 var listEl = document.getElementById("list");
 var statusEl = document.getElementById("status");
+var overlay = document.getElementById("overlay");
+var thint = document.getElementById("thint");
+var __editing = null; /* the card being edited, null for a new agent */
 
 function setStatus(s) { statusEl.textContent = s || ""; }
+function setHint(s, cls) { thint.textContent = s; thint.className = "hintline" + (cls ? " " + cls : ""); }
 
 function renderAgents(data) {
   listEl.textContent = "";
@@ -144,16 +213,93 @@ function renderAgents(data) {
     var md = document.createElement("div"); md.className = "amodel";
     md.textContent = a.model ? a.model : "модель по умолчанию";
     card.appendChild(av); card.appendChild(who); card.appendChild(md);
+    if (!a.builtin) {
+      var acts = document.createElement("div"); acts.className = "acts";
+      var ed = document.createElement("button"); ed.textContent = "изменить";
+      ed.onclick = function (ev) {
+        if (ev && ev.stopPropagation) { ev.stopPropagation(); }
+        showForm(a);
+      };
+      acts.appendChild(ed);
+      card.appendChild(acts);
+    }
     card.onclick = function () { apiCall("openAgent", { name: a.name }); };
     listEl.appendChild(card);
   });
   if (data.status) { setStatus(data.status); }
   else if (agents.length <= 1) {
-    setStatus("это агенты, с которыми можно говорить; провайдеры и модели — под «⚙»");
+    setStatus("это агенты, с которыми можно говорить; «+ агент» добавляет своего, «⚙» — провайдеры и модели");
   } else {
     setStatus("");
   }
 }
+
+function clearForm() {
+  document.getElementById("f_id").value = "";
+  document.getElementById("f_id").disabled = false;
+  document.getElementById("f_level").value = "project";
+  document.getElementById("f_title").value = "";
+  document.getElementById("f_desc").value = "";
+  document.getElementById("f_model").value = "";
+  document.getElementById("f_steps").value = "0";
+  document.getElementById("f_mode").value = "all";
+  document.getElementById("f_tools").value = "";
+  document.getElementById("f_sys").value = "";
+  document.getElementById("btnDelete").style.display = "none";
+  document.getElementById("formtitle").textContent = "Новый агент";
+  setHint("");
+}
+function showForm(a) {
+  __editing = a || null;
+  clearForm();
+  if (a) {
+    document.getElementById("formtitle").textContent = "Агент: " + (a.label || a.name);
+    document.getElementById("f_id").value = a.name;
+    document.getElementById("f_id").disabled = true;
+    document.getElementById("f_level").value = a.level || "project";
+    document.getElementById("f_title").value = a.title || "";
+    document.getElementById("f_desc").value = a.description || "";
+    document.getElementById("f_model").value = a.model || "";
+    document.getElementById("f_steps").value = a.maxSteps || "0";
+    document.getElementById("f_mode").value = a.mode || "all";
+    document.getElementById("f_tools").value = a.tools || "";
+    document.getElementById("f_sys").value = a.system || "";
+    document.getElementById("btnDelete").style.display = "";
+  }
+  overlay.classList.add("shown");
+}
+function hideForm() { overlay.classList.remove("shown"); __editing = null; }
+
+document.getElementById("btnadd").onclick = function () { showForm(null); };
+document.getElementById("btnCancel").onclick = hideForm;
+document.getElementById("btnSave").onclick = function () {
+  var id = document.getElementById("f_id").value.trim();
+  if (!/^[a-z0-9_-]{1,64}$/.test(id)) {
+    setHint("id: только строчные латинские буквы, цифры, «-» и «_» (до 64)", "bad");
+    return;
+  }
+  apiCall("saveAgent", {
+    id: id,
+    isNew: !__editing,
+    level: document.getElementById("f_level").value,
+    title: document.getElementById("f_title").value.trim(),
+    description: document.getElementById("f_desc").value.trim(),
+    model: document.getElementById("f_model").value.trim(),
+    maxSteps: document.getElementById("f_steps").value.trim(),
+    mode: document.getElementById("f_mode").value,
+    tools: document.getElementById("f_tools").value.trim(),
+    system: document.getElementById("f_sys").value
+  });
+  setHint("сохраняю…");
+};
+document.getElementById("btnDelete").onclick = function () {
+  if (!__editing) { return; }
+  apiCall("removeAgent", {
+    id: __editing.name,
+    level: document.getElementById("f_level").value
+  });
+  setHint("удаляю…");
+};
 
 document.getElementById("btnrefresh").onclick = function () {
   setStatus("Загружаю агентов…"); apiCall("refresh", {});

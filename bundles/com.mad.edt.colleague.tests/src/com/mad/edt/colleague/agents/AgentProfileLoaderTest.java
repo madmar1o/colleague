@@ -70,4 +70,31 @@ class AgentProfileLoaderTest {
         Assertions.assertTrue(new AgentProfileLoader()
             .loadAll(theRoot.resolve("no-such-dir").toFile()).isEmpty());
     }
+
+    @Test
+    @DisplayName("the title header is the display name, the file name stays the id")
+    void titleIsTheDisplayNameFileNameStaysTheId(@TempDir final Path theRoot)
+        throws IOException {
+        Files.writeString(theRoot.resolve("analyst-1c.md"),
+            "---\r\ntitle: Аналитик 1С\r\ndescription: разбор типовых\r\n---\r\n"
+                + "Ты — аналитик 1С.\r\n",
+            StandardCharsets.UTF_8);
+
+        final AgentProfile profile = new AgentProfileLoader().loadAll(theRoot.toFile()).get(0);
+
+        Assertions.assertEquals("analyst-1c", profile.getName(),
+            "the id used for picking and file keeping stays the file name");
+        Assertions.assertEquals("Аналитик 1С", profile.getDisplayName());
+    }
+
+    @Test
+    @DisplayName("without a title header the display name is the file name")
+    void noTitleFallsBackToFileName(@TempDir final Path theRoot) throws IOException {
+        Files.writeString(theRoot.resolve("plain.md"),
+            "---\ndescription: no title here\n---\n", StandardCharsets.UTF_8);
+
+        final AgentProfile profile = new AgentProfileLoader().loadAll(theRoot.toFile()).get(0);
+
+        Assertions.assertEquals("plain", profile.getDisplayName());
+    }
 }
