@@ -33,25 +33,41 @@ import com.mad.edt.colleague.mcp.McpSettings;
 import com.mad.edt.colleague.mcp.McpToolInfo;
 
 /**
- * Messenger-style contact list rendered by the bundled {@code web/contacts.html}
- * page inside an embedded browser: one card per configured provider with its
- * chat-capable models as chips; clicking a chip opens a chat tab. The gear on
- * the page header opens a popup with the provider list: pick which provider
- * new dialogs use, change or remove one in place, and add a new one through
- * the button under the list. When no browser backend is available the panel
- * falls back to a plain SWT tree plus a refresh button.
+ * Provider and model settings page rendered by the bundled
+ * {@code web/contacts.html} page inside an embedded browser: one card per
+ * configured provider with its chat-capable models listed, the gear opening a
+ * popup with the provider list: pick which provider new dialogs use, change
+ * or remove one in place, and add a new one through the button under the
+ * list. Since the agents page became the way into a chat, this page no longer
+ * opens chats from the browser: model chips are read-only information here.
+ * The plain SWT fallback used without a browser backend still selects a
+ * model on the tree. When no browser backend is available the panel falls
+ * back to a plain SWT tree plus a refresh button.
  */
 public final class ContactsPanel {
 
-    /** A selectable chat contact: provider plus model. */
+    /** A selectable chat contact: provider, model and the agent speaking them. */
     public static final class Contact {
 
         private final String ourProviderId;
         private final String ourModel;
+        private final String ourAgentName;
 
         public Contact(final String theProviderId, final String theModel) {
+            this(theProviderId, theModel, "");
+        }
+
+        /**
+         * @param theProviderId provider configuration id
+         * @param theModel model name as reported by the provider
+         * @param theAgentName profile the chat runs under, empty for the
+         *            built-in default colleague
+         */
+        public Contact(final String theProviderId, final String theModel,
+            final String theAgentName) {
             ourProviderId = theProviderId;
             ourModel = theModel;
+            ourAgentName = theAgentName == null ? "" : theAgentName;
         }
 
         /**
@@ -69,10 +85,28 @@ public final class ContactsPanel {
         }
 
         /**
-         * @return stable key for per-contact session reuse
+         * @return profile name the chat runs under, empty for the built-in
+         *         default colleague
+         */
+        public String getAgentName() {
+            return ourAgentName;
+        }
+
+        /**
+         * @return what the tab shows: the agent name when the contact is an
+         *         agent, the model otherwise
+         */
+        public String getDisplayName() {
+            return ourAgentName.isEmpty() ? ourModel : ourAgentName;
+        }
+
+        /**
+         * @return stable key for per-contact session reuse; agents keep their
+         *         own conversation even when two of them share one model
          */
         public String getKey() {
-            return ourProviderId + "\u0000" + ourModel;
+            return ourProviderId + "\u0000" + ourModel
+                + (ourAgentName.isEmpty() ? "" : "\u0000" + ourAgentName);
         }
     }
 
@@ -233,11 +267,10 @@ public final class ContactsPanel {
             case "refresh":
                 reload();
                 return;
-            case "openContact":
-                ourOnContactSelected.accept(new Contact(
-                    BridgeBrowser.optString(theArguments, "provider"),
-                    BridgeBrowser.optString(theArguments, "model")));
-                return;
+            // no openContact case on purpose: the browser page is settings
+            // only now, chats open from the agents page. The constructor's
+            // selection callback stays for the SWT fallback tree, the entry
+            // into a chat on workbenches without a browser backend.
             case "loadSettings":
                 pushSettings();
                 return;

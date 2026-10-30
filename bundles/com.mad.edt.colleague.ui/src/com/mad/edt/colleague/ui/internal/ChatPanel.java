@@ -150,6 +150,11 @@ public final class ChatPanel {
     private Listener ourEscFilter;
     private Consumer<String> ourAnswerListener;
     private Runnable ourOnBack;
+    /**
+     * Gear target: the provider and model settings page, kept apart from the
+     * back arrow since the agents page became the chat's way back.
+     */
+    private Runnable ourOnOpenSettings;
     private Supplier<List<IToolExecutor>> ourToolSupplier;
 
     /**
@@ -305,10 +310,33 @@ public final class ChatPanel {
 
     /**
      * @param theOnBack invoked on the UI thread when the page back arrow is
-     *            pressed; the view switches to the contacts page
+     *            pressed; the view switches to the agents page
      */
     public void setOnBack(final Runnable theOnBack) {
         ourOnBack = theOnBack;
+    }
+
+    /**
+     * @param theOnOpenSettings invoked on the UI thread when the page gear is
+     *            pressed; the view switches to the provider settings page
+     */
+    public void setOnOpenSettings(final Runnable theOnOpenSettings) {
+        ourOnOpenSettings = theOnOpenSettings;
+    }
+
+    /**
+     * Runs this chat under a workspace agent from the first turn: the panel
+     * picks the profile as if the chip had, and the header subtitle shows the
+     * agent's display name instead of the bare model line.
+     *
+     * @param theAgentName profile name to run under, empty for the built-in
+     *            default colleague
+     */
+    public void setInitialAgent(final String theAgentName) {
+        if(theAgentName == null || theAgentName.isEmpty()) {
+            return;
+        }
+        pickProfileName(theAgentName);
     }
 
     /**
@@ -646,10 +674,14 @@ public final class ChatPanel {
 
         @Override
         public void openSettings() {
-            // the view's provider list page is where providers and their
-            // models get configured, so the gear lands on the same page the
-            // back arrow opens; the chat header itself keeps no provider
-            // pickers, only the read-only model line
+            // the gear opens the provider and model settings page, which is
+            // not the page the back arrow returns to: that one is the list
+            // of agents now. Without a settings route wired up the gear keeps
+            // the older single-page behavior and follows the back target.
+            if(ourOnOpenSettings != null) {
+                ourOnOpenSettings.run();
+                return;
+            }
             if(ourOnBack != null) {
                 ourOnBack.run();
             }
@@ -867,8 +899,12 @@ public final class ChatPanel {
             applyNativePalette(palette);
             payload.add("palette", palette);
             payload.addProperty("name", "Colleague");
-            payload.addProperty("sub", ourModel == null || ourModel.isEmpty()
-                ? "ассистент по проекту" : ourModel);
+            // an agent tab leads with the agent's name; a plain chat keeps
+            // the model line it always showed
+            final String agentName = ourProfileName;
+            payload.addProperty("sub", !agentName.isEmpty() ? agentName
+                : ourModel == null || ourModel.isEmpty()
+                    ? "ассистент по проекту" : ourModel);
             payload.addProperty("mode", AgentMode.current().wireName());
         }
         ourBridge.push(theKind, payload);

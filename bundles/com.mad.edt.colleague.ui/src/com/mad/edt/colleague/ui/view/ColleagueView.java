@@ -31,8 +31,8 @@ import org.osgi.framework.FrameworkUtil;
 
 import com.mad.edt.colleague.agent.AgentMemory;
 import com.mad.edt.colleague.agent.AgentMode;
+import com.mad.edt.colleague.agents.AgentCatalog;
 import com.mad.edt.colleague.agents.AgentProfile;
-import com.mad.edt.colleague.agents.AgentProfileLoader;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
 import com.mad.edt.colleague.context.ContextSource;
@@ -50,6 +50,7 @@ import com.mad.edt.colleague.skills.SkillDefinition;
 import com.mad.edt.colleague.skills.SkillLoader;
 import com.mad.edt.colleague.skills.SkillRegistry;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
+import com.mad.edt.colleague.ui.internal.AgentsPanel;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
 import com.mad.edt.colleague.ui.internal.ChatSession;
 import com.mad.edt.colleague.ui.internal.ChatSessionRegistry;
@@ -59,10 +60,11 @@ import com.mad.edt.colleague.ui.internal.StartupDeferral;
 import com.mad.edt.colleague.ui.internal.WorkspaceTools;
 
 /**
- * Chat-messenger shell of the Colleague assistant: the contacts panel lists
- * configured LLM providers and their models, selecting a contact opens a chat
- * tab. Each contact keeps its own conversation through the session registry,
- * so closing and reopening a tab preserves history while the view lives.
+ * Chat-messenger shell of the Colleague assistant: the agents page lists the
+ * agents the user can talk to and opens a chat tab under the picked one; the
+ * provider list lives behind the gear as a settings page only. Each contact
+ * keeps its own conversation through the session registry, so closing and
+ * reopening a tab preserves history while the view lives.
  */
 public class ColleagueView extends ViewPart {
 
@@ -96,6 +98,8 @@ public class ColleagueView extends ViewPart {
     private final Map<String, ChatPanel> ourPanels = new HashMap<>();
 
     private Composite ourRoot;
+    private Composite ourAgentsArea;
+    private AgentsPanel ourAgents;
     private Composite ourContactsArea;
     private Composite ourTabsArea;
     private Composite ourMobileStack;
@@ -189,12 +193,21 @@ public class ColleagueView extends ViewPart {
         rootLayout.marginHeight = 0;
         ourRoot.setLayout(rootLayout);
 
-        // a two-page stack: contacts and chat, exactly one visible at any
-        // moment; the back arrow lives inside the chat page header itself
+        // a stack of pages - agents, provider settings and chat - with
+        // exactly one visible at any moment; the back arrow lives inside the
+        // chat page header itself
         ourMobileStack = new Composite(ourRoot, SWT.NONE);
         ourMobileStack.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
         ourMobileStackLayout = new StackLayout();
         ourMobileStack.setLayout(ourMobileStackLayout);
+
+        // the agents page is the way into a chat now: it lists the agents the
+        // user talks to, while the provider list moved behind the gear and
+        // became a pure settings page
+        ourAgentsArea = new Composite(ourMobileStack, SWT.NONE);
+        ourAgentsArea.setLayout(new FillLayout());
+        ourAgents = new AgentsPanel(ourAgentsArea, this::profileCatalog,
+            this::openAgent, () -> showMobilePage(ourContactsArea, "gear", "settings"));
 
         ourContactsArea = new Composite(ourMobileStack, SWT.NONE);
         ourContactsArea.setLayout(new FillLayout());
@@ -206,7 +219,10 @@ public class ColleagueView extends ViewPart {
         ourTabFolder = new CTabFolder(ourTabsArea, SWT.TOP | SWT.FLAT);
         ourTabFolder.setTabHeight(24);
 
-        ourMobileStackLayout.topControl = ourContactsArea;
+        // without a browser backend the agents page cannot render, and the
+        // provider tree stays the only working way into a chat there
+        ourMobileStackLayout.topControl =
+            ourAgents.hasBrowser() ? ourAgentsArea : ourContactsArea;
 
         ourCodeSearch = new CodeSearch();
         ourOverview = new ConfigurationOverview();
@@ -377,7 +393,9 @@ public class ColleagueView extends ViewPart {
             final int tabs = ourTabFolder == null || ourTabFolder.isDisposed()
                 ? -1 : ourTabFolder.getItemCount();
             System.err.println("[colleague] mobile page -> " + PageSwitchNote.describe(
-                thePage == ourTabsArea ? "chat tabs" : "contacts", theCause, tabs, theDetail)
+                thePage == ourTabsArea ? "chat tabs"
+                    : thePage == ourAgentsArea ? "agents" : "contacts",
+                theCause, tabs, theDetail)
                 + " stack=" + ourMobileStack.getSize() + " page=" + thePage.getSize());
         }
     }
@@ -391,6 +409,10 @@ public class ColleagueView extends ViewPart {
                 return;
             }
         }
+        if(ourMobileStackLayout.topControl == ourAgentsArea && ourAgents != null) {
+            ourAgents.getControl().setFocus();
+            return;
+        }
         if(ourContacts != null) {
             ourContacts.getControl().setFocus();
         }
@@ -400,6 +422,9 @@ public class ColleagueView extends ViewPart {
     public void dispose() {
         if(ourInstance == this) {
             ourInstance = null;
+        }
+        if(ourAgents != null) {
+            ourAgents.dispose();
         }
         if(ourContacts != null) {
             ourContacts.dispose();
@@ -488,9 +513,8 @@ public class ColleagueView extends ViewPart {
             preferred = theAvailable.get(0);
         }
         ourDefaultContactCache = preferred;
-        if(ourTabFolder.getSelection() == null) {
-            openContact(preferred);
-        }
+        // no auto-open on cold start any more: the agents page is where the
+        // view lands, and a chat begins only when the user picks an agent
         maybeRunSelfTest();
     }
 
@@ -520,14 +544,16 @@ public class ColleagueView extends ViewPart {
     /**
      * Stack fallback for an emptied tab folder: with no chat tabs left the
      * tabs page shows nothing but blank space, so the visible page becomes
-     * the contacts list the user can pick a new chat from. Runs on the UI
-     * queue after a tab item was disposed.
+     * the agents list the user can pick a new chat from; without a browser
+     * backend the provider tree stays the working entry instead. Runs on the
+     * UI queue after a tab item was disposed.
      */
     private void fallBackToContactsIfEmpty() {
         if(ourTabFolder.isDisposed() || ourTabFolder.getItemCount() > 0) {
             return;
         }
-        showMobilePage(ourContactsArea, "tabs empty", "");
+        showMobilePage(ourAgents != null && ourAgents.hasBrowser()
+            ? ourAgentsArea : ourContactsArea, "tabs empty", "");
     }
 
     /**
@@ -601,28 +627,53 @@ public class ColleagueView extends ViewPart {
     }
 
     /**
-     * Agent profiles the profile chip offers: loaded once per view session
-     * from {@code .colleague/agents} under the first open workspace project.
-     * A missing or unreadable directory leaves the list empty, so the chats
-     * simply run without profiles instead of failing the view.
+     * Agent profiles the pages offer: merged from the two catalog levels -
+     * the personal {@code .colleague/agents} under the user home and the
+     * project one under the first open workspace project - loaded once per
+     * view session. A missing or unreadable level leaves its part empty, so
+     * the chats simply run without those profiles instead of failing the view.
      *
      * @return shared profile list, never {@code null}
      */
     private List<AgentProfile> profileCatalog() {
         if(ourProfileCatalog == null) {
-            final java.io.File agentsDir = colleagueDirectory("agents");
-            final List<AgentProfile> profiles = new ArrayList<>();
-            if(agentsDir != null) {
-                try {
-                    profiles.addAll(new AgentProfileLoader().loadAll(agentsDir));
-                } catch (final java.io.IOException ex) {
-                    System.err.println("[colleague] agents directory unreadable: "
-                        + ex.getMessage());
-                }
+            final List<AgentProfile> merged;
+            try {
+                merged = AgentCatalog.load(personalAgentsDirectory(),
+                    colleagueDirectory("agents"));
+            } catch (final java.io.IOException ex) {
+                System.err.println("[colleague] agents directories unreadable: "
+                    + ex.getMessage());
+                ourProfileCatalog = List.of();
+                return ourProfileCatalog;
             }
-            ourProfileCatalog = profiles;
+            ourProfileCatalog = merged;
         }
         return ourProfileCatalog;
+    }
+
+    /**
+     * The user-wide agents directory {@code .colleague/agents} below the home
+     * directory: profiles shared by every workspace, kept out of project
+     * repositories so the user can version them separately.
+     *
+     * @return the personal directory whether or not it exists; a missing one
+     *         simply contributes no profiles to the merge
+     */
+    private static java.io.File personalAgentsDirectory() {
+        return Paths.get(System.getProperty("user.home"), ".colleague", "agents")
+            .toFile();
+    }
+
+    /**
+     * Drops the cached profile catalog so the next read sees the profile files
+     * as they are now, and re-pushes the agents page from the fresh catalog.
+     */
+    void refreshAgentCatalog() {
+        ourProfileCatalog = null;
+        if(ourAgents != null) {
+            ourAgents.refresh();
+        }
     }
 
     /**
@@ -649,13 +700,13 @@ public class ColleagueView extends ViewPart {
     }
 
     /**
-     * Opens a contact the way the ordinary UI paths do (list click, cold
-     * start auto-open): the tab itself appears right away, but the heavy
-     * chat page - the embedded browser and its controls - is queued behind
-     * the first paint of the tab, so switching to the chat never waits on
-     * the browser widget initialization.
+     * Opens a contact the way the ordinary UI paths do (agent card click,
+     * selftests): the tab itself appears right away, but the heavy chat page
+     * - the embedded browser and its controls - is queued behind the first
+     * paint of the tab, so switching to the chat never waits on the browser
+     * widget initialization.
      *
-     * @param theContact provider and model pair to open
+     * @param theContact provider, model and agent triple to open
      */
     private void openContact(final ContactsPanel.Contact theContact) {
         if(ourTabFolder.isDisposed()) {
@@ -674,6 +725,67 @@ public class ColleagueView extends ViewPart {
                 buildChatPanel(tab, body, session, theContact);
             }
         });
+    }
+
+    /**
+     * Opens the chat tab of one agent card: the built-in colleague runs on the
+     * default provider and model as before, a workspace profile keeps its own
+     * identity in the tab (name in the title, own conversation) while its
+     * model is honored when the default provider actually serves it. With no
+     * reachable provider there is nothing to run the agent on, so the gear's
+     * settings page opens instead of a chat that could only fail.
+     *
+     * @param theName profile name from the card, empty for the built-in
+     *            default colleague
+     */
+    private void openAgent(final String theName) {
+        if(ourTabFolder.isDisposed()) {
+            return;
+        }
+        final ContactsPanel.Contact preferred = ourDefaultContactCache;
+        if(preferred == null) {
+            showMobilePage(ourContactsArea, "no providers yet", theName);
+            return;
+        }
+        final AgentProfile profile = theName == null || theName.isEmpty()
+            ? null : findProfile(theName);
+        final String model = agentModelFor(profile, preferred);
+        openContact(new ContactsPanel.Contact(preferred.getProviderId(), model,
+            profile == null ? "" : profile.getName()));
+    }
+
+    /**
+     * @param theName profile name as the card carries it
+     * @return the catalog profile of that name, {@code null} when the catalog
+     *         no longer has it (a removed file between two page refreshes)
+     */
+    private AgentProfile findProfile(final String theName) {
+        for(final AgentProfile profile : profileCatalog()) {
+            if(profile.getName().equals(theName)) {
+                return profile;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Resolves which model an agent tab asks: the profile's own model when it
+     * names one, otherwise the default contact's model. A profile asking for
+     * a model the default provider does not list still runs against it - the
+     * provider answers with its own clear error, which is more honest than
+     * silently running the agent on a model the user never picked.
+     *
+     * @param theProfile picked profile, {@code null} for the built-in one
+     * @param thePreferred default provider and model pair
+     * @return model name for the agent's chat tab
+     */
+    private static String agentModelFor(final AgentProfile theProfile,
+        final ContactsPanel.Contact thePreferred) {
+        if(theProfile != null && theProfile.getModelName() != null
+            && !theProfile.getModelName().isEmpty()) {
+            return theProfile.getModelName();
+        }
+        return thePreferred.getModel();
     }
 
     /**
@@ -700,18 +812,18 @@ public class ColleagueView extends ViewPart {
     }
 
     /**
-     * Selects the tab of this model when the folder already has one. The
+     * Selects the tab of this contact when the folder already has one. The
      * text check alone is enough: a tab is created only by these open paths,
-     * one per model, and its panel build never runs twice for one tab.
+     * one per display name, and its panel build never runs twice for one tab.
      *
-     * @param theContact provider and model pair
+     * @param theContact provider, model and agent triple
      * @return the existing tab, {@code null} when there is none
      */
     private CTabItem existingTabFor(final ContactsPanel.Contact theContact) {
         for(final CTabItem item : ourTabFolder.getItems()) {
-            if(theContact.getModel().equals(item.getText())) {
+            if(theContact.getDisplayName().equals(item.getText())) {
                 ourTabFolder.setSelection(item);
-                showMobilePage(ourTabsArea, "existing tab", theContact.getModel());
+                showMobilePage(ourTabsArea, "existing tab", theContact.getDisplayName());
                 return item;
             }
         }
@@ -721,17 +833,17 @@ public class ColleagueView extends ViewPart {
     /**
      * Creates the closed-able tab shell for one contact.
      *
-     * @param theContact provider and model pair
+     * @param theContact provider, model and agent triple
      * @return the new tab item
      */
     private CTabItem createTabFor(final ContactsPanel.Contact theContact) {
         final CTabItem tab = new CTabItem(ourTabFolder, SWT.CLOSE);
-        tab.setText(theContact.getModel());
+        tab.setText(theContact.getDisplayName());
         // closing the last chat tab must not leave the empty tab page on
-        // screen: the provider list is the only way back into a chat, so the
-        // stack falls back to it once the folder runs out of tabs. the close
-        // button disposes the item, and the folder itself gives no usable
-        // "now empty" event, so the item's own dispose is the trigger
+        // screen: the agents list is the way back into a chat, so the stack
+        // falls back to it once the folder runs out of tabs. the close button
+        // disposes the item, and the folder itself gives no usable "now empty"
+        // event, so the item's own dispose is the trigger
         tab.addDisposeListener((final DisposeEvent theEvent) ->
             Display.getDefault().asyncExec(this::fallBackToContactsIfEmpty));
         return tab;
@@ -824,8 +936,17 @@ public class ColleagueView extends ViewPart {
         panel.setCommandSupplier(this::commandsCatalog);
         panel.setProfileSupplier(this::profileCatalog);
         panel.setAutoContextSupplier(this::collectAutoContext);
-        panel.setOnBack(() -> showMobilePage(ourContactsArea, "back arrow",
-            theContact.getModel()));
+        // the agents page is the way back out of a chat; the gear opens the
+        // provider settings page instead. without a browser backend the
+        // agents page cannot render, so back keeps the provider tree there
+        final boolean agentsLive = ourAgents != null && ourAgents.hasBrowser();
+        panel.setOnBack(() -> showMobilePage(agentsLive ? ourAgentsArea : ourContactsArea,
+            "back arrow", theContact.getDisplayName()));
+        panel.setOnOpenSettings(() -> showMobilePage(ourContactsArea,
+            "gear", theContact.getDisplayName()));
+        // an agent tab speaks as its agent from the first turn, not only
+        // after the chip was touched
+        panel.setInitialAgent(theContact.getAgentName());
         theTab.setData(panel);
         panel.setAnswerListener(answer -> {
             ourLastAnswer = answer;
