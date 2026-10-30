@@ -149,4 +149,23 @@ class PageCatalogEventsTest {
         Assertions.assertEquals(1, PageCatalogEvents.agents(null).size());
         Assertions.assertEquals(1, PageCatalogEvents.agents(List.of()).size());
     }
+
+    @Test
+    @DisplayName("the card shows the profile title as its label, the id stays pickable")
+    void agentCardsLabelFollowsTheProfileTitle() {
+        final JsonArray cards = PageCatalogEvents.agents(
+            List.of(new AgentProfile("analyst-1c", "разбор типовых", "Ты — аналитик 1С.",
+                null, 6, AgentProfile.Mode.PRIMARY, Set.of("read_file", "search_code"),
+                false, "Аналитик 1С")));
+
+        final JsonObject card = cards.get(1).getAsJsonObject();
+        Assertions.assertEquals("analyst-1c", card.get("name").getAsString(),
+            "picking still travels by the file-name id");
+        Assertions.assertEquals("Аналитик 1С", card.get("label").getAsString());
+        Assertions.assertEquals("Аналитик 1С", card.get("title").getAsString());
+        Assertions.assertEquals(6, card.get("maxSteps").getAsInt());
+        Assertions.assertEquals("read_file, search_code", card.get("tools").getAsString());
+        Assertions.assertEquals("Ты — аналитик 1С.", card.get("system").getAsString(),
+            "the edit form repopulates from the card, so the prompt travels with it");
+    }
 }

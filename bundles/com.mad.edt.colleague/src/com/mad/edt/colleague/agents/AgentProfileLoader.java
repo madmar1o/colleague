@@ -13,10 +13,11 @@ import com.mad.edt.colleague.ext.Frontmatter;
 
 /**
  * Loads agent profiles from &lt;workspace&gt;/.colleague/agents/*.md: a
- * frontmatter header (description, model, max-steps, mode, tools, hidden)
- * over a body that becomes the system prompt of that agent. The header is
- * read by the shared {@link Frontmatter} parser, the same one skills and
- * commands use.
+ * frontmatter header (title, description, model, max-steps, mode, tools,
+ * hidden) over a body that becomes the system prompt of that agent. The
+ * header is read by the shared {@link Frontmatter} parser, the same one
+ * skills and commands use. The file name stays the profile id; the
+ * {@code title} header is only its display name.
  */
 public final class AgentProfileLoader {
 
@@ -51,7 +52,8 @@ public final class AgentProfileLoader {
                 intOrZero(header.fields().get("max-steps")),
                 modeOf(header.fields().get("mode")),
                 toolNamesOf(header.fields().get("tools")),
-                "true".equalsIgnoreCase(header.fields().getOrDefault("hidden", "false"))));
+                "true".equalsIgnoreCase(header.fields().getOrDefault("hidden", "false")),
+                header.fields().getOrDefault("title", "")));
         }
         profiles.sort((left, right) -> left.getName().compareTo(right.getName()));
         return profiles;
