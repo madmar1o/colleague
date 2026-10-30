@@ -39,6 +39,7 @@ import com.mad.edt.colleague.agent.AgentAnswer;
 import com.mad.edt.colleague.agent.AgentLoop;
 import com.mad.edt.colleague.agent.AgentMemory;
 import com.mad.edt.colleague.agent.AgentMode;
+import com.mad.edt.colleague.agent.ChatMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
 import com.mad.edt.colleague.agent.LoggingAgentObserver;
 import com.mad.edt.colleague.agent.MemoryTool;
@@ -622,6 +623,11 @@ public final class ChatPanel {
         }
 
         @Override
+        public void setMode(final String theName) {
+            ChatPanel.this.setMode(theName);
+        }
+
+        @Override
         public void copy(final String theText) {
             ViewBridge.copyToClipboard(ourRoot, theText);
         }
@@ -797,12 +803,47 @@ public final class ChatPanel {
         });
     }
 
+    /**
+     * Legacy ESC gesture: walks the mode between the two ends of the old
+     * switch, question mode and execution mode. The plan mode is only
+     * reachable through the three-state control.
+     */
     private void toggleEdit() {
         final boolean on = AgentMode.toggle();
         refreshModeIndicators();
         setStatus(on
-            ? "Режим правки ВКЛЮЧЁН — агент с инструментами проекта"
-            : "Режим правки ВЫКЛЮЧЕН");
+            ? "Режим «Исполнение» — агент меняет файлы только по вашему подтверждению"
+            : "Режим «Спросить» — обычный разговор без инструментов");
+    }
+
+    /**
+     * Applies one of the three chat modes picked on the page: plain
+     * conversation without tools, a read-only planning pass or full
+     * execution. Unparseable names settle on the safest mode, and every
+     * live panel redraws its indicator because the mode is shared state.
+     *
+     * @param theWireName mode name as the page sent it
+     */
+    private void setMode(final String theWireName) {
+        final ChatMode mode = ChatMode.of(theWireName);
+        AgentMode.set(mode);
+        refreshModeIndicators();
+        setStatus(modeStatus(mode));
+    }
+
+    /**
+     * @param theMode picked mode
+     * @return one-line status explaining what that mode will let the agent do
+     */
+    private static String modeStatus(final ChatMode theMode) {
+        switch(theMode) {
+            case PLAN:
+                return "Режим «План» — читаю проект и раскладываю шаги, файлы не меняю";
+            case EXECUTE:
+                return "Режим «Исполнение» — агент меняет файлы только по вашему подтверждению";
+            default:
+                return "Режим «Спросить» — обычный разговор без инструментов";
+        }
     }
 
     private void postEvent(final String theKind, final JsonObject thePayload) {
@@ -817,7 +858,7 @@ public final class ChatPanel {
             payload.addProperty("name", "Colleague");
             payload.addProperty("sub", ourModel == null || ourModel.isEmpty()
                 ? "ассистент по проекту" : ourModel);
-            payload.addProperty("mode", Boolean.valueOf(AgentMode.isOn()));
+            payload.addProperty("mode", AgentMode.current().wireName());
         }
         ourBridge.push(theKind, payload);
     }
@@ -1016,14 +1057,9 @@ public final class ChatPanel {
         final Button resetButton = new Button(header, SWT.PUSH);
         resetButton.setText("Новый диалог");
         resetButton.addListener(SWT.Selection, event -> reset());
-        ourModeButton = new Button(header, SWT.TOGGLE);
-        ourModeButton.addListener(SWT.Selection, event -> {
-            AgentMode.setOn(ourModeButton.getSelection());
-            refreshModeIndicators();
-            setStatus(AgentMode.isOn()
-                ? "Режим правки ВКЛЮЧЁН — клик по кнопке «⚙» выключит"
-                : "Режим правки ВЫКЛЮЧЕН");
-        });
+        ourModeButton = new Button(header, SWT.PUSH);
+        ourModeButton.addListener(SWT.Selection, event ->
+            setMode(AgentMode.current().next().wireName()));
         updateModeIndicator();
 
         final Composite input = new Composite(theParent, SWT.NONE);
@@ -1397,22 +1433,32 @@ public final class ChatPanel {
         throws com.mad.edt.colleague.llm.LLMException {
         final AgentProfile profile = pickedProfile();
         final ToolPolicy policy = new ToolPolicy().excludeUnused(PRUNE_AFTER_IDLE_RUNS);
+        // the chat mode is the first gate: in plan mode the supplier still
+        // hands over the write-capable set (the legacy isOn flag is true for
+        // it), and allowsIn takes write_file/edit_file back out, so a
+        // planning agent can only observe and lay out steps
+        final ChatMode mode = AgentMode.current();
         final List<IToolExecutor> tools = new ArrayList<>();
         for(final IToolExecutor tool : ourToolSupplier.get()) {
-            if(policy.allows(profile, tool.getName())
+            if(policy.allowsIn(mode, tool.getName())
+                && policy.allows(profile, tool.getName())
                 && policy.shouldOffer(ourToolUsage, tool.getName())) {
                 tools.add(tool);
             }
         }
-        if(policy.allows(profile, "update_plan") && policy.shouldOffer(ourToolUsage, "update_plan")) {
+        if(policy.allowsIn(mode, "update_plan")
+            && policy.allows(profile, "update_plan")
+            && policy.shouldOffer(ourToolUsage, "update_plan")) {
             tools.add(new PlanTool(ourPlanBoard));
         }
-        if(ourLessonMemory != null && policy.allows(profile, "remember")
+        if(ourLessonMemory != null && policy.allowsIn(mode, "remember")
+            && policy.allows(profile, "remember")
             && policy.shouldOffer(ourToolUsage, "remember")) {
             tools.add(new MemoryTool(ourLessonMemory));
         }
         final SkillRegistry skills = ourSkillSupplier == null ? null : ourSkillSupplier.get();
-        if(skills != null && !skills.isEmpty() && policy.allows(profile, "load_skill")
+        if(skills != null && !skills.isEmpty() && policy.allowsIn(mode, "load_skill")
+            && policy.allows(profile, "load_skill")
             && policy.shouldOffer(ourToolUsage, "load_skill")) {
             tools.add(new SkillTool(skills));
         }
@@ -1432,13 +1478,15 @@ public final class ChatPanel {
                 if(!remote.isParallelSafe() && !localWrites) {
                     continue; // a read-only run keeps read-only remote tools only
                 }
-                if(policy.allows(profile, remote.getName())
+                if(policy.allowsIn(mode, remote.getName())
+                    && policy.allows(profile, remote.getName())
                     && policy.shouldOffer(ourToolUsage, remote.getName())) {
                     tools.add(remote);
                 }
             }
         }
-        if(policy.allows(profile, "subagent") && policy.shouldOffer(ourToolUsage, "subagent")) {
+        if(policy.allowsIn(mode, "subagent") && policy.allows(profile, "subagent")
+            && policy.shouldOffer(ourToolUsage, "subagent")) {
             // the delegate hears about its finished turn through this panel so
             // the page shows a card; the listener thread is the worker thread,
             // delivery to the page goes through asyncExec as everywhere else
@@ -1656,6 +1704,7 @@ public final class ChatPanel {
     private void updateModeIndicator() {
         if(ourBridge != null && ourBridge.isReady()) {
             final JsonObject payload = new JsonObject();
+            payload.addProperty("mode", AgentMode.current().wireName());
             payload.addProperty("on", Boolean.valueOf(AgentMode.isOn()));
             pushNow("mode", payload);
             return;
@@ -1663,9 +1712,22 @@ public final class ChatPanel {
         if(ourModeButton == null || ourModeButton.isDisposed()) {
             return;
         }
-        ourModeButton.setSelection(AgentMode.isOn());
-        ourModeButton.setText(AgentMode.isOn()
-            ? "\u2699 режим правки: вкл" : "\u2699 режим правки: выкл");
+        ourModeButton.setText("\u2699 " + modeButtonLabel(AgentMode.current()));
+    }
+
+    /**
+     * @param theMode current chat mode
+     * @return the fallback button caption naming that mode
+     */
+    private static String modeButtonLabel(final ChatMode theMode) {
+        switch(theMode) {
+            case PLAN:
+                return "режим: План";
+            case EXECUTE:
+                return "режим: Исполнение";
+            default:
+                return "режим: Спросить";
+        }
     }
 
     private static String applyOrEmpty(final Function<String, String> theFunction,

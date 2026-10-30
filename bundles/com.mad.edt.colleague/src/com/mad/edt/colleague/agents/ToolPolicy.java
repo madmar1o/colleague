@@ -6,6 +6,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import com.mad.edt.colleague.agent.ChatMode;
 import com.mad.edt.colleague.agent.ToolUsageStats;
 import com.mad.edt.colleague.llm.ToolSpec;
 
@@ -80,6 +81,26 @@ public final class ToolPolicy {
      */
     public boolean isWriteTool(final String theToolName) {
         return writeToolNames.contains(theToolName);
+    }
+
+    /**
+     * Decides one tool by name against the chat mode. The ask mode hands no
+     * tool to the model at all; the plan mode keeps observers and the plan
+     * board but refuses every writer, so a planning agent can look and lay
+     * out steps yet physically cannot change anything; the execute mode
+     * narrows nothing. The mode gate adds to the profile gate, it never
+     * widens what a profile refused.
+     *
+     * @param theMode chat mode of the coming turn, {@code null} treated as
+     *            {@link ChatMode#ASK}
+     * @param theToolName tool name to decide
+     * @return whether the mode may offer this tool to the model
+     */
+    public boolean allowsIn(final ChatMode theMode, final String theToolName) {
+        if(theMode == ChatMode.PLAN) {
+            return !isWriteTool(theToolName);
+        }
+        return theMode == ChatMode.EXECUTE;
     }
 
     /**
