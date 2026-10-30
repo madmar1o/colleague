@@ -81,6 +81,30 @@ class BridgePushDeliveryTest {
     }
 
     @Test
+    void burstsQueuedBeforeOneTickLeaveAsOneScriptInOrder() {
+        final FakePage page = new FakePage();
+        final BridgePushDelivery delivery = page.create();
+
+        // the send path pushes the question echo, the busy flag and the
+        // status line back to back; one timer tick must hand them over as a
+        // single script, otherwise the display may run the ticks in any order
+        // and the page shows the status before the question
+        delivery.schedule(Arrays.<Object[]>asList(new Object[] {"user", "{\"text\":\"q\"}"}));
+        delivery.schedule(Arrays.<Object[]>asList(new Object[] {"busy", "{\"busy\":true}"}));
+        delivery.schedule(Arrays.<Object[]>asList(new Object[] {"status", "{\"text\":\"Думаю...\"}"}));
+
+        assertEquals(0, page.scriptCount());
+        page.runPending();
+
+        assertEquals(1, page.scriptCount(), "one tick must carry the whole burst");
+        assertEquals("window.colleagueEvents("
+            + "[[\"user\",\"{\\\"text\\\":\\\"q\\\"}\"],"
+            + "[\"busy\",\"{\\\"busy\\\":true}\"],"
+            + "[\"status\",\"{\\\"text\\\":\\\"Думаю...\\\"}\"]])",
+            page.lastScript());
+    }
+
+    @Test
     void emptyBatchIsNotScheduledAtAll() {
         final FakePage page = new FakePage();
         final BridgePushDelivery delivery = page.create();

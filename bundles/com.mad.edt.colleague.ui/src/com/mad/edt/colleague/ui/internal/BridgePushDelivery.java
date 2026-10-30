@@ -31,6 +31,10 @@ final class BridgePushDelivery {
 
     private final Function<String, Runnable> ourDeliverer;
     private final Consumer<Runnable> ourScheduler;
+    /** rendered events waiting for the tick; merged, never replaced */
+    private String ourPending = "[]";
+    /** one tick is enough for everything queued so far */
+    private boolean ourTickPending;
 
     /**
      * @param theDeliverer turns script text into the runnable that runs it in
@@ -61,7 +65,8 @@ final class BridgePushDelivery {
 
     /**
      * Queues an already rendered batch, for callers that rendered it for
-     * another purpose first (the navigation-channel polling reply).
+     * another purpose first (the navigation-channel polling reply). Events
+     * queued before the next widget tick leave together, in arrival order.
      *
      * @param theBatch {@code [["kind","{json}"],...]} text as produced by
      *            {@link #renderBatch(List)}
@@ -71,9 +76,47 @@ final class BridgePushDelivery {
         if("[]".equals(theBatch)) {
             return "";
         }
-        final String script = pushScript(theBatch);
-        ourScheduler.accept(ourDeliverer.apply(script));
-        return script;
+        final String merged;
+        synchronized(this) {
+            ourPending = merge(ourPending, theBatch);
+            merged = ourPending;
+            if(!ourTickPending) {
+                ourTickPending = true;
+                ourScheduler.accept(this::deliverPending);
+            }
+        }
+        return pushScript(merged);
+    }
+
+    /**
+     * Hands everything queued before this tick to the page as one script.
+     * A burst of events (question echo, busy flag, status line) therefore
+     * reaches the page in the order Java produced it: separate ticks may run
+     * in any order on the widget thread, while one script keeps its order.
+     */
+    private void deliverPending() {
+        final String batch;
+        synchronized(this) {
+            batch = ourPending;
+            ourPending = "[]";
+            ourTickPending = false;
+        }
+        if("[]".equals(batch)) {
+            return;
+        }
+        ourDeliverer.apply(pushScript(batch)).run();
+    }
+
+    /**
+     * @param theFirst already queued events text, {@code []} for none
+     * @param theSecond new events text
+     * @return both event arrays as one array text
+     */
+    private static String merge(final String theFirst, final String theSecond) {
+        if("[]".equals(theFirst)) {
+            return theSecond;
+        }
+        return theFirst.substring(0, theFirst.length() - 1) + "," + theSecond.substring(1);
     }
 
     /**
