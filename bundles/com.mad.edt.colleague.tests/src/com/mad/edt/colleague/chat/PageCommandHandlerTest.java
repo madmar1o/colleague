@@ -94,6 +94,11 @@ class PageCommandHandlerTest {
         public void setMode(final String theName) {
             calls.add("setMode|" + theName);
         }
+
+        @Override
+        public void openSettings() {
+            calls.add("openSettings");
+        }
     }
 
     /** page arguments as name-value pairs, missing name arrives as null */
@@ -188,6 +193,14 @@ class PageCommandHandlerTest {
         handler.handle("setMode", args());
         assertEquals(List.of("setMode|plan", "setMode|"), actions.calls,
             "the page sends the mode name, a missing one arrives empty");
+    }
+
+    @Test
+    void gearOpensTheProviderAndModelSettings() {
+        final RecordingActions actions = new RecordingActions();
+        final PageCommandHandler handler = handlerWith(actions);
+        handler.handle("openSettings", args());
+        assertEquals(List.of("openSettings"), actions.calls);
     }
 
     @Test

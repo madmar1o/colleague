@@ -288,6 +288,7 @@ button.scrollbottom:hover { border-color: var(--accent); }
     <button type="button" data-mode="plan" title="Читаю проект и раскладываю шаги, файлы не меняю">План</button>
     <button type="button" data-mode="execute" title="Агент меняет файлы по подтверждению">Исполнение</button>
   </div>
+  <button class="iconbtn" id="btngear" title="Настройки провайдеров и моделей">&#9881;</button>
   <button class="iconbtn" id="btnnew" title="Новый диалог">новый</button>
 </header>
 <main id="msgs">
@@ -854,6 +855,9 @@ modeBtns.forEach(function (b) {
 });
 document.getElementById("btnnew").addEventListener("click", function () {
   apiCall("newChat", {});
+});
+document.getElementById("btngear").addEventListener("click", function () {
+  apiCall("openSettings", {});
 });
 document.getElementById("btnback").addEventListener("click", function () {
   apiCall("back", {});
