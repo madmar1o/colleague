@@ -42,7 +42,7 @@ import com.mad.edt.colleague.ui.ColleagueUIPlugin;
  * the page learns about an event within one UI tick instead of at the next
  * poll; the polling reply stays as the fallback path.
  */
-final class BridgeBrowser {
+final class BridgeBrowser implements PageTransport {
 
     /** Prefix of the navigation-based call channel. */
     private static final String PROTOCOL = "colleague:";
@@ -117,7 +117,8 @@ final class BridgeBrowser {
      * @param theKind event name seen by the page
      * @param thePayload JSON payload of the event
      */
-    void push(final String theKind, final JsonObject thePayload) {
+    @Override
+    public void push(final String theKind, final JsonObject thePayload) {
         synchronized(ourQueue) {
             ourQueue.add(new String[] {theKind, thePayload.toString()});
         }
@@ -134,7 +135,8 @@ final class BridgeBrowser {
      *
      * @param theBatch ordered events to deliver
      */
-    void pushEvents(final List<Object[]> theBatch) {
+    @Override
+    public void pushEvents(final List<Object[]> theBatch) {
         deliverQueued();
     }
 
