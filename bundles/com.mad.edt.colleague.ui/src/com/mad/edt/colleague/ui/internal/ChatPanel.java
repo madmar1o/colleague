@@ -81,8 +81,13 @@ import com.mad.edt.colleague.ui.ColleagueUIPlugin;
  */
 public final class ChatPanel {
 
-    /** Model round-trips allowed for one edit-mode question. */
-    private static final int AGENT_MAX_STEPS = 8;
+    /**
+     * Model round-trips allowed for one edit-mode question. Twelve, matching
+     * the loop's own default: a reasoning local model spends several calls
+     * just to locate the files a task names, and at eight the budget dies
+     * before the interesting half of the work starts.
+     */
+    private static final int AGENT_MAX_STEPS = 12;
     /**
      * Finished runs an offered tool may go uncalled before it leaves the
      * advertised catalog; a call inside a run resets the streak, so a pruned
@@ -127,6 +132,13 @@ public final class ChatPanel {
 
     private String ourAttachedContext = "";
     private String ourLastAnswer = "";
+    /**
+     * The agent conversation left open when a run spent its step budget. The
+     * page offers a continuation over exactly this history: the loop resumes
+     * where it stopped instead of starting the task blind. Written by the
+     * question worker, read by the bridge handler on the UI thread.
+     */
+    private volatile List<ChatMessage> ourInterruptedConversation = List.of();
     private String ourCachedQuestion = "";
     private boolean ourBusy;
     private boolean ourPageProofDone;
@@ -373,6 +385,7 @@ public final class ChatPanel {
     private void reset() {
         ourSession.reset();
         ourLastAnswer = "";
+        ourInterruptedConversation = List.of();
         if(ourBridge != null) {
             pushHistory();
             setStatus("Диалог сброшен");
@@ -651,6 +664,11 @@ public final class ChatPanel {
         @Override
         public void pickProfile(final String theName) {
             pickProfileName(theName);
+        }
+
+        @Override
+        public void continueTurn() {
+            continueAgent();
         }
     }
 
@@ -1049,6 +1067,10 @@ public final class ChatPanel {
         final SlashCommands.Invocation invocation =
             commands == null ? null : commands.match(question);
         final String prompt = invocation == null ? question : invocation.prompt();
+        // a fresh question replaces the exchange, so an interrupted agent
+        // turn cannot be picked back up afterwards and its carried history
+        // must not leak into the next answer's continuation offer
+        ourInterruptedConversation = List.of();
         final String context = ourAttachedContext;
         ourAttachedContext = "";
         final boolean editMode = AgentMode.isOn() && ourToolSupplier != null;
@@ -1140,6 +1162,10 @@ public final class ChatPanel {
                         final JsonObject payload = new JsonObject();
                         payload.addProperty("text", body);
                         payload.addProperty("time", timeLabel());
+                        // a spent agent budget hands over its open history:
+                        // the page turns this flag into a continue button
+                        payload.addProperty("resumable",
+                            Boolean.valueOf(!ourInterruptedConversation.isEmpty()));
                         // pushed from this worker on purpose: the bridge
                         // queue is the delivery order, and an asyncExec hop
                         // here could overtake the streamed batches already
@@ -1199,6 +1225,77 @@ public final class ChatPanel {
             }
         };
         ourQuestionJob = Job.create("Colleague: question", questionBody);
+        ourQuestionJob.schedule();
+    }
+
+    /**
+     * Picks an agent turn whose step budget ran out back up: the carried
+     * conversation goes through the same edit-mode wiring, so the model sees
+     * its own executed tool results and finishes the work where the budget
+     * interrupted it instead of starting the task blind. Only the browser
+     * page offers this gesture; the plain fallback never carries a history.
+     */
+    private void continueAgent() {
+        final List<ChatMessage> conversation = ourInterruptedConversation;
+        if(ourBusy || conversation.isEmpty() || ourBridge == null || !ourBridge.isReady()) {
+            return;
+        }
+        // the continuation owns the exchange from here: a fresh interruption
+        // re-arms the offer, a completed answer clears it in runAgent
+        ourInterruptedConversation = List.of();
+        ourBusy = true;
+        final TurnController.Turn turn = ourTurns.startTurn();
+        final JsonObject busyOn = new JsonObject();
+        busyOn.addProperty("busy", Boolean.TRUE);
+        pushNow("busy", busyOn);
+        setStatus("Агент: продолжает прерванный ход...");
+        final IJobFunction continueBody = (final IProgressMonitor monitor) -> {
+            GeneratorGate.GLOBAL.enter();
+            try {
+                ourTurns.attachWorker(turn, Thread.currentThread());
+                final String answer = runAgent("", "", turn.cancellation(), conversation);
+                final int split = answer.lastIndexOf("\n--- ");
+                final String body = split > 0 ? answer.substring(0, split).strip() : answer;
+                final String stats = split > 0 ? answer.substring(split + 1).strip() : "";
+                ourLastAnswer = body;
+                if(!body.isEmpty() && ourTurns.isCurrent(turn)) {
+                    final JsonObject payload = new JsonObject();
+                    payload.addProperty("text", body);
+                    payload.addProperty("time", timeLabel());
+                    // the continuation may spend the new budget too: the page
+                    // gets another offer over the newly open history
+                    payload.addProperty("resumable",
+                        Boolean.valueOf(!ourInterruptedConversation.isEmpty()));
+                    pushNow("answer", payload);
+                }
+                setStatus(stats);
+                return Status.OK_STATUS;
+            } catch (final Exception ex) {
+                if(!ourTurns.isAborted() && ourTurns.isCurrent(turn)) {
+                    final JsonObject payload = new JsonObject();
+                    payload.addProperty("text", String.valueOf(ex.getMessage()));
+                    payload.addProperty("time", timeLabel());
+                    pushNow("error", payload);
+                }
+                return Status.OK_STATUS;
+            } finally {
+                GeneratorGate.GLOBAL.leave();
+                if(Thread.currentThread().isInterrupted()) {
+                    // the stop interrupt belongs to this turn only: clear its
+                    // status so it cannot leak into the next pooled worker run
+                    Thread.interrupted();
+                }
+                ourBusy = false;
+                Display.getDefault().asyncExec(() -> {
+                    if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
+                        final JsonObject busyOff = new JsonObject();
+                        busyOff.addProperty("busy", Boolean.FALSE);
+                        pushNow("busy", busyOff);
+                    }
+                });
+            }
+        };
+        ourQuestionJob = Job.create("Colleague: continue turn", continueBody);
         ourQuestionJob.schedule();
     }
 
@@ -1266,6 +1363,26 @@ public final class ChatPanel {
      */
     private String runAgent(final String theQuestion, final String theContext,
         final CancellationFlag theCancellation)
+        throws com.mad.edt.colleague.llm.LLMException {
+        return runAgent(theQuestion, theContext, theCancellation, null);
+    }
+
+    /**
+     * Same edit-mode run resuming an open conversation instead of opening a
+     * new one. The carried history already contains the role instructions and
+     * the task, so the question and context arguments go unused; the model
+     * sees its own executed tool results and finishes the work where the
+     * spent budget interrupted it.
+     *
+     * @param theQuestion unused on this path, kept for the shared tool wiring
+     * @param theContext unused on this path
+     * @param theCancellation stop flag of the continuing turn
+     * @param theConversation the carried history to resume, not {@code null}
+     * @return the answer with its stats line, as in a fresh run
+     * @throws com.mad.edt.colleague.llm.LLMException when the endpoint fails
+     */
+    private String runAgent(final String theQuestion, final String theContext,
+        final CancellationFlag theCancellation, final List<ChatMessage> theConversation)
         throws com.mad.edt.colleague.llm.LLMException {
         final AgentProfile profile = pickedProfile();
         final ToolPolicy policy = new ToolPolicy().excludeUnused(PRUNE_AFTER_IDLE_RUNS);
@@ -1394,13 +1511,22 @@ public final class ChatPanel {
         final long startedAt = System.nanoTime();
         final AgentAnswer answer;
         try {
-            answer = loop.run(system.toString(), task);
+            // a carried history already holds the instructions and the task:
+            // the loop appends to it instead of opening a fresh exchange
+            answer = theConversation == null
+                ? loop.run(system.toString(), task) : loop.run(theConversation);
         } finally {
             // the run is over whatever the outcome: offered-but-uncalled names
             // age here, and the pruning decision of the next run reads that
             ourToolUsage.finishRun();
         }
-        if(!answer.getText().isEmpty()) {
+        // a run that spent its budget mid-work hands the open exchange to the
+        // panel: the page turns it into one continue offer over exactly this
+        // history; a completed run or a user stop leaves nothing to resume
+        ourInterruptedConversation = !answer.isCompleted() && !answer.getConversation().isEmpty()
+            && !theCancellation.isCancelled()
+            ? answer.getConversation() : List.of();
+        if(!theQuestion.isEmpty() && !answer.getText().isEmpty()) {
             ourSession.noteExchange(theQuestion, answer.getText());
         }
         final long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;

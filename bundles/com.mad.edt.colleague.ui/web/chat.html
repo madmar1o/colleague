@@ -50,6 +50,12 @@ header {
   border-radius: 8px;
 }
 .backbtn:hover { background: var(--panel2); }
+.resumebtn {
+  display: block; margin-top: 8px; border: 1px solid var(--accent);
+  background: none; color: var(--accent); border-radius: 8px;
+  padding: 4px 10px; font-size: 12px; cursor: pointer;
+}
+.resumebtn:hover { background: var(--accent); color: #fff; }
 main {
   flex: 1 1 auto; overflow-y: auto; padding: 12px 14px 4px;
   display: flex; flex-direction: column; gap: 10px;
@@ -537,6 +543,24 @@ function addOutgoing(text, time) {
   b.appendChild(meta);
   row.appendChild(b); msgs.appendChild(row); scrollDown();
 }
+/* A turn whose step budget ran out hands its open history over: the button
+   under that answer sends the history back through the same agent wiring,
+   so the model finishes where it was interrupted instead of starting over.
+   A newer exchange retires the offer: only the newest one stays on screen. */
+function addResumeOffer(bubble) {
+  var btn = document.createElement("button");
+  btn.className = "resumebtn"; btn.type = "button";
+  btn.textContent = "Продолжить прерванный ход";
+  btn.onclick = function () {
+    btn.disabled = true;
+    apiCall("continueTurn", {});
+  };
+  bubble.appendChild(btn);
+}
+function clearResumeOffers() {
+  var stale = msgs.querySelectorAll(".resumebtn");
+  for (var i = 0; i < stale.length; i++) { stale[i].remove(); }
+}
 /* Streaming answer bubble: grows with every delta batch from Java and is
    replaced by the final rendered bubble on "answer". */
 var streamRow = null, streamText = null;
@@ -837,12 +861,14 @@ window.colleaguePush = function (kind, payload) {
         else { addIncoming(m.kind === "error" ? "error" : "answer", m.text, m.time); }
       });
       break;
-    case "user": addOutgoing(data.text || "", data.time); break;
+    case "user": clearResumeOffers(); addOutgoing(data.text || "", data.time); break;
     case "delta": streamDelta(data.text || ""); break;
     case "thinking": thinkingDelta(data.text || ""); break;
     case "answer": endStream(); endThinking();
       if (keptStream) { keptStream.remove(); keptStream = null; }
-      setTools(data.tools || []); addIncoming("answer", data.text || "", data.time);
+      setTools(data.tools || []);
+      var bubble = addIncoming("answer", data.text || "", data.time);
+      if (data.resumable && bubble) { addResumeOffer(bubble); scrollDown(); }
       /* Order census for the first few answers: the transcript order is the
          one thing the page can lie about while every event looked right in
          the Java log (a late user echo puts the answer above its question). */

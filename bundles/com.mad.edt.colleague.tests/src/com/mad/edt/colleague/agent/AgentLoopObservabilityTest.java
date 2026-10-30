@@ -152,17 +152,22 @@ class AgentLoopObservabilityTest {
     }
 
     @Test
-    @DisplayName("the exhausted budget is visible round by round")
+    @DisplayName("the exhausted budget is visible round by round, then closes with a summary round")
     void exhaustedBudgetStillReportsRounds() throws Exception {
         final ChatResult looping = toolRound("t1", "read_file", "{}");
-        final ScriptedProvider provider = new ScriptedProvider(List.of(looping, looping, looping));
+        final ScriptedProvider provider = new ScriptedProvider(List.of(looping, looping, looping,
+            finalRound("closed: three reads done, task still open")));
         final RecordingObserver observer = new RecordingObserver();
         final AgentAnswer answer = new AgentLoop(provider, List.of(new StubTool()), "stub", 3,
             new CancellationFlag(), observer).run("sys", "task");
 
         Assertions.assertFalse(answer.isCompleted());
+        // the budget died mid-work: the loop spends one more round-trip with
+        // no tools to turn the open tool results into a readable summary
+        Assertions.assertEquals("closed: three reads done, task still open", answer.getText());
         Assertions.assertEquals(List.of("round 1 tools=1", "tool 1 read_file {} result=file body ms>=true",
             "round 2 tools=1", "tool 2 read_file {} result=file body ms>=true",
-            "round 3 tools=1", "tool 3 read_file {} result=file body ms>=true"), observer.events);
+            "round 3 tools=1", "tool 3 read_file {} result=file body ms>=true",
+            "round 4 tools=0"), observer.events);
     }
 }

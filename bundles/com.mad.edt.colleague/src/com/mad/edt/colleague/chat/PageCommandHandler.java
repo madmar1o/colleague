@@ -72,6 +72,13 @@ public final class PageCommandHandler {
          *            default agent
          */
         void pickProfile(String theName);
+
+        /**
+         * The page asked to pick an interrupted agent turn back up: the
+         * carried conversation continues over the same history instead of a
+         * fresh question.
+         */
+        void continueTurn();
     }
 
     private static final String[] FOCUS_STATE_FIELDS = {"ae", "hf", "kd", "qvlen", "ch",
@@ -133,6 +140,9 @@ public final class PageCommandHandler {
                 return;
             case "pickProfile":
                 actions.pickProfile(argument(theArgument, "name"));
+                return;
+            case "continueTurn":
+                actions.continueTurn();
                 return;
             default:
                 return;
