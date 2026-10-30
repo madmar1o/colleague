@@ -852,6 +852,17 @@ public final class ChatPanel {
     }
 
     /**
+     * Opens a trace block on the page for one tool-asking model round: the
+     * chips of that round arrive on the same bridge queue right behind it,
+     * so the page nests them inside the block it just opened.
+     */
+    private void pushTraceBlock(final JsonObject theBlock) {
+        if(ourBridge != null && !ourRoot.isDisposed()) {
+            pushNow("trace", theBlock);
+        }
+    }
+
+    /**
      * Paints the panel container itself with the page background color so no
      * neutral-colored strip remains around the HTML page.
      */
@@ -1460,7 +1471,7 @@ public final class ChatPanel {
         final AgentLoop loop = new AgentLoop(ourSession.getProvider(),
             tools, model, maxSteps, theCancellation,
             new PageAgentObserver(new LoggingAgentObserver(ourToolUsage),
-                this::pushToolChip, this::setStatus));
+                this::pushToolChip, this::setStatus, this::pushTraceBlock));
         final StringBuilder system = new StringBuilder();
         if(ourSession.getSystemPrompt() != null && !ourSession.getSystemPrompt().isEmpty()) {
             system.append(ourSession.getSystemPrompt()).append(' ');

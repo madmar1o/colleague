@@ -206,6 +206,27 @@ button.scrollbottom:hover { border-color: var(--accent); }
   max-height: 320px; overflow-y: auto; user-select: text; line-height: 1.45;
 }
 .thought.open .tbody { display: block; }
+/* Round trace block: one per tool-asking model round, open by default so
+   the called tools stay visible; the header collapses the whole round and
+   a chip click expands the arguments and result preview under it. */
+.trace {
+  align-self: flex-start; max-width: 78%; background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 12px; padding: 6px 12px;
+  color: var(--muted); font-size: 12px; user-select: none;
+}
+.trace .thead { cursor: pointer; display: flex; gap: 6px; align-items: center; }
+.trace .tarrow { transition: transform .15s; }
+.trace.open .tarrow { transform: rotate(90deg); }
+.trace .tbody { display: none; margin-top: 6px; }
+.trace.open .tbody { display: block; }
+.chipdetail {
+  display: none; flex-basis: 100%; margin-top: 6px; white-space: pre-wrap;
+  color: var(--muted);
+  font-family: monospace; font-size: 11px; max-height: 240px; overflow-y: auto;
+  user-select: text; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 8px;
+}
+.chipdetail.show { display: block; }
 </style>
 </head>
 <body>
@@ -659,14 +680,64 @@ function setTools(list) {
   list.forEach(function (t) { row.appendChild(chipFor(t)); });
   msgs.appendChild(row); scrollDown(); pendingTools = row;
 }
+/* The round trace: Java opens one block per tool-asking round ("trace") and
+   the "tool" chips of that round arrive on the same bridge queue right after,
+   so they nest inside it. The block starts open - the called tools stay
+   visible - and its header collapses the whole round on click. A chip click
+   expands the arguments, the result preview and the time under it; a chip
+   that names a file keeps opening the editor from inside its details. */
+var traceBlock = null, traceTools = null;
+function openTrace(d) {
+  hideWelcome();
+  traceBlock = document.createElement("div"); traceBlock.className = "trace open";
+  var head = document.createElement("div"); head.className = "thead";
+  head.innerHTML = "раунд " + esc(String(d.round || "")) + " — " +
+    esc(String(d.calls || "")) + " инстр. <span class='tarrow'>&#9656;</span>";
+  var block = traceBlock;
+  head.onclick = function () { block.classList.toggle("open"); };
+  traceTools = document.createElement("div"); traceTools.className = "tools";
+  traceBlock.appendChild(head); traceBlock.appendChild(traceTools);
+  msgs.appendChild(traceBlock); scrollDown();
+}
+function endTrace() { traceBlock = null; traceTools = null; }
+function addChipDetail(chipEl, t) {
+  var existing = chipEl.parentNode.querySelector(".chipdetail");
+  if (existing) { existing.remove(); }
+  var box = document.createElement("div"); box.className = "chipdetail show";
+  var lines = ["аргументы: " + (t.args || "{}"),
+    "результат: " + (t.result || ""),
+    "время: " + (t.elapsed || 0) + " мс"];
+  box.textContent = lines.join("\n");
+  if (t.file) {
+    var link = document.createElement("span"); link.className = "copylink";
+    link.textContent = "открыть " + t.file;
+    link.onclick = function () { apiCall("openInEditor", { file: t.file }); };
+    box.appendChild(document.createElement("br"));
+    box.appendChild(link);
+  }
+  chipEl.parentNode.insertBefore(box, chipEl.nextSibling);
+}
 function chipFor(t) {
   var c = document.createElement("span");
   c.className = "chip " + (t.state === "done" ? "done" : "pending");
   c.textContent = t.name + (t.detail ? ": " + t.detail : "");
-  c.onclick = function () { apiCall("openInEditor", { file: t.file || t.name }); };
+  if (t.args || t.result) {
+    c.onclick = function () {
+      var parent = c.parentNode;
+      var old = parent.querySelector(".chipdetail");
+      if (old) { old.remove(); return; }
+      addChipDetail(c, t);
+      scrollDown();
+    };
+  } else if (t.file) {
+    c.onclick = function () { apiCall("openInEditor", { file: t.file }); };
+  }
   return c;
 }
 function addTool(t) {
+  if (traceTools) {
+    traceTools.appendChild(chipFor(t)); scrollDown(); return;
+  }
   if (!pendingTools) { setTools([]); }
   if (pendingTools) { pendingTools.appendChild(chipFor(t)); scrollDown(); }
 }
@@ -853,6 +924,7 @@ window.colleaguePush = function (kind, payload) {
     case "history":
       endStream();
       endThinking();
+      endTrace();
       keptStream = null;
       msgs.textContent = "";
       if (!(data.items || []).length) { restoreWelcome(); }
@@ -864,7 +936,7 @@ window.colleaguePush = function (kind, payload) {
     case "user": clearResumeOffers(); addOutgoing(data.text || "", data.time); break;
     case "delta": streamDelta(data.text || ""); break;
     case "thinking": thinkingDelta(data.text || ""); break;
-    case "answer": endStream(); endThinking();
+    case "answer": endStream(); endThinking(); endTrace();
       if (keptStream) { keptStream.remove(); keptStream = null; }
       setTools(data.tools || []);
       var bubble = addIncoming("answer", data.text || "", data.time);
@@ -881,6 +953,7 @@ window.colleaguePush = function (kind, payload) {
       break;
     case "error": endStream(); addIncoming("error", data.text || "", data.time); break;
     case "tool": addTool(data); break;
+    case "trace": openTrace(data); break;
     case "subagent": addSubagent(data); break;
     case "status": setStatus(data.text || ""); break;
     case "mode": setMode(!!data.on); setStatus(data.text || ""); break;
@@ -889,7 +962,7 @@ window.colleaguePush = function (kind, payload) {
       sendEl.textContent = pageBusy ? "Стоп" : "Спросить";
       sendEl.classList.toggle("stop", pageBusy);
       setStatus(data.text || "");
-      if (data.busy) { keptStream = null; showTyping(); } else { hideTyping(); endStream(true); endThinking(); }
+      if (data.busy) { keptStream = null; endTrace(); showTyping(); } else { hideTyping(); endStream(true); endThinking(); }
       break;
     case "input": qEl.value = data.text || ""; qEl.focus(); renderSlashHints(); break;
     case "catalog":
