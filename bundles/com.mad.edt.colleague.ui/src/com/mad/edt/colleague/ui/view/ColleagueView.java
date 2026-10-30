@@ -222,6 +222,7 @@ public class ColleagueView extends ViewPart {
         // a debugging door, not a feature: the socket only exists when the
         // start-up flag named a port for it
         openWebBridgeIfAsked();
+        autoOpenChatIfAsked();
 
         ourContactsArea = new Composite(ourMobileStack, SWT.NONE);
         ourContactsArea.setLayout(new FillLayout());
@@ -1037,6 +1038,23 @@ public class ColleagueView extends ViewPart {
      * @param theContact provider and model pair
      * @return the built chat panel
      */
+    /**
+     * Debug seam for an unattended verification run: opens one chat tab under
+     * the built-in agent without a click, which is what gives the web bridge a
+     * panel to attach to. Off unless {@code -Dcolleague.debug.autochat=true}.
+     */
+    private void autoOpenChatIfAsked() {
+        if(!Boolean.getBoolean("colleague.debug.autochat")) {
+            return;
+        }
+        ourRoot.getDisplay().timerExec(3_000, () -> {
+            if(ourRoot != null && !ourRoot.isDisposed()) {
+                openAgent("");
+                System.err.println("[colleague] auto chat opened (debug)");
+            }
+        });
+    }
+
     /**
      * Opens the debug web bridge when the start-up flag asked for a port. The
      * bridge is a debugging door for an agent or a browser test: it serves the
