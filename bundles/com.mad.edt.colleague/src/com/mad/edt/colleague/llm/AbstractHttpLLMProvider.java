@@ -51,6 +51,19 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
     }
 
     /**
+     * Extra guidance appended to an HTTP failure message when the endpoint
+     * answered with an error status. The default adds nothing; a dialect that
+     * is routinely misconfigured by an honest-looking address overrides it so
+     * the user sees the address that would have worked.
+     *
+     * @param theStatus HTTP status the endpoint answered
+     * @return text appended to the message, empty when there is nothing to add
+     */
+    protected String failureHint(final int theStatus) {
+        return "";
+    }
+
+    /**
      * POSTs a JSON body and returns the parsed JSON response.
      *
      * @param thePath path appended to the base URL, starting with a slash
@@ -138,7 +151,8 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
                 lines.limit(4).forEach(line -> excerpt.append(line));
             }
             throw new LLMException("Endpoint " + config.getBaseUrl() + " returned HTTP "
-                + response.getStatus() + ": " + excerpt, response.getStatus(), null);
+                + response.getStatus() + ": " + excerpt + failureHint(response.getStatus()),
+                response.getStatus(), null);
         }
         try (java.util.stream.Stream<String> lines = response.lines()) {
             lines.forEach(line -> {
@@ -225,7 +239,8 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
         }
         if(response.getStatus() < 200 || response.getStatus() >= 300) {
             throw new LLMException("Endpoint " + config.getBaseUrl() + " returned HTTP "
-                + response.getStatus() + ": " + excerpt(response.getBodyText()),
+                + response.getStatus() + ": " + excerpt(response.getBodyText())
+                + failureHint(response.getStatus()),
                 response.getStatus(), null);
         }
         try {

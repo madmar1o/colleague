@@ -27,6 +27,10 @@ import com.mad.edt.colleague.llm.LLMProviderType;
 import com.mad.edt.colleague.llm.LLMSettings;
 import com.mad.edt.colleague.llm.ProviderConfig;
 import com.mad.edt.colleague.llm.ProviderStore;
+import com.mad.edt.colleague.mcp.McpClient;
+import com.mad.edt.colleague.mcp.McpServerConfig;
+import com.mad.edt.colleague.mcp.McpSettings;
+import com.mad.edt.colleague.mcp.McpToolInfo;
 
 /**
  * Messenger-style contact list rendered by the bundled {@code web/contacts.html}
@@ -74,6 +78,7 @@ public final class ContactsPanel {
 
     private final Consumer<Contact> ourOnContactSelected;
     private final Consumer<List<Contact>> ourOnLoaded;
+    private final Runnable ourOnProvidersChanged;
 
     private Composite ourRoot;
     private BridgeBrowser ourBridge;
@@ -88,11 +93,15 @@ public final class ContactsPanel {
      * @param theOnContactSelected invoked on the UI thread for model selection
      * @param theOnLoaded invoked on the UI thread after each reload with the
      *            contacts that answered
+     * @param theOnProvidersChanged invoked on the UI thread after the saved
+     *            provider list moved (saved, corrected or removed), so the
+     *            view can retire conversations built on the old configuration
      */
     public ContactsPanel(final Composite theParent, final Consumer<Contact> theOnContactSelected,
-        final Consumer<List<Contact>> theOnLoaded) {
+        final Consumer<List<Contact>> theOnLoaded, final Runnable theOnProvidersChanged) {
         ourOnContactSelected = theOnContactSelected;
         ourOnLoaded = theOnLoaded;
+        ourOnProvidersChanged = theOnProvidersChanged;
         createControls(theParent);
     }
 
@@ -154,7 +163,7 @@ public final class ContactsPanel {
                 final ILLMProvider provider =
                     LLMProviderFactory.create(LLMSettings.getConfig(id));
                 final List<String> models = provider.listModels().stream()
-                    .filter(name -> !name.contains("embed") && !name.startsWith("bge"))
+                    .filter(name -> provider.supportsChatCapability(name))
                     .collect(Collectors.toList());
                 providers.add(new Object[] {Boolean.TRUE, id,
                     provider.getConfig().getBaseUrl(), models});
@@ -246,6 +255,18 @@ public final class ContactsPanel {
             case "saveProvider":
                 saveProvider(theArguments);
                 return;
+            case "listMcp":
+                pushMcpServers();
+                return;
+            case "saveMcp":
+                saveMcp(theArguments);
+                return;
+            case "removeMcp":
+                removeMcp(BridgeBrowser.optString(theArguments, "name"));
+                return;
+            case "testMcp":
+                testMcp(theArguments);
+                return;
             default:
                 return;
         }
@@ -261,6 +282,7 @@ public final class ContactsPanel {
             LLMSettings.setDefaultProviderId(LLMSettings.LOCAL_PROVIDER_ID);
         }
         ProviderStore.saveFromSettings();
+        ourOnProvidersChanged.run();
         pushSaved(true, "");
         reload();
     }
@@ -290,9 +312,10 @@ public final class ContactsPanel {
                     .baseUrl(url)
                     .apiKey(BridgeBrowser.optString(theArguments, "key"))
                     .build();
-                final List<String> models = LLMProviderFactory.create(config).listModels()
+                final ILLMProvider probed = LLMProviderFactory.create(config);
+                final List<String> models = probed.listModels()
                     .stream()
-                    .filter(name -> !name.contains("embed") && !name.startsWith("bge"))
+                    .filter(name -> probed.supportsChatCapability(name))
                     .collect(Collectors.toList());
                 final JsonArray array = new JsonArray();
                 models.forEach(array::add);
@@ -346,6 +369,7 @@ public final class ContactsPanel {
             LLMSettings.setDefaultProviderId(id);
         }
         ProviderStore.saveFromSettings();
+        ourOnProvidersChanged.run();
         pushSaved(true, "");
         reload();
     }
@@ -357,6 +381,126 @@ public final class ContactsPanel {
     private static LLMProviderType toType(final String thePageValue) {
         return "openai".equals(thePageValue)
             ? LLMProviderType.OPENAI_COMPATIBLE : LLMProviderType.OLLAMA;
+    }
+
+    /**
+     * Registers (or replaces) one MCP server from the page form. The name is
+     * the stable key of the {@code mcp_<server>_<tool>} prefix, so it has to
+     * be plain lower-case letters, digits and underscores.
+     *
+     * @param theArguments form fields: name, command, url, enabled
+     */
+    private void saveMcp(final JsonObject theArguments) {
+        final String name = BridgeBrowser.optString(theArguments, "name");
+        final String command = BridgeBrowser.optString(theArguments, "command");
+        final String url = BridgeBrowser.optString(theArguments, "url");
+        if(!name.matches("[a-z0-9_]{1,40}")) {
+            pushSaved(false, "имя сервера — только строчные латинские буквы,"
+                + " цифры и подчёркивание");
+            return;
+        }
+        if(url.isEmpty() && command.trim().isEmpty()) {
+            pushSaved(false, "нужен адрес HTTP-сервера или команда запуска процесса");
+            return;
+        }
+        if(!url.isEmpty() && !url.startsWith("http://") && !url.startsWith("https://")) {
+            pushSaved(false, "адрес должен начинаться с http:// или https://");
+            return;
+        }
+        final List<String> parts = new ArrayList<>();
+        for(final String part : command.trim().split("\\s+")) {
+            if(!part.isEmpty()) {
+                parts.add(part);
+            }
+        }
+        final boolean enabled = !theArguments.has("enabled")
+            || theArguments.get("enabled").getAsBoolean();
+        McpSettings.upsert(new McpServerConfig(name,
+            url.isEmpty() ? parts : null, url.isEmpty() ? null : url, enabled));
+        pushSaved(true, "");
+        pushMcpServers();
+    }
+
+    /**
+     * @param theName stored MCP server to drop from the settings
+     */
+    private void removeMcp(final String theName) {
+        if(theName.isEmpty()) {
+            return;
+        }
+        McpSettings.remove(theName);
+        pushSaved(true, "");
+        pushMcpServers();
+    }
+
+    /**
+     * Probes an unsaved MCP draft by running the handshake and listing its
+     * tools, without storing anything: the page shows the tool names right
+     * away, exactly like the provider test shows the model list.
+     *
+     * @param theArguments draft fields: name, command, url
+     */
+    private void testMcp(final JsonObject theArguments) {
+        final String name = BridgeBrowser.optString(theArguments, "name");
+        final String command = BridgeBrowser.optString(theArguments, "command");
+        final String url = BridgeBrowser.optString(theArguments, "url");
+        final List<String> parts = new ArrayList<>();
+        for(final String part : command.trim().split("\\s+")) {
+            if(!part.isEmpty()) {
+                parts.add(part);
+            }
+        }
+        final McpServerConfig probe = new McpServerConfig(
+            name.isEmpty() ? "probe" : name,
+            url.isEmpty() ? parts : null, url.isEmpty() ? null : url, true);
+        Job.create("Colleague: MCP server test", (monitor) -> {
+            final JsonObject result = new JsonObject();
+            try (McpClient client = new McpClient(probe)) {
+                final JsonArray tools = new JsonArray();
+                for(final McpToolInfo tool : client.discover()) {
+                    final JsonObject item = new JsonObject();
+                    item.addProperty("name", tool.name());
+                    item.addProperty("readOnly", Boolean.valueOf(tool.readOnly()));
+                    tools.add(item);
+                }
+                result.add("tools", tools);
+                result.addProperty("ok", Boolean.TRUE);
+            } catch (final Exception ex) {
+                result.addProperty("ok", Boolean.FALSE);
+                result.addProperty("error", ex.getMessage() == null
+                    ? ex.getClass().getSimpleName() : ex.getMessage());
+            }
+            Display.getDefault().asyncExec(() -> {
+                if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
+                    ourBridge.push("mcpTestResult", result);
+                }
+            });
+            return Status.OK_STATUS;
+        }).schedule();
+    }
+
+    /** Pushes the stored MCP servers so the settings table can redraw itself. */
+    private void pushMcpServers() {
+        final JsonObject payload = new JsonObject();
+        payload.add("servers", mcpJson());
+        ourBridge.push("mcpData", payload);
+    }
+
+    /**
+     * @return the stored MCP servers in the shape the page renders
+     */
+    private static JsonArray mcpJson() {
+        final JsonArray servers = new JsonArray();
+        for(final McpServerConfig server : McpSettings.loadServers()) {
+            final JsonObject item = new JsonObject();
+            item.addProperty("name", server.getName());
+            item.addProperty("enabled", Boolean.valueOf(server.isEnabled()));
+            item.addProperty("url", server.getUrl() == null ? "" : server.getUrl());
+            item.addProperty("command", server.getCommand() == null
+                ? "" : String.join(" ", server.getCommand()));
+            servers.add(item);
+        }
+        return servers;
     }
 
     private void pushSaved(final boolean theOk, final String theError) {
@@ -387,6 +531,7 @@ public final class ContactsPanel {
         }
         final JsonObject payload = new JsonObject();
         payload.add("providers", providers);
+        payload.add("mcpServers", mcpJson());
         ourBridge.push("settingsData", payload);
     }
 

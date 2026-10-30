@@ -35,6 +35,15 @@ public final class AgentLoop {
      */
     private static final int ROUND_TRIP_OUTPUT_TOKENS = 4_096;
 
+    /**
+     * Generation budget of the repair round. The round it repairs died with
+     * the thinking pass eating the whole ceiling, so repeating that ceiling
+     * would doom the repair to the same silent cut-off; the budget doubles
+     * while the thinking pass is suppressed, so the extra room goes to the
+     * answer itself.
+     */
+    private static final int REPAIR_ROUND_OUTPUT_TOKENS = 8_192;
+
     private final ILLMProvider provider;
     private final Map<String, IToolExecutor> executors;
     private final String model;
@@ -103,6 +112,21 @@ public final class AgentLoop {
             messages.add(ChatMessage.system(theSystemPrompt));
         }
         messages.add(ChatMessage.user(theUserMessage));
+        return run(messages);
+    }
+
+    /**
+     * Runs one task over an already open conversation: the loop continues the
+     * history it is handed instead of starting a fresh one. A delegate that
+     * resumes its parent's or its own earlier exchange uses this entry.
+     *
+     * @param theConversation messages to start from, system message first when
+     *            the caller wants one; the loop appends to this list
+     * @return the final answer
+     * @throws LLMException when the model endpoint fails
+     */
+    public AgentAnswer run(final List<ChatMessage> theConversation) throws LLMException {
+        final List<ChatMessage> messages = new ArrayList<>(theConversation);
 
         final List<ToolSpec> specs = new ArrayList<>();
         for(final IToolExecutor executor : executors.values()) {
@@ -116,16 +140,19 @@ public final class AgentLoop {
             if(cancellation.isCancelled()) {
                 return new AgentAnswer("", steps, executed, false);
             }
-            final ChatRequest.Builder request = ChatRequest.builder(
-                model != null ? model : defaultModel());
+            final String roundModel = model != null ? model : defaultModel();
+            final ChatRequest.Builder request = ChatRequest.builder(roundModel);
             for(final ChatMessage message : messages) {
                 request.addMessage(message);
             }
             request.tools(specs);
             // the reasoning pass is where the tool-call syntax of local
             // reasoning models reliably appears; suppressing it on these
-            // models makes them describe calls in prose instead of making them
-            request.think(true);
+            // models makes them describe calls in prose instead of making
+            // them. a model without the capability rejects the whole round,
+            // so the provider - the side that learns from that rejection -
+            // answers whether the pass may be requested at all
+            request.think(Boolean.valueOf(provider.supportsThinking(roundModel)));
             request.maxTokens(ROUND_TRIP_OUTPUT_TOKENS);
             request.cancellation(cancellation);
 
@@ -150,6 +177,7 @@ public final class AgentLoop {
                 // chasing it further only burns the budget
                 steps++;
                 request.think(false);
+                request.maxTokens(REPAIR_ROUND_OUTPUT_TOKENS);
                 result = streamedRound(request.build());
             }
             if(!result.wantsToolCall()) {

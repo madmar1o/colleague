@@ -54,6 +54,12 @@ public final class Conversation {
     private final List<ChatMessage> history = new ArrayList<>();
 
     /**
+     * Whether the last finished turn was cut by the runtime's context
+     * window; the chat panel reads it to label such an answer incomplete.
+     */
+    private boolean lastTurnTruncated;
+
+    /**
      * @param theProvider endpoint to talk to
      * @param theSystemPrompt assistant role instructions, may be {@code null}
      */
@@ -130,8 +136,16 @@ public final class Conversation {
     public String ask(final String theModel, final String theContext, final String theQuestion,
         final Consumer<String> theOnDelta, final Consumer<String> theOnThinking,
         final CancellationFlag theCancellation) throws LLMException {
-        final ChatRequest.Builder request = ChatRequest
-            .builder(theModel != null ? theModel : provider.getConfig().getDefaultModel());
+        final String model = theModel != null ? theModel : provider.getConfig().getDefaultModel();
+        if(model == null || model.isEmpty()) {
+            // the model is a user setting, not a guess: without a saved one
+            // the request would carry a made-up name and the endpoint would
+            // answer with an error the user cannot connect to their settings
+            throw new LLMException("No model selected for provider '"
+                + provider.getConfig().getId()
+                + "': pick one in the settings and save the provider");
+        }
+        final ChatRequest.Builder request = ChatRequest.builder(model);
         if(systemPrompt != null && !systemPrompt.isEmpty()) {
             request.addMessage(ChatMessage.system(systemPrompt));
         }
@@ -172,10 +186,21 @@ public final class Conversation {
         final long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
 
         rememberExchange(contextMessage, theQuestion, result.getContent());
+        lastTurnTruncated = result.truncated();
 
         return result.getContent()
             + String.format("%n--- %d/%d tokens, %d ms", Integer.valueOf(result.getPromptTokens()),
                 Integer.valueOf(result.getCompletionTokens()), Long.valueOf(elapsedMs));
+    }
+
+    /**
+     * @return {@code true} when the last finished turn ended because the
+     *         runtime's context window ran out and cut the oldest prompt
+     *         text away; the chat panel shows the user that the answer is
+     *         only as complete as the surviving tail of the prompt
+     */
+    public boolean wasLastTurnTruncated() {
+        return lastTurnTruncated;
     }
 
     /**
@@ -241,14 +266,15 @@ public final class Conversation {
      * Reasoning-capable models produce their chain of thought in a separate
      * stream field; the assistant history keeps only the final answer, so the
      * reasoning pass is requested and shown to the user collapsed apart from
-     * the answer.
+     * the answer. The provider is the only side that knows the capability:
+     * model names say nothing reliable about it.
      *
      * @param theModel model name, may be {@code null}
      * @return {@code true} when the reasoning pass must be requested
      */
     private boolean wantsVisibleReasoning(final String theModel) {
         final String name = theModel == null ? provider.getConfig().getDefaultModel() : theModel;
-        return name != null && name.contains("qwen3");
+        return name != null && provider.supportsThinking(name);
     }
 
     /**

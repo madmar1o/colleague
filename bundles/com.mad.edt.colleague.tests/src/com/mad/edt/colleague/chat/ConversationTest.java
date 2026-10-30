@@ -25,8 +25,9 @@ import com.mad.edt.colleague.llm.ProviderConfig;
  * Pins how a conversation builds each request and grows its memory: system
  * instructions first, replayed history, the per-turn workspace context right
  * before the question, the assistant history keeping only final answers and
- * never the reasoning pass, the reasoning request flag following the model
- * name, and the history cap trimming from the oldest end.
+ * never the reasoning pass, the reasoning request flag following what the
+ * provider reports about the model, and the history cap trimming from the
+ * oldest end.
  */
 class ConversationTest {
 
@@ -38,12 +39,25 @@ class ConversationTest {
         private ChatResult myNext = new ChatResult("a", "model", "stop", 7, 12);
         private List<String> myStreamChunks = List.of();
         private LLMException myStreamFailure;
+        private boolean myThinking = true;
 
         ScriptedProvider(final String theDefaultModel) {
             myConfig = ProviderConfig.builder("test", LLMProviderType.OLLAMA)
                 .baseUrl("http://runtime.test")
                 .defaultModel(theDefaultModel)
                 .build();
+        }
+
+        /**
+         * @param theThinking what the provider reports about its models
+         */
+        void thinking(final boolean theThinking) {
+            myThinking = theThinking;
+        }
+
+        @Override
+        public boolean supportsThinking(final String theModel) {
+            return myThinking;
         }
 
         void script(final ChatResult theResult) {
@@ -184,24 +198,38 @@ class ConversationTest {
     }
 
     @Test
-    void reasoningModelsAreRequestedToStreamTheirThinking() throws LLMException {
+    void thinkingIsRequestedOnlyWhereTheProviderReportsTheCapability() throws LLMException {
         final ScriptedProvider provider = new ScriptedProvider("base-model");
         final Conversation conversation = new Conversation(provider, null);
-        conversation.ask("qwen3:4b", null, "q1");
+        conversation.ask("thinking-model", null, "q1");
         assertEquals(Boolean.TRUE, provider.requests().get(0).getThink());
-        conversation.ask("some-other-model", null, "q2");
+        provider.thinking(false);
+        conversation.ask("plain-model", null, "q2");
         assertEquals(Boolean.FALSE, provider.requests().get(1).getThink());
     }
 
     @Test
     void missingModelFallsBackToTheProviderDefault() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("qwen3:8b");
+        final ScriptedProvider provider = new ScriptedProvider("saved-default-model");
         final Conversation conversation = new Conversation(provider, null);
         conversation.ask(null, null, "q1");
         final ChatRequest sent = provider.requests().get(0);
-        assertEquals("qwen3:8b", sent.getModel());
+        assertEquals("saved-default-model", sent.getModel());
         // the default name decides the reasoning flag as well
         assertEquals(Boolean.TRUE, sent.getThink());
+    }
+
+    @Test
+    void aProviderWithoutASavedModelRefusesToSendAGuess() {
+        final ScriptedProvider provider = new ScriptedProvider(null);
+        final Conversation conversation = new Conversation(provider, null);
+        final LLMException error =
+            assertThrows(LLMException.class, () -> conversation.ask(null, null, "q1"));
+        assertTrue(error.getMessage().contains("test"),
+            "the message must point at the provider whose settings need a model: "
+                + error.getMessage());
+        assertTrue(provider.requests().isEmpty(),
+            "a request with a made-up model name must never leave for the endpoint");
     }
 
     @Test
@@ -342,5 +370,20 @@ class ConversationTest {
             "system|Workspace context:\nnew context",
             "user|q2"),
             rolesAndContent(provider.requests().get(1)));
+    }
+
+    @Test
+    void truncationFromTheRuntimeReachesTheUiSide() throws LLMException {
+        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final Conversation conversation = new Conversation(provider, null);
+        // the runtime says the window ran out: the chat panel reads the flag
+        // off the conversation after the call and says the answer is cut
+        provider.script(new ChatResult("half", "model", "length", 900, 40));
+        conversation.ask("plain-model", "ctx", "q1");
+        assertTrue(conversation.wasLastTurnTruncated());
+        provider.script(new ChatResult("whole", "model", "stop", 9, 4));
+        conversation.ask("plain-model", "ctx", "q2");
+        assertEquals(false, Boolean.valueOf(conversation.wasLastTurnTruncated()),
+            "a normally finished turn clears the flag");
     }
 }

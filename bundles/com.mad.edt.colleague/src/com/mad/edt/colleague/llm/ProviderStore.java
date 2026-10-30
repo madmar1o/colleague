@@ -1,18 +1,22 @@
 package com.mad.edt.colleague.llm;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import org.osgi.service.prefs.BackingStoreException;
 import org.osgi.service.prefs.Preferences;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
 
 /**
- * Persists user-added LLM provider configurations in the workspace instance
- * preferences as a single JSON document. The built-in local provider is not
- * stored; it always exists with its defaults.
+ * Persists provider configurations - the built-in local one included - in the
+ * workspace instance preferences as a single JSON document. The built-in
+ * provider always exists, but its address and model are user settings: a
+ * stored entry for it overrides what the code seeds, so nothing about the
+ * endpoint is fixed once the user has chosen it.
  */
 public final class ProviderStore {
 
@@ -47,12 +51,12 @@ public final class ProviderStore {
             return;
         }
         try {
-            final JsonArray stored = GSON.fromJson(json, JsonArray.class);
-            for(final JsonElement element : stored) {
-                final ProviderConfig config = fromJson(element.getAsJsonObject());
-                if(config != null && LLMSettings.getConfig(config.getId()) == null) {
-                    LLMSettings.register(config);
-                }
+            final Map<String, ProviderConfig> stored =
+                ProviderDocument.fromJson(GSON.fromJson(json, JsonArray.class));
+            for(final ProviderConfig config : stored.values()) {
+                // a stored entry wins over the built-in defaults: the user
+                // may have moved the local runtime or picked another model
+                LLMSettings.register(config);
             }
         } catch (final RuntimeException ex) {
             // corrupt preferences must not break startup; keep built-ins only
@@ -60,19 +64,20 @@ public final class ProviderStore {
     }
 
     /**
-     * Rewrites the stored document from the currently registered custom
-     * providers (the built-in local one is skipped).
+     * Rewrites the stored document from the currently registered providers,
+     * the built-in local one included: its settings are the user's choice,
+     * not a constant.
      */
     public static synchronized void saveFromSettings() {
-        final JsonArray stored = new JsonArray();
+        final List<ProviderConfig> registered = new ArrayList<>();
         for(final String id : LLMSettings.getProviderIds()) {
-            if(LLMSettings.LOCAL_PROVIDER_ID.equals(id)) {
-                continue;
+            final ProviderConfig config = LLMSettings.getConfig(id);
+            if(config != null) {
+                registered.add(config);
             }
-            stored.add(toJson(LLMSettings.getConfig(id)));
         }
         final Preferences preferences = node();
-        preferences.put(KEY_PROVIDERS, GSON.toJson(stored));
+        preferences.put(KEY_PROVIDERS, GSON.toJson(ProviderDocument.toJson(registered)));
         preferences.put(KEY_DEFAULT, LLMSettings.getDefaultProviderId());
         try {
             preferences.flush();
@@ -83,42 +88,5 @@ public final class ProviderStore {
 
     private static Preferences node() {
         return org.eclipse.core.runtime.preferences.InstanceScope.INSTANCE.getNode(NODE_ID);
-    }
-
-    private static JsonObject toJson(final ProviderConfig theConfig) {
-        final JsonObject json = new JsonObject();
-        json.addProperty("id", theConfig.getId());
-        json.addProperty("type", theConfig.getType().name());
-        json.addProperty("baseUrl", theConfig.getBaseUrl());
-        if(theConfig.getApiKey() != null && !theConfig.getApiKey().isEmpty()) {
-            json.addProperty("apiKey", theConfig.getApiKey());
-        }
-        if(theConfig.getDefaultModel() != null) {
-            json.addProperty("defaultModel", theConfig.getDefaultModel());
-        }
-        return json;
-    }
-
-    private static ProviderConfig fromJson(final JsonObject theJson) {
-        final String id = optString(theJson, "id");
-        final String type = optString(theJson, "type");
-        final String baseUrl = optString(theJson, "baseUrl");
-        if(id == null || type == null || baseUrl == null) {
-            return null;
-        }
-        try {
-            return ProviderConfig.builder(id, LLMProviderType.valueOf(type))
-                .baseUrl(baseUrl)
-                .apiKey(optString(theJson, "apiKey"))
-                .defaultModel(optString(theJson, "defaultModel"))
-                .build();
-        } catch (final IllegalArgumentException ex) {
-            return null;
-        }
-    }
-
-    private static String optString(final JsonObject theJson, final String theName) {
-        final JsonElement element = theJson.get(theName);
-        return element == null || element.isJsonNull() ? null : element.getAsString();
     }
 }

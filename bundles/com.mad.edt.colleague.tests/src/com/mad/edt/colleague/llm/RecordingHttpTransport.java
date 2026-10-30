@@ -19,6 +19,7 @@ import com.mad.edt.colleague.http.TransportFailure;
 final class RecordingHttpTransport implements HttpTransport {
 
     private HttpCallResult answer;
+    private final List<HttpCallResult> answers = new ArrayList<>();
     private final TransportFailure failure;
     private final List<HttpCallSpec> calls = new ArrayList<>();
     private final AtomicBoolean streamClosed = new AtomicBoolean();
@@ -57,16 +58,38 @@ final class RecordingHttpTransport implements HttpTransport {
         return transport;
     }
 
+    /**
+     * @param theAnswers answers handed out in order; the last one keeps
+     *            answering every further call, so a test that asserts the
+     *            call count never runs out of prepared results
+     * @return a transport replaying that script
+     */
+    static RecordingHttpTransport sequence(final HttpCallResult... theAnswers) {
+        final RecordingHttpTransport transport = new RecordingHttpTransport(null, null);
+        transport.answers.addAll(Arrays.asList(theAnswers));
+        return transport;
+    }
+
     @Override
     public HttpCallResult send(final HttpCallSpec theCall) throws TransportFailure {
         calls.add(theCall);
         if(failure != null) {
             throw failure;
         }
+        if(!answers.isEmpty()) {
+            return answers.size() == 1 ? answers.get(0) : answers.remove(0);
+        }
         if(answer == null) {
             throw new IllegalStateException("no canned answer prepared");
         }
         return answer;
+    }
+
+    /**
+     * @return how many calls the provider made so far
+     */
+    int getCallCount() {
+        return calls.size();
     }
 
     /**

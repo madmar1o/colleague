@@ -79,6 +79,11 @@ class PageCommandHandlerTest {
         public void diagnose(final String theText) {
             calls.add("diagnose|" + theText);
         }
+
+        @Override
+        public void pickProfile(final String theName) {
+            calls.add("pickProfile|" + theName);
+        }
     }
 
     /** page arguments as name-value pairs, missing name arrives as null */
@@ -147,6 +152,14 @@ class PageCommandHandlerTest {
         final PageCommandHandler handler = handlerWith(actions);
         handler.handle("diag", args("txt", "bw=96 avatarOverlapsMeta=false"));
         assertEquals(List.of("diagnose|bw=96 avatarOverlapsMeta=false"), actions.calls);
+    }
+
+    @Test
+    void profileChipChoiceCarriesTheProfileName() {
+        final RecordingActions actions = new RecordingActions();
+        final PageCommandHandler handler = handlerWith(actions);
+        handler.handle("pickProfile", args("name", "reviewer"));
+        assertEquals(List.of("pickProfile|reviewer"), actions.calls);
     }
 
     @Test
