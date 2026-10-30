@@ -642,7 +642,8 @@ public final class ChatPanel {
             // embedded webview when the page goes blank. The selftest layout
             // measurements stay gated to keep normal runs quiet.
             if(Boolean.getBoolean("colleague.browser.selftest")
-                || theText.startsWith("js-") || theText.startsWith("census:")) {
+                || theText.startsWith("js-") || theText.startsWith("census:")
+                || theText.startsWith("order:")) {
                 System.out.println("[colleague] page diag: " + theText);
             }
         }
@@ -817,6 +818,19 @@ public final class ChatPanel {
         // the queue is the single source of truth for delivery, so the batch
         // argument stays empty; pushEvents drains everything queued before it
         ourBridge.pushEvents(java.util.Collections.<Object[]>emptyList());
+    }
+
+    /**
+     * Hands one executed agent step to the page as a transcript chip. Chips
+     * exist only in the page: the plain-text fallback already gets the agent
+     * answer and has no transcript to decorate.
+     *
+     * @param theChip page chip built by the agent observer
+     */
+    private void pushToolChip(final JsonObject theChip) {
+        if(ourBridge != null && !ourRoot.isDisposed()) {
+            pushNow("tool", theChip);
+        }
     }
 
     /**
@@ -1293,7 +1307,8 @@ public final class ChatPanel {
         ourToolUsage.noteOffered(offered);
         final AgentLoop loop = new AgentLoop(ourSession.getProvider(),
             tools, model, maxSteps, theCancellation,
-            new LoggingAgentObserver(ourToolUsage));
+            new PageAgentObserver(new LoggingAgentObserver(ourToolUsage),
+                this::pushToolChip, this::setStatus));
         final StringBuilder system = new StringBuilder();
         if(ourSession.getSystemPrompt() != null && !ourSession.getSystemPrompt().isEmpty()) {
             system.append(ourSession.getSystemPrompt()).append(' ');
