@@ -33,6 +33,7 @@ import com.mad.edt.colleague.agent.AgentMemory;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agents.AgentCatalog;
 import com.mad.edt.colleague.agents.AgentProfile;
+import com.mad.edt.colleague.agents.AgentProfileWriter;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
 import com.mad.edt.colleague.context.ContextSource;
@@ -83,6 +84,12 @@ public class ColleagueView extends ViewPart {
     private static final String SYSTEM_PROMPT =
         "You are a helpful assistant embedded in an IDE for the 1C:Enterprise platform."
             + " Answer concisely in the language of the question.";
+
+    /** Profile file this plugin ships as the first agent of an empty catalog. */
+    private static final String SEED_AGENT_RESOURCE = "seed/agents/analyst-1c.md";
+
+    /** Id the shipped seed is written under; also its file name. */
+    private static final String SEED_AGENT_ID = "analyst-1c";
 
     /** Question staged by handlers before the view instance exists. */
     private static volatile String ourPendingQuestion;
@@ -207,7 +214,8 @@ public class ColleagueView extends ViewPart {
         ourAgentsArea = new Composite(ourMobileStack, SWT.NONE);
         ourAgentsArea.setLayout(new FillLayout());
         ourAgents = new AgentsPanel(ourAgentsArea, this::profileCatalog,
-            this::openAgent, () -> showMobilePage(ourContactsArea, "gear", "settings"));
+            this::openAgent, () -> showMobilePage(ourContactsArea, "gear", "settings"),
+            this::agentsLevelDirectory, this::refreshAgentCatalog);
 
         ourContactsArea = new Composite(ourMobileStack, SWT.NONE);
         ourContactsArea.setLayout(new FillLayout());
@@ -276,6 +284,11 @@ public class ColleagueView extends ViewPart {
         });
 
         com.mad.edt.colleague.llm.ProviderStore.loadIntoSettings();
+        // first run in a workspace that has no agent files at all: the user
+        // gets a real first agent file to read, keep or delete right away
+        if(profileCatalog().isEmpty()) {
+            seedDefaultAgent();
+        }
         ourContacts.reload();
         scheduleAgentProbe();
     }
@@ -673,6 +686,96 @@ public class ColleagueView extends ViewPart {
         ourProfileCatalog = null;
         if(ourAgents != null) {
             ourAgents.refresh();
+        }
+    }
+
+    /**
+     * Maps a page level name to the directory its agent files live in.
+     *
+     * @param theLevel {@code personal} for the user-wide directory,
+     *            {@code project} for the first open project
+     * @return the directory to read from or write into (the writer creates it
+     *            when missing), {@code null} when the level has no target
+     *            right now - no open project for the project level
+     */
+    private java.io.File agentsLevelDirectory(final String theLevel) {
+        if("personal".equals(theLevel)) {
+            return personalAgentsDirectory();
+        }
+        if("project".equals(theLevel)) {
+            return colleagueDirectoryForWriting("agents");
+        }
+        return null;
+    }
+
+    /**
+     * The {@code .colleague/<theName>} directory path of the first open
+     * project, used where a directory must still be created; unlike
+     * {@link #colleagueDirectory(String)} it answers even when the folder
+     * does not exist yet.
+     *
+     * @param theName folder name below {@code .colleague}
+     * @return the directory path whether or not it exists, {@code null} when
+     *         no project is open
+     */
+    private java.io.File colleagueDirectoryForWriting(final String theName) {
+        for(final IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
+            if(!project.isOpen()) {
+                continue;
+            }
+            return project.getLocation().append(".colleague/" + theName).toFile();
+        }
+        return null;
+    }
+
+    /**
+     * Writes the seed agent into the first open project while the catalog is
+     * still empty. The seed ships as an ordinary profile file inside this
+     * bundle ({@code seed/agents/}), so its text is reviewable in the repository
+     * and the user finds exactly that file to read, correct or delete; it is
+     * written only into an empty catalog, so a deleted seed stays deleted on the
+     * next start.
+     */
+    private void seedDefaultAgent() {
+        final java.io.File dir = colleagueDirectoryForWriting("agents");
+        if(dir == null) {
+            return;
+        }
+        final String text = readBundleText(SEED_AGENT_RESOURCE);
+        if(text.isEmpty()) {
+            return;
+        }
+        try {
+            AgentProfileWriter.saveText(dir, SEED_AGENT_ID, text);
+            refreshAgentCatalog();
+        } catch (final java.io.IOException ex) {
+            System.err.println("[colleague] seed agent not written: " + ex.getMessage());
+        }
+    }
+
+    /**
+     * Reads one text resource of this plugin's bundle as UTF-8.
+     *
+     * @param thePath bundle-relative path, e.g. {@code seed/agents/x.md}
+     * @return the text, empty when the resource is missing or unreadable - a
+     *         shipped default never breaks the view
+     */
+    private static String readBundleText(final String thePath) {
+        final Bundle bundle = FrameworkUtil.getBundle(ColleagueView.class);
+        if(bundle == null) {
+            return "";
+        }
+        final java.net.URL entry = bundle.getEntry(thePath);
+        if(entry == null) {
+            System.err.println("[colleague] missing bundle resource: " + thePath);
+            return "";
+        }
+        try (java.io.InputStream stream = entry.openStream()) {
+            return new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (final java.io.IOException ex) {
+            System.err.println("[colleague] resource unreadable: " + thePath + ": "
+                + ex.getMessage());
+            return "";
         }
     }
 
