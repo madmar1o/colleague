@@ -72,6 +72,40 @@ public final class PageCatalogEvents {
     }
 
     /**
+     * The cards the agents page shows: the built-in default colleague first,
+     * then every catalog profile allowed to run as the chat itself (profiles
+     * marked sub-agent only, and hidden ones, stay out - they just serve
+     * delegates). Each card carries the model it asks for, empty meaning the
+     * page follows whatever provider model is default.
+     *
+     * @param theProfiles merged agent catalog, {@code null} for none
+     * @return ordered card entries, each with name, label, description and
+     *         model; only the built-in card also carries {@code builtin}
+     */
+    public static JsonArray agents(final List<AgentProfile> theProfiles) {
+        final JsonArray cards = new JsonArray();
+        final JsonObject builtIn = contact("", "Колега по умолчанию",
+            "обычный ассистент по проекту, без ограничений профиля", "default");
+        builtIn.addProperty("model", "");
+        builtIn.addProperty("builtin", true);
+        cards.add(builtIn);
+        if(theProfiles != null) {
+            for(final AgentProfile profile : theProfiles) {
+                if(profile.isHidden() || profile.getMode() == AgentProfile.Mode.SUBAGENT) {
+                    continue;
+                }
+                final JsonObject card = contact(profile.getName(), profile.getName(),
+                    profile.getDescription(),
+                    profile.getMode().name().toLowerCase(java.util.Locale.ROOT));
+                card.addProperty("model",
+                    profile.getModelName() == null ? "" : profile.getModelName());
+                cards.add(card);
+            }
+        }
+        return cards;
+    }
+
+    /**
      * The contacts the chat lists on its left rail: the built-in default
      * colleague first, then every workspace profile allowed to run as the
      * chat itself (profiles marked sub-agent only, and hidden ones, stay out

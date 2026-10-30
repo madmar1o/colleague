@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Colleague agents</title>
+<style>
+:root {
+  --bg: #1b1f27; --panel: #232833; --panel2: #2b3140; --text: #dfe4ec;
+  --muted: #8b93a3; --accent: #4d7fb3; --user: #2f5c86; --answer: #262c39;
+  --error: #5a2e2e; --line: #333a49; --chip: #2b3a4d; --code: #171b22;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--text); font-size: 13px;
+  font-family: "Segoe UI", "PT Sans", Tahoma, sans-serif;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+header {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  background: var(--panel); border-bottom: 1px solid var(--line); flex: none;
+}
+header .title { flex: 1 1 auto; font-weight: 600; font-size: 14px; }
+button {
+  border: 1px solid var(--line); background: var(--panel2); color: var(--text);
+  border-radius: 14px; padding: 5px 12px; font-size: 12px; cursor: pointer;
+  font-family: inherit;
+}
+button:hover { border-color: var(--accent); }
+main { flex: 1 1 auto; overflow-y: auto; padding: 10px; }
+.agent {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 8px; cursor: pointer;
+}
+.agent:hover { border-color: var(--accent); }
+.avatar {
+  flex: none; width: 38px; height: 38px; border-radius: 50%;
+  background: var(--chip); color: var(--text); font-size: 17px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+}
+.agent .who { flex: 1 1 auto; min-width: 0; }
+.agent .aname { font-weight: 600; font-size: 14px; }
+.agent .adesc {
+  color: var(--muted); font-size: 12px; margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.agent .amodel {
+  flex: none; align-self: center; font-size: 11px; color: var(--muted);
+  background: var(--chip); border: 1px solid var(--line); border-radius: 10px;
+  padding: 3px 9px; max-width: 45%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.statusline { color: var(--muted); font-size: 11px; padding: 2px 12px; flex: none;
+  min-height: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="title">Агенты</div>
+  <button id="btnrefresh" title="Перечитать агентов">⟳</button>
+  <button id="btngear" title="Провайдеры и модели">⚙</button>
+</header>
+<main id="list"></main>
+<div class="statusline" id="status">Загружаю агентов…</div>
+
+<script>
+"use strict";
+/* Bridge to Java: batch function channel with navigation fallback, see the
+   chat page for the full protocol. */
+var CHANNEL = "none";
+function applyEvents(list) {
+  if (!list || !list.length) { return; }
+  for (var i = 0; i < list.length; i++) {
+    var e = list[i];
+    if (e && e.length >= 2) { window.colleaguePush(e[0], e[1]); }
+  }
+}
+function unwrap(v) {
+  if (typeof v === "string") {
+    try { return JSON.parse(v); } catch (e) { return null; }
+  }
+  return v;
+}
+window.colleagueEvents = function (list) { applyEvents(unwrap(list)); };
+function apiCall(method, obj) {
+  var json;
+  try { json = JSON.stringify(obj || {}); } catch (e) { json = "{}"; }
+  if (CHANNEL === "func"
+      || (CHANNEL === "none" && typeof window.colleague === "function")) {
+    CHANNEL = "func";
+    try {
+      var r = window.colleague(method, json);
+      if (r && typeof r.then === "function") {
+        r.then(function (v) { applyEvents(unwrap(v)); }, function () { });
+      } else { applyEvents(unwrap(r)); }
+      return;
+    } catch (e) { CHANNEL = "none"; }
+  }
+  window.location.href = "colleague:" + method + ":" + encodeURIComponent(json);
+}
+var __pollSeq = 0;
+var __lastUserAt = 0;
+document.addEventListener("keydown", function () { __lastUserAt = Date.now(); }, true);
+document.addEventListener("mousedown", function () { __lastUserAt = Date.now(); }, true);
+setInterval(function () {
+  __pollSeq++;
+  if (Date.now() - __lastUserAt < 2500) { return; }
+  apiCall("sync", { ch: CHANNEL, poll: String(__pollSeq) });
+}, 1500);
+function applyPalette(p) {
+  var map = {
+    bg: "--bg", panel: "--panel", panel2: "--panel2", text: "--text",
+    muted: "--muted", accent: "--accent", user: "--user", answer: "--answer",
+    error: "--error", line: "--line", chip: "--chip", code: "--code"
+  };
+  var st = document.documentElement.style;
+  for (var key in map) {
+    if (p[key]) { st.setProperty(map[key], p[key]); }
+  }
+}
+var listEl = document.getElementById("list");
+var statusEl = document.getElementById("status");
+
+function setStatus(s) { statusEl.textContent = s || ""; }
+
+function renderAgents(data) {
+  listEl.textContent = "";
+  var agents = data.agents || [];
+  agents.forEach(function (a) {
+    var card = document.createElement("div"); card.className = "agent";
+    var av = document.createElement("div"); av.className = "avatar";
+    var label = a.label || a.name || "?";
+    av.textContent = label.charAt(0).toUpperCase();
+    var who = document.createElement("div"); who.className = "who";
+    var nm = document.createElement("div"); nm.className = "aname";
+    nm.textContent = label;
+    who.appendChild(nm);
+    if (a.description) {
+      var de = document.createElement("div"); de.className = "adesc";
+      de.textContent = a.description;
+      who.appendChild(de);
+    }
+    var md = document.createElement("div"); md.className = "amodel";
+    md.textContent = a.model ? a.model : "модель по умолчанию";
+    card.appendChild(av); card.appendChild(who); card.appendChild(md);
+    card.onclick = function () { apiCall("openAgent", { name: a.name }); };
+    listEl.appendChild(card);
+  });
+  if (data.status) { setStatus(data.status); }
+  else if (agents.length <= 1) {
+    setStatus("это агенты, с которыми можно говорить; провайдеры и модели — под «⚙»");
+  } else {
+    setStatus("");
+  }
+}
+
+document.getElementById("btnrefresh").onclick = function () {
+  setStatus("Загружаю агентов…"); apiCall("refresh", {});
+};
+document.getElementById("btngear").onclick = function () {
+  apiCall("openSettings", {});
+};
+
+window.colleaguePush = function (kind, payload) {
+  var data = {};
+  try { data = payload ? JSON.parse(payload) : {}; } catch (e) { data = {}; }
+  switch (kind) {
+    case "ready":
+      window.__bridgeReady = true;
+      clearTimeout(__warmTimer);
+      if (data.palette) { applyPalette(data.palette); }
+      break;
+    case "readyPalette": applyPalette(data); break;
+    case "agentsData": renderAgents(data); break;
+    case "status": setStatus(data.text || ""); break;
+  }
+};
+/* Announce the page: on some backends the host function only becomes
+   visible after the first real navigation, so the very first apiCall
+   deliberately takes the location channel once (a no-op), after which the
+   function channel is used. If the navigation side never served anything,
+   the next sync poll retries through the function. */
+window.__colleagueWarmed = false;
+var __warmTimer = setTimeout(function () {
+  if (!window.__bridgeReady) { apiCall("bridgeReady", {}); }
+}, 2500);
+window.addEventListener("load", function () {
+  apiCall("noop", {});
+  apiCall("bridgeReady", {});
+});
+if (document.readyState === "complete") {
+  apiCall("noop", {});
+  apiCall("bridgeReady", {});
+}
+</script>
+</body>
+</html>

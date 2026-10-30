@@ -113,4 +113,40 @@ class PageCatalogEventsTest {
         Assertions.assertEquals(1, contacts.size());
         Assertions.assertEquals("", contacts.get(0).getAsJsonObject().get("name").getAsString());
     }
+
+    @Test
+    @DisplayName("the agents page cards lead with the built-in and carry the model")
+    void agentCardsLeadWithBuiltInAndCarryModel() {
+        final JsonArray cards = PageCatalogEvents.agents(
+            List.of(new AgentProfile("analyst", "аналитик типовых решений", "system",
+                    "qwen3:8b", 0, AgentProfile.Mode.PRIMARY, Set.of(), false),
+                new AgentProfile("delegated", "sub-agent only", "system", null, 0,
+                    AgentProfile.Mode.SUBAGENT, Set.of(), false),
+                new AgentProfile("invisible", "not for the page", "system", null, 0,
+                    AgentProfile.Mode.ALL, Set.of(), true)));
+
+        Assertions.assertEquals(2, cards.size(),
+            "built-in plus only the profiles allowed to run as the chat itself");
+        final JsonObject builtIn = cards.get(0).getAsJsonObject();
+        Assertions.assertEquals("", builtIn.get("name").getAsString());
+        Assertions.assertEquals("Колега по умолчанию", builtIn.get("label").getAsString());
+        Assertions.assertTrue(builtIn.get("builtin").getAsBoolean());
+        Assertions.assertEquals("", builtIn.get("model").getAsString(),
+            "the built-in colleague follows whatever provider model is default");
+        final JsonObject analyst = cards.get(1).getAsJsonObject();
+        Assertions.assertEquals("analyst", analyst.get("name").getAsString());
+        Assertions.assertEquals("analyst", analyst.get("label").getAsString());
+        Assertions.assertEquals("аналитик типовых решений",
+            analyst.get("description").getAsString());
+        Assertions.assertEquals("qwen3:8b", analyst.get("model").getAsString());
+        Assertions.assertFalse(analyst.has("builtin"),
+            "only the built-in card marks itself as built-in");
+    }
+
+    @Test
+    @DisplayName("with no profiles at all the page still offers the built-in card")
+    void agentCardsAlwaysCarryTheBuiltIn() {
+        Assertions.assertEquals(1, PageCatalogEvents.agents(null).size());
+        Assertions.assertEquals(1, PageCatalogEvents.agents(List.of()).size());
+    }
 }
