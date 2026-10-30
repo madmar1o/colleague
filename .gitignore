@@ -23,3 +23,6 @@ Desktop.ini
 # Local secrets / env
 *.env
 local.properties
+
+# Tycho consumer pom written by tycho-packaging
+.tycho-consumer-pom.xml

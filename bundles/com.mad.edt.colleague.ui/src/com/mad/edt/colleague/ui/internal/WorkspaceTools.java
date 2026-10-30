@@ -28,6 +28,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mad.edt.colleague.agent.AgentMode;
+import com.mad.edt.colleague.agent.ChatMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
@@ -244,17 +245,17 @@ public final class WorkspaceTools {
         @Override
         public ToolSpec getSpec() {
             return new ToolSpec("write_file",
-                "Create a new workspace file with the given content. Only available in edit"
-                    + " mode; the user confirms every creation in a dialog. For changing an"
-                    + " existing file use edit_file instead.",
+                "Create a new workspace file with the given content. Only available in"
+                    + " execute mode; the user confirms every creation in a dialog. For"
+                    + " changing an existing file use edit_file instead.",
                 schema("path", "workspace-relative file path", "content",
                     "complete new file content"));
         }
 
         @Override
         public String execute(final String theArgumentsJson) throws Exception {
-            if(!AgentMode.isOn()) {
-                return "ERROR: edit mode is off, write_file is disabled";
+            if(AgentMode.current() != ChatMode.EXECUTE) {
+                return "ERROR: write_file is disabled outside the execute mode";
             }
             final String path = stringArg(theArgumentsJson, "path");
             final String content = stringArg(theArgumentsJson, "content");
@@ -309,7 +310,7 @@ public final class WorkspaceTools {
         public ToolSpec getSpec() {
             return new ToolSpec("edit_file",
                 "Change an existing workspace file with exact search/replace blocks. Only"
-                    + " available in edit mode; the user confirms the diff in a dialog."
+                    + " available in execute mode; the user confirms the diff in a dialog."
                     + " Every search fragment must occur EXACTLY ONCE in the current file"
                     + " content, copied verbatim from read_file output; blocks apply in"
                     + " order. Use an empty search to replace the whole file. Line endings"
@@ -319,8 +320,8 @@ public final class WorkspaceTools {
 
         @Override
         public String execute(final String theArgumentsJson) throws Exception {
-            if(!AgentMode.isOn()) {
-                return "ERROR: edit mode is off, edit_file is disabled";
+            if(AgentMode.current() != ChatMode.EXECUTE) {
+                return "ERROR: edit_file is disabled outside the execute mode";
             }
             final EditScript.ParseResult parsed = EditScript.parse(theArgumentsJson);
             if(!parsed.isOk()) {

@@ -44,6 +44,20 @@ header {
 }
 .iconbtn:hover { border-color: var(--accent); }
 .iconbtn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* Three-state chat mode control: ask / plan / execute. The picked segment
+   is filled, the others stay quiet; a click sends setMode to Java, and a
+   mode changed elsewhere (ESC gesture, another panel) arrives back as the
+   "mode" event that repaints this control. */
+.modeseg {
+  flex: none; display: flex; align-self: center;
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+}
+.modeseg button {
+  border: 0; background: var(--panel2); color: var(--muted);
+  font-size: 11px; padding: 4px 8px; cursor: pointer;
+}
+.modeseg button + button { border-left: 1px solid var(--line); }
+.modeseg button.sel { background: var(--accent); color: #fff; }
 .backbtn {
   flex: none; border: none; background: none; color: var(--text);
   font-size: 18px; line-height: 1; padding: 6px 8px; cursor: pointer;
@@ -238,7 +252,11 @@ button.scrollbottom:hover { border-color: var(--accent); }
     <div class="sub" id="hdrsub">ассистент по проекту</div>
   </div>
   <button class="iconbtn" id="btnprofile" title="Профиль агента: клик переключает следующий" hidden>профиль: обычный</button>
-  <button class="iconbtn" id="btnmode" title="Дважды ESC или клик — режим правки">&#9881; правка: выкл</button>
+  <div class="modeseg" id="modeseg" title="Режим ассистента: спросить - разговор без инструментов, план - чтение проекта и шаги без правок, исполнение - работа с правками по подтверждению">
+    <button type="button" data-mode="ask" title="Разговор без инструментов">Спросить</button>
+    <button type="button" data-mode="plan" title="Читаю проект и раскладываю шаги, файлы не меняю">План</button>
+    <button type="button" data-mode="execute" title="Агент меняет файлы по подтверждению">Исполнение</button>
+  </div>
   <button class="iconbtn" id="btnnew" title="Новый диалог">новый</button>
 </header>
 <main id="msgs">
@@ -346,7 +364,8 @@ var msgs = document.getElementById("msgs");
 var statusEl = document.getElementById("status");
 var qEl = document.getElementById("q");
 var sendEl = document.getElementById("btnsend");
-var modeEl = document.getElementById("btnmode");
+var modeSeg = document.getElementById("modeseg");
+var modeBtns = modeSeg.querySelectorAll("button");
 var pendingTools = null;
 
 function esc(s) {
@@ -759,9 +778,14 @@ function addSubagent(d) {
   msgs.appendChild(row); scrollDown();
 }
 function setStatus(s) { statusEl.textContent = s || ""; }
-function setMode(on) {
-  modeEl.classList.toggle("on", !!on);
-  modeEl.innerHTML = "&#9881; правка: " + (on ? "вкл" : "выкл");
+/* Paints the picked mode onto the segmented control. Accepts the mode name;
+   a legacy boolean still lands on execute/ask so an older push repaints
+   something sane rather than nothing. */
+function setMode(name) {
+  if (typeof name === "boolean") { name = name ? "execute" : "ask"; }
+  modeBtns.forEach(function (b) {
+    b.classList.toggle("sel", b.getAttribute("data-mode") === name);
+  });
 }
 function sendNow() {
   if (pageBusy) { apiCall("abort", {}); return; }
@@ -790,7 +814,11 @@ document.addEventListener("keydown", function (e) {
      toward the double-ESC edit-mode gesture */
   if (pageBusy) { apiCall("abort", {}); } else { apiCall("esc", {}); }
 });
-modeEl.addEventListener("click", function () { apiCall("toggleEdit", {}); });
+modeBtns.forEach(function (b) {
+  b.addEventListener("click", function () {
+    apiCall("setMode", { mode: b.getAttribute("data-mode") });
+  });
+});
 document.getElementById("btnnew").addEventListener("click", function () {
   apiCall("newChat", {});
 });
@@ -918,7 +946,7 @@ window.colleaguePush = function (kind, payload) {
       if (data.palette) { applyPalette(data.palette); }
       if (data.name) { document.getElementById("hdrname").textContent = data.name; }
       if (data.sub) { document.getElementById("hdrsub").textContent = data.sub; }
-      if (typeof data.mode === "boolean") { setMode(data.mode); }
+      if (data.mode) { setMode(data.mode); }
       break;
     case "readyPalette": applyPalette(data); break;
     case "history":
@@ -956,7 +984,7 @@ window.colleaguePush = function (kind, payload) {
     case "trace": openTrace(data); break;
     case "subagent": addSubagent(data); break;
     case "status": setStatus(data.text || ""); break;
-    case "mode": setMode(!!data.on); setStatus(data.text || ""); break;
+    case "mode": setMode(data.mode || (data.on ? "execute" : "ask")); setStatus(data.text || ""); break;
     case "busy":
       pageBusy = !!data.busy;
       sendEl.textContent = pageBusy ? "Стоп" : "Спросить";

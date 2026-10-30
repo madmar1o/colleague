@@ -74,6 +74,15 @@ public final class PageCommandHandler {
         void pickProfile(String theName);
 
         /**
+         * The page picked one of the three chat modes directly: plain
+         * question, planning pass or full execution.
+         *
+         * @param theName mode name on the page wire, unknown names settle on
+         *            the safest mode
+         */
+        void setMode(String theName);
+
+        /**
          * The page asked to pick an interrupted agent turn back up: the
          * carried conversation continues over the same history instead of a
          * fresh question.
@@ -143,6 +152,9 @@ public final class PageCommandHandler {
                 return;
             case "continueTurn":
                 actions.continueTurn();
+                return;
+            case "setMode":
+                actions.setMode(argument(theArgument, "mode"));
                 return;
             default:
                 return;

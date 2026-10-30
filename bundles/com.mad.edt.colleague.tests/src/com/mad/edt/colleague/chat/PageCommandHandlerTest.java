@@ -89,6 +89,11 @@ class PageCommandHandlerTest {
         public void continueTurn() {
             calls.add("continueTurn");
         }
+
+        @Override
+        public void setMode(final String theName) {
+            calls.add("setMode|" + theName);
+        }
     }
 
     /** page arguments as name-value pairs, missing name arrives as null */
@@ -173,6 +178,16 @@ class PageCommandHandlerTest {
         final PageCommandHandler handler = handlerWith(actions);
         handler.handle("continueTurn", args());
         assertEquals(List.of("continueTurn"), actions.calls);
+    }
+
+    @Test
+    void modeSegmentCarriesTheModeNameToThePanel() {
+        final RecordingActions actions = new RecordingActions();
+        final PageCommandHandler handler = handlerWith(actions);
+        handler.handle("setMode", args("mode", "plan"));
+        handler.handle("setMode", args());
+        assertEquals(List.of("setMode|plan", "setMode|"), actions.calls,
+            "the page sends the mode name, a missing one arrives empty");
     }
 
     @Test
