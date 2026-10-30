@@ -67,9 +67,13 @@ final class BridgeBrowser {
         final BiConsumer<String, JsonObject> theHandler) {
         ourHandler = theHandler;
         ourBrowser = new Browser(theParent, SWT.NONE);
+        final UiTicks ticks = new UiTicks(
+            () -> ourBrowser.getDisplay().getThread() == Thread.currentThread(),
+            task -> ourBrowser.getDisplay().asyncExec(task),
+            task -> ourBrowser.getDisplay().timerExec(0, task));
         ourDelivery = new BridgePushDelivery(
             script -> () -> executePush(script),
-            tick -> ourBrowser.getDisplay().timerExec(0, tick));
+            ticks::tick);
         ourBrowser.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
         ourBrowser.addLocationListener(new LocationListener() {
             @Override
