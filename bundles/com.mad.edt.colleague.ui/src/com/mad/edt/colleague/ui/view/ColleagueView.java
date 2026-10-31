@@ -1047,11 +1047,38 @@ public class ColleagueView extends ViewPart {
         if(!Boolean.getBoolean("colleague.debug.autochat")) {
             return;
         }
-        ourRoot.getDisplay().timerExec(3_000, () -> {
-            if(ourRoot != null && !ourRoot.isDisposed()) {
-                openAgent("");
-                System.err.println("[colleague] auto chat opened (debug)");
+        scheduleAutoChat(0);
+    }
+
+    /**
+     * Waits for the provider probe to name a provider and model pair, then
+     * opens the debug chat tab. The pair only exists once the startup probe has
+     * talked to an endpoint, so opening right away would land on the settings
+     * page instead of a chat; the seam says what it is waiting for rather than
+     * reporting a chat that never appeared.
+     *
+     * @param theAttempt attempts already made, capped so a dead endpoint cannot
+     *            keep the display timer alive forever
+     */
+    private void scheduleAutoChat(final int theAttempt) {
+        ourRoot.getDisplay().timerExec(theAttempt == 0 ? 3_000 : 2_000, () -> {
+            if(ourRoot == null || ourRoot.isDisposed()) {
+                return;
             }
+            if(ourDefaultContactCache == null) {
+                if(theAttempt >= 20) {
+                    System.err.println("[colleague] auto chat gave up: no provider answered"
+                        + " the probe, nothing to open");
+                    return;
+                }
+                System.err.println("[colleague] auto chat waiting for a provider probe ("
+                    + (theAttempt + 1) + ")");
+                scheduleAutoChat(theAttempt + 1);
+                return;
+            }
+            openAgent("");
+            System.err.println("[colleague] auto chat opened (debug), provider "
+                + ourDefaultContactCache.getProviderId());
         });
     }
 

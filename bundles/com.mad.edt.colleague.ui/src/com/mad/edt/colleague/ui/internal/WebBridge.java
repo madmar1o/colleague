@@ -300,6 +300,11 @@ public final class WebBridge implements PageTransport {
         final BiConsumer<String, JsonObject> sink = ourPageCallSink;
         if(sink != null) {
             sink.accept(name, arguments);
+        } else {
+            // the page is open but no chat tab has attached to this bridge yet:
+            // saying so beats dropping a call without a trace
+            System.out.println("[colleague] web bridge dropped page call '" + name
+                + "': no chat tab attached");
         }
         // any event the panel produced while taking the call leaves with the
         // reply, the same way the embedded bridge answers a page call
