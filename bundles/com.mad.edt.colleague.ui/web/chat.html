@@ -277,6 +277,7 @@ button.scrollbottom:hover { border-color: var(--accent); }
 <div id="chatcol">
 <header>
   <button class="backbtn" id="btnback" title="К списку контактов">&#8592;</button>
+  <button class="iconbtn" id="btnrail" title="Показать или скрыть список коллег" hidden>Коллеги</button>
   <div class="avatar bot" id="hdravatar">C</div>
   <div class="hdr">
     <div class="name" id="hdrname">Colleague</div>
@@ -936,8 +937,19 @@ profileEl.addEventListener("click", function () {
    separate histories per contact are a later task. The rail only shows
    when there is a real choice; the header keeps naming who is answering. */
 var railEl = document.getElementById("rail");
+var railBtn = document.getElementById("btnrail");
 var contactList = [];
 var contactIdx = 0;
+/* The rail starts closed: the colleague was already picked on the agents
+   page before this chat opened, so the list folds away right away. The
+   header button brings it back whenever the user wants to switch, and a
+   pick there closes it again. */
+var railOpen = false;
+function applyRail() {
+  var hasChoice = contactList.length >= 2;
+  railBtn.hidden = !hasChoice;
+  railEl.classList.toggle("show", railOpen && hasChoice);
+}
 function paintRail() {
   railEl.innerHTML = "";
   var title = document.createElement("div");
@@ -964,9 +976,8 @@ function paintRail() {
 function setContacts(list) {
   contactList = list || [];
   if (contactIdx >= contactList.length) { contactIdx = 0; }
-  if (contactList.length < 2) { railEl.classList.remove("show"); return; }
-  railEl.classList.add("show");
   paintRail();
+  applyRail();
 }
 function pickContact(idx) {
   contactIdx = idx;
@@ -978,8 +989,16 @@ function pickContact(idx) {
   paintProfileChip();
   paintRail();
   paintHeaderContact(c);
+  // the pick is made: fold the list away so the chat gets the whole width,
+  // the header button opens it again for the next switch
+  railOpen = false;
+  applyRail();
   apiCall("pickProfile", { name: c.name || "" });
 }
+railBtn.addEventListener("click", function () {
+  railOpen = !railOpen;
+  applyRail();
+});
 /* the chip walked to another profile: move the rail highlight and the
    header name along, so the header always says who is answering */
 function syncContactFromChip() {
