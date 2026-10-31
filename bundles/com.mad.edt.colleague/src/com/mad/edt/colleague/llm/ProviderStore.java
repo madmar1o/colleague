@@ -24,9 +24,91 @@ public final class ProviderStore {
     private static final String KEY_PROVIDERS = "providers.json";
     private static final String KEY_DEFAULT = "default-provider";
 
+    /**
+     * Start-up flag naming which registered provider this session talks to.
+     * The plug-in never decides the model runtime itself: the flag is how a
+     * person (or a verification run) says so without editing the stored
+     * settings, and the choice is dropped when the session ends.
+     */
+    private static final String PROVIDER_OVERRIDE_PROPERTY = "colleague.provider";
+
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private static boolean ourLoaded;
+
+    /** What the workspace stored and what this session actually runs on. */
+    private static SessionDefaults ourDefaults = new SessionDefaults("", "");
+
+    /**
+     * Which provider a start-up flag asks for, out of the ones the workspace
+     * actually has.
+     *
+     * @param theFlagValue flag value, may be {@code null} or blank
+     * @param theKnownIds provider ids the workspace has registered
+     * @return the provider to use for this session, empty when the flag names
+     *         nothing registered - a typo must not invent an endpoint
+     */
+    public static String sessionOverrideId(final String theFlagValue,
+        final List<String> theKnownIds) {
+        if(theFlagValue == null) {
+            return "";
+        }
+        final String wanted = theFlagValue.trim();
+        if(wanted.isEmpty()) {
+            return "";
+        }
+        return theKnownIds != null && theKnownIds.contains(wanted) ? wanted : "";
+    }
+
+    /**
+     * The two provider ids of one session: what the run talks to, and what may
+     * be written back to the workspace settings.
+     */
+    public static final class SessionDefaults {
+
+        private final String ourStored;
+        private final String ourOverride;
+
+        /**
+         * @param theStored default provider the workspace has stored
+         * @param theOverride provider this session was told to use, empty when
+         *            no flag asked for one
+         */
+        public SessionDefaults(final String theStored, final String theOverride) {
+            ourStored = theStored == null ? "" : theStored;
+            ourOverride = theOverride == null ? "" : theOverride;
+        }
+
+        /** @return the provider this session talks to */
+        public String forThisSession() {
+            return ourOverride.isEmpty() ? ourStored : ourOverride;
+        }
+
+        /**
+         * @return the provider to keep in the settings: a session override is
+         *         not a user decision, so the stored choice survives it
+         */
+        public String toStore() {
+            return ourOverride.isEmpty() ? forThisSession() : ourStored;
+        }
+
+        /**
+         * Decides what the workspace settings should carry once the session
+         * saves its providers.
+         *
+         * @param theCurrentDefault provider the session runs on right now,
+         *            which the settings page may have moved on its own
+         * @return the provider to store: the current one, except when the
+         *         current one is only the session flag still in force
+         */
+        public String toStoreFor(final String theCurrentDefault) {
+            final String current = theCurrentDefault == null ? "" : theCurrentDefault;
+            if(!ourOverride.isEmpty() && ourOverride.equals(current)) {
+                return ourStored;
+            }
+            return current;
+        }
+    }
 
     private ProviderStore() {
         // utility
@@ -43,23 +125,34 @@ public final class ProviderStore {
         ourLoaded = true;
         final Preferences preferences = node();
         final String storedDefault = preferences.get(KEY_DEFAULT, "");
-        if(!storedDefault.isEmpty()) {
-            LLMSettings.setDefaultProviderId(storedDefault);
-        }
         final String json = preferences.get(KEY_PROVIDERS, "");
-        if(json.isEmpty()) {
-            return;
-        }
-        try {
-            final Map<String, ProviderConfig> stored =
-                ProviderDocument.fromJson(GSON.fromJson(json, JsonArray.class));
-            for(final ProviderConfig config : stored.values()) {
-                // a stored entry wins over the built-in defaults: the user
-                // may have moved the local runtime or picked another model
-                LLMSettings.register(config);
+        if(!json.isEmpty()) {
+            try {
+                final Map<String, ProviderConfig> stored =
+                    ProviderDocument.fromJson(GSON.fromJson(json, JsonArray.class));
+                for(final ProviderConfig config : stored.values()) {
+                    // a stored entry wins over the built-in defaults: the user
+                    // may have moved the local runtime or picked another model
+                    LLMSettings.register(config);
+                }
+            } catch (final RuntimeException ex) {
+                // corrupt preferences must not break startup; keep built-ins only
             }
-        } catch (final RuntimeException ex) {
-            // corrupt preferences must not break startup; keep built-ins only
+        }
+        // the flag is read after registration on purpose: it can only name a
+        // provider the workspace really has
+        final String override = sessionOverrideId(
+            System.getProperty(PROVIDER_OVERRIDE_PROPERTY, ""), LLMSettings.getProviderIds());
+        if(!override.isEmpty() && !override.equals(storedDefault)) {
+            System.out.println("[colleague] provider this session: " + override
+                + " (flag " + PROVIDER_OVERRIDE_PROPERTY + ", stored choice kept)");
+        } else if(!System.getProperty(PROVIDER_OVERRIDE_PROPERTY, "").trim().isEmpty()) {
+            System.out.println("[colleague] flag " + PROVIDER_OVERRIDE_PROPERTY + " names no"
+                + " registered provider, keeping " + storedDefault);
+        }
+        ourDefaults = new SessionDefaults(storedDefault, override);
+        if(!ourDefaults.forThisSession().isEmpty()) {
+            LLMSettings.setDefaultProviderId(ourDefaults.forThisSession());
         }
     }
 
@@ -78,7 +171,10 @@ public final class ProviderStore {
         }
         final Preferences preferences = node();
         preferences.put(KEY_PROVIDERS, GSON.toJson(ProviderDocument.toJson(registered)));
-        preferences.put(KEY_DEFAULT, LLMSettings.getDefaultProviderId());
+        // a session flag is not a user decision: whatever the run talked to,
+        // the workspace keeps the provider its owner had picked
+        preferences.put(KEY_DEFAULT,
+            ourDefaults.toStoreFor(LLMSettings.getDefaultProviderId()));
         try {
             preferences.flush();
         } catch (final BackingStoreException ex) {
