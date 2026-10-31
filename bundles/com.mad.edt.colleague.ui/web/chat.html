@@ -73,20 +73,10 @@ header {
 }
 .iconbtn:hover { border-color: var(--accent); }
 .iconbtn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-/* Three-state chat mode control: ask / plan / execute. The picked segment
-   is filled, the others stay quiet; a click sends setMode to Java, and a
-   mode changed elsewhere (ESC gesture, another panel) arrives back as the
-   "mode" event that repaints this control. */
-.modeseg {
-  flex: none; display: flex; align-self: center;
-  border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
-}
-.modeseg button {
-  border: 0; background: var(--panel2); color: var(--muted);
-  font-size: 11px; padding: 4px 8px; cursor: pointer;
-}
-.modeseg button + button { border-left: 1px solid var(--line); }
-.modeseg button.sel { background: var(--accent); color: #fff; }
+/* The chat mode (ask / plan / execute) has no control of its own: the send
+   button of the composer carries the mode name, Shift+Tab walks it forward,
+   and a mode changed elsewhere (ESC gesture, another panel) arrives back as
+   the "mode" event that repaints the button. */
 .backbtn {
   flex: none; border: none; background: none; color: var(--text);
   font-size: 18px; line-height: 1; padding: 6px 8px; cursor: pointer;
@@ -283,14 +273,8 @@ button.scrollbottom:hover { border-color: var(--accent); }
     <div class="name" id="hdrname">Colleague</div>
     <div class="sub" id="hdrsub">ассистент по проекту</div>
   </div>
-  <button class="iconbtn" id="btnprofile" title="Профиль агента: клик переключает следующий" hidden>профиль: обычный</button>
-  <div class="modeseg" id="modeseg" title="Режим ассистента: спросить - разговор без инструментов, план - чтение проекта и шаги без правок, исполнение - работа с правками по подтверждению">
-    <button type="button" data-mode="ask" title="Разговор без инструментов">Спросить</button>
-    <button type="button" data-mode="plan" title="Читаю проект и раскладываю шаги, файлы не меняю">План</button>
-    <button type="button" data-mode="execute" title="Агент меняет файлы по подтверждению">Исполнение</button>
-  </div>
+  <button class="iconbtn" id="btnnew" title="Новый диалог">новый чат</button>
   <button class="iconbtn" id="btngear" title="Настройки провайдеров и моделей">&#9881;</button>
-  <button class="iconbtn" id="btnnew" title="Новый диалог">новый</button>
 </header>
 <main id="msgs">
   <div class="welcome" id="welcome">
@@ -309,7 +293,7 @@ button.scrollbottom:hover { border-color: var(--accent); }
   <textarea id="q" placeholder="Спросите о проекте… (Ctrl+Enter — отправить)"></textarea>
   <button class="send" id="btnsend" type="submit">Спросить</button>
 </form>
-<div class="hint">Ctrl+Enter — отправить · Ctrl+V с картинкой — приложить файл · два ESC — режим исполнения</div>
+<div class="hint">Ctrl+Enter — отправить · Shift+Tab — режим кнопки отправки (спросить / план / исполнение) · Ctrl+V с картинкой — приложить файл · два ESC — режим исполнения</div>
 </div>
 <script>
 "use strict";
@@ -399,8 +383,6 @@ var msgs = document.getElementById("msgs");
 var statusEl = document.getElementById("status");
 var qEl = document.getElementById("q");
 var sendEl = document.getElementById("btnsend");
-var modeSeg = document.getElementById("modeseg");
-var modeBtns = modeSeg.querySelectorAll("button");
 var pendingTools = null;
 
 function esc(s) {
@@ -813,14 +795,28 @@ function addSubagent(d) {
   msgs.appendChild(row); scrollDown();
 }
 function setStatus(s) { statusEl.textContent = s || ""; }
-/* Paints the picked mode onto the segmented control. Accepts the mode name;
-   a legacy boolean still lands on execute/ask so an older push repaints
-   something sane rather than nothing. */
+/* The composer's send button is the mode control: its label names the mode
+   the next question runs in. Shift+Tab in the input walks ask -> plan ->
+   execute -> ask; a mode set elsewhere (ESC gesture, another panel) arrives
+   back as the "mode" event and repaints the label. A legacy boolean still
+   lands on execute/ask so an older push repaints something sane. */
+var modeOrder = ["ask", "plan", "execute"];
+var modeLabels = { ask: "Спросить", plan: "План", execute: "Исполнение" };
+var modeTitles = {
+  ask: "Разговор без инструментов",
+  plan: "Читаю проект и раскладываю шаги, файлы не меняю",
+  execute: "Агент меняет файлы по подтверждению"
+};
+var curMode = "ask";
+function paintSendLabel() {
+  if (pageBusy) { return; } // the stop label belongs to a running answer
+  sendEl.textContent = modeLabels[curMode];
+  sendEl.title = modeTitles[curMode] + " · Shift+Tab меняет режим";
+}
 function setMode(name) {
   if (typeof name === "boolean") { name = name ? "execute" : "ask"; }
-  modeBtns.forEach(function (b) {
-    b.classList.toggle("sel", b.getAttribute("data-mode") === name);
-  });
+  if (modeOrder.indexOf(name) >= 0) { curMode = name; }
+  paintSendLabel();
 }
 function sendNow() {
   if (pageBusy) { apiCall("abort", {}); return; }
@@ -833,7 +829,15 @@ document.getElementById("composer").addEventListener("submit", function (e) {
   e.preventDefault(); sendNow();
 });
 qEl.addEventListener("keydown", function (e) {
-  if (e.ctrlKey && (e.key === "Enter")) { e.preventDefault(); sendNow(); }
+  if (e.ctrlKey && (e.key === "Enter")) { e.preventDefault(); sendNow(); return; }
+  /* Shift+Tab is the mode switch: the send button under the caret carries
+     the mode name, so the control to change it sits right where the user
+     already is. Java answers with the "mode" event that repaints it. */
+  if (e.key === "Tab" && e.shiftKey) {
+    e.preventDefault();
+    var next = modeOrder[(modeOrder.indexOf(curMode) + 1) % modeOrder.length];
+    apiCall("setMode", { mode: next });
+  }
 });
 /* If a workbench focus change ever takes the caret out of the composer,
    the next typed character brings it back instead of going nowhere. */
@@ -848,11 +852,6 @@ document.addEventListener("keydown", function (e) {
   /* while an answer streams, Esc is the stop key: it must never count
      toward the double-ESC edit-mode gesture */
   if (pageBusy) { apiCall("abort", {}); } else { apiCall("esc", {}); }
-});
-modeBtns.forEach(function (b) {
-  b.addEventListener("click", function () {
-    apiCall("setMode", { mode: b.getAttribute("data-mode") });
-  });
 });
 document.getElementById("btnnew").addEventListener("click", function () {
   apiCall("newChat", {});
@@ -908,29 +907,17 @@ function renderSlashHints() {
   slashEl.classList.add("show");
 }
 qEl.addEventListener("input", renderSlashHints);
-/* Profile chip: one click walks the list default -> first profile -> next ->
-   back to default. The picked name travels to Java, which applies that
-   profile's tool policy and step budget to the next edit-mode question. */
+/* Profile names arrive with the catalog: the contacts rail is the only
+   picker now (the header chip is gone), and a rail pick maps the contact
+   onto its profile index so the two stay in step. The picked name travels
+   to Java, which applies that profile's tool policy and step budget to the
+   next edit-mode question. */
 var profileNames = [];
 var profileIdx = -1;
-var profileEl = document.getElementById("btnprofile");
-function paintProfileChip() {
-  if (!profileNames.length) { profileEl.hidden = true; return; }
-  profileEl.hidden = false;
-  profileEl.textContent = "профиль: "
-    + (profileIdx < 0 ? "обычный" : profileNames[profileIdx]);
-}
 function setProfiles(list) {
   profileNames = (list || []).map(function (p) { return p.name; });
   if (profileIdx >= profileNames.length) { profileIdx = -1; }
-  paintProfileChip();
 }
-profileEl.addEventListener("click", function () {
-  profileIdx = profileIdx + 1 >= profileNames.length ? -1 : profileIdx + 1;
-  paintProfileChip();
-  syncContactFromChip();
-  apiCall("pickProfile", { name: profileIdx < 0 ? "" : profileNames[profileIdx] });
-});
 /* Contacts rail: the catalog delivers the agents the chat can run as, the
    built-in colleague first. Picking one is the same pickProfile call the
    chip makes, so the conversation simply continues under that profile -
@@ -986,7 +973,6 @@ function pickContact(idx) {
   for (var i = 0; i < profileNames.length; i++) {
     if (profileNames[i] === c.name) { profileIdx = i; break; }
   }
-  paintProfileChip();
   paintRail();
   paintHeaderContact(c);
   // the pick is made: fold the list away so the chat gets the whole width,
@@ -999,17 +985,6 @@ railBtn.addEventListener("click", function () {
   railOpen = !railOpen;
   applyRail();
 });
-/* the chip walked to another profile: move the rail highlight and the
-   header name along, so the header always says who is answering */
-function syncContactFromChip() {
-  var name = profileIdx < 0 ? "" : profileNames[profileIdx];
-  var cur = null;
-  for (var i = 0; i < contactList.length; i++) {
-    if ((contactList[i].name || "") === name) { contactIdx = i; cur = contactList[i]; break; }
-  }
-  if (contactList.length > 1) { paintRail(); }
-  paintHeaderContact(cur);
-}
 function paintHeaderContact(c) {
   document.getElementById("hdrname").textContent =
     c && c.name ? (c.label || c.name) : "Colleague";
@@ -1109,8 +1084,9 @@ window.colleaguePush = function (kind, payload) {
     case "mode": setMode(data.mode || (data.on ? "execute" : "ask")); setStatus(data.text || ""); break;
     case "busy":
       pageBusy = !!data.busy;
-      sendEl.textContent = pageBusy ? "Стоп" : "Спросить";
+      sendEl.textContent = pageBusy ? "Стоп" : modeLabels[curMode];
       sendEl.classList.toggle("stop", pageBusy);
+      if (!pageBusy) { paintSendLabel(); }
       setStatus(data.text || "");
       if (data.busy) { keptStream = null; endTrace(); showTyping(); } else { hideTyping(); endStream(true); endThinking(); }
       break;
