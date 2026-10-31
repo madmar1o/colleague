@@ -227,7 +227,8 @@ public class ColleagueView extends ViewPart {
         ourContactsArea = new Composite(ourMobileStack, SWT.NONE);
         ourContactsArea.setLayout(new FillLayout());
         ourContacts = new ContactsPanel(ourContactsArea, this::openContact,
-            this::onContactsLoaded, this::onProvidersChanged);
+            this::onContactsLoaded, this::onProvidersChanged,
+            () -> showMobilePage(ourAgentsArea, "back from providers", ""));
 
         ourTabsArea = new Composite(ourMobileStack, SWT.NONE);
         ourTabsArea.setLayout(new FillLayout());

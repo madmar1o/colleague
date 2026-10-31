@@ -113,6 +113,7 @@ public final class ContactsPanel {
     private final Consumer<Contact> ourOnContactSelected;
     private final Consumer<List<Contact>> ourOnLoaded;
     private final Runnable ourOnProvidersChanged;
+    private final Runnable ourOnGoBack;
 
     private Composite ourRoot;
     private BridgeBrowser ourBridge;
@@ -130,12 +131,16 @@ public final class ContactsPanel {
      * @param theOnProvidersChanged invoked on the UI thread after the saved
      *            provider list moved (saved, corrected or removed), so the
      *            view can retire conversations built on the old configuration
+     * @param theOnGoBack invoked on the UI thread when the page asks to leave
+     *            the providers list, the way back to the agents page
      */
     public ContactsPanel(final Composite theParent, final Consumer<Contact> theOnContactSelected,
-        final Consumer<List<Contact>> theOnLoaded, final Runnable theOnProvidersChanged) {
+        final Consumer<List<Contact>> theOnLoaded, final Runnable theOnProvidersChanged,
+        final Runnable theOnGoBack) {
         ourOnContactSelected = theOnContactSelected;
         ourOnLoaded = theOnLoaded;
         ourOnProvidersChanged = theOnProvidersChanged;
+        ourOnGoBack = theOnGoBack;
         createControls(theParent);
     }
 
@@ -267,10 +272,19 @@ public final class ContactsPanel {
             case "refresh":
                 reload();
                 return;
-            // no openContact case on purpose: the browser page is settings
-            // only now, chats open from the agents page. The constructor's
-            // selection callback stays for the SWT fallback tree, the entry
-            // into a chat on workbenches without a browser backend.
+            case "openContact": {
+                // a model chip on the providers page: tapping it opens a chat on
+                // that provider and model, the same entry the SWT fallback tree
+                // gives with its selection
+                final Contact picked = contactFromArgs(theArguments);
+                if(picked != null) {
+                    ourOnContactSelected.accept(picked);
+                }
+                return;
+            }
+            case "goBack":
+                ourOnGoBack.run();
+                return;
             case "loadSettings":
                 pushSettings();
                 return;
@@ -303,6 +317,24 @@ public final class ContactsPanel {
             default:
                 return;
         }
+    }
+
+    /**
+     * Reads a model-chip tap of the providers page into a contact. Both halves
+     * of the pair must be named: a chat on an empty provider or model name
+     * would only fail at the endpoint and leave a tab named after nothing.
+     *
+     * @param theArguments page call arguments, the provider under {@code id}
+     *            and the model under {@code model}
+     * @return the contact to open, {@code null} when the call is incomplete
+     */
+    static Contact contactFromArgs(final JsonObject theArguments) {
+        final String providerId = BridgeBrowser.optString(theArguments, "id");
+        final String model = BridgeBrowser.optString(theArguments, "model");
+        if(providerId.isEmpty() || model.isEmpty()) {
+            return null;
+        }
+        return new Contact(providerId, model, "");
     }
 
     private void removeProvider(final String theId) {
