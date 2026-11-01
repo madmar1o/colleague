@@ -263,6 +263,22 @@ public final class Conversation {
     }
 
     /**
+     * Seeds the memory from a transcript restored after a restart: whatever
+     * this conversation held is replaced by the stored dialog, oldest first.
+     * The cap on replayed history is not applied here - trimming would fold
+     * away exactly the restored turns the user expects to continue from;
+     * the next finished exchange trims as usual.
+     *
+     * @param theMessages stored dialog to continue from, may be empty
+     */
+    public void restoreHistory(final List<ChatMessage> theMessages) {
+        history.clear();
+        if(theMessages != null) {
+            history.addAll(theMessages);
+        }
+    }
+
+    /**
      * Reasoning-capable models produce their chain of thought in a separate
      * stream field; the assistant history keeps only the final answer, so the
      * reasoning pass is requested and shown to the user collapsed apart from

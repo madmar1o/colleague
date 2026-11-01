@@ -143,4 +143,14 @@ public final class ChatSession {
     public List<ChatMessage> snapshotHistory() {
         return conversation.snapshotHistory();
     }
+
+    /**
+     * Seeds the conversation from a transcript stored by an earlier workbench
+     * session, so a reopened tab continues where its dialog left off.
+     *
+     * @param theMessages stored dialog oldest first, may be empty
+     */
+    public void restoreHistory(final List<ChatMessage> theMessages) {
+        conversation.restoreHistory(theMessages);
+    }
 }
