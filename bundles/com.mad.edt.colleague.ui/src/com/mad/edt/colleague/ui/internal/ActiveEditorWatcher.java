@@ -2,9 +2,15 @@ package com.mad.edt.colleague.ui.internal;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IResource;
+import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.Path;
+import org.eclipse.emf.ecore.EObject;
+import org.eclipse.emf.ecore.resource.Resource;
 import org.eclipse.jface.text.ITextViewer;
 import org.eclipse.jface.text.TextViewer;
+import org.eclipse.jface.text.TextSelection;
+import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.ISelectionProvider;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.IEditorPart;
@@ -16,6 +22,7 @@ import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.IPartListener2;
 import org.eclipse.ui.texteditor.ITextEditor;
 import org.eclipse.ui.texteditor.IDocumentProvider;
+import org.eclipse.xtext.ui.editor.XtextEditor;
 
 import com.mad.edt.colleague.chat.ActiveEditorContext;
 import com.mad.edt.colleague.context.ProjectContext;
@@ -39,12 +46,31 @@ public final class ActiveEditorWatcher {
         if(thePage == null) {
             return;
         }
+        System.err.println("[colleague] ActiveEditorWatcher: attach called");
         thePage.addPartListener(new PartTracker());
         // also capture the currently active editor, in case the view opened
         // after the editor was already active
         final IEditorPart active = thePage.getActiveEditor();
-        if(active instanceof ITextEditor) {
-            snapshot((ITextEditor)active);
+        if(active != null) {
+            System.err.println("[colleague] ActiveEditorWatcher: initial active editorClass=" + active.getClass().getName());
+            // Try XtextEditor first (1C EDT editors are Xtext-based)
+            final XtextEditor xtextEditor = active.getAdapter(XtextEditor.class);
+            System.err.println("[colleague] ActiveEditorWatcher: XtextEditor adapter=" + xtextEditor);
+            if(xtextEditor != null) {
+                snapshotXtext(xtextEditor);
+                return;
+            }
+            if(active instanceof ITextEditor) {
+                snapshot((ITextEditor)active);
+            } else {
+                final ITextEditor adapted = active.getAdapter(ITextEditor.class);
+                System.err.println("[colleague] ActiveEditorWatcher: ITextEditor adapter=" + adapted);
+                if(adapted != null) {
+                    snapshot(adapted);
+                } else {
+                    snapshotGeneric(active);
+                }
+            }
         }
     }
 
@@ -67,6 +93,49 @@ public final class ActiveEditorWatcher {
         final String text = documentText(theEditor);
         ourContext.show(path, caretLine, text);
     }
+
+    /**
+     * Snapshot using XtextEditor (1C EDT editors are Xtext-based).
+     */
+    private void snapshotXtext(final XtextEditor theEditor) {
+        final IFile file = editorFile(theEditor);
+        if(file == null) {
+            ourContext.clear();
+            return;
+        }
+        final String path = file.getProjectRelativePath().toPortableString();
+        
+        // Get document text via ITextViewer adapter (XtextEditor provides this)
+        String text = "";
+        final ITextViewer viewer = theEditor.getAdapter(ITextViewer.class);
+        if(viewer != null && viewer.getDocument() != null) {
+            text = viewer.getDocument().get();
+        }
+        if(text.isEmpty()) {
+            text = documentText(theEditor);
+        }
+        
+        // Get caret/selection line
+        int caretLine = 1;
+        if(viewer != null) {
+            final org.eclipse.swt.custom.StyledText textWidget = viewer.getTextWidget();
+            if(textWidget != null) {
+                caretLine = textWidget.getLineAtOffset(textWidget.getCaretOffset()) + 1;
+            }
+        }
+        // Also try selection provider for selection range
+        final ISelectionProvider selProvider = theEditor.getAdapter(ISelectionProvider.class);
+        if(selProvider != null) {
+            final org.eclipse.jface.viewers.ISelection sel = selProvider.getSelection();
+            if(sel instanceof org.eclipse.jface.text.TextSelection) {
+                caretLine = ((org.eclipse.jface.text.TextSelection)sel).getStartLine() + 1;
+            }
+        }
+        
+        ourContext.show(path, caretLine, text);
+    }
+
+    
 
     private static IFile editorFile(final ITextEditor theEditor) {
         final IEditorPart editor = theEditor.getAdapter(IEditorPart.class);
@@ -102,60 +171,132 @@ public final class ActiveEditorWatcher {
     }
 
     /**
-     * Tries to extract text and caret position from a non-ITextEditor editor
-     * using common adapter patterns.
+     * Tries to extract text and caret/selection position from a non-ITextEditor editor
+     * using common adapter patterns and 1C-specific input methods.
      */
     private void snapshotGeneric(final IEditorPart theEditor) {
         // Try to get IFile from editor input
         final IEditorInput input = theEditor.getEditorInput();
-        if(input == null) {
+        if (input == null) {
+            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric - no editor input");
             ourContext.clear();
             return;
         }
-        final IFile file = input.getAdapter(IFile.class);
-        if(file == null) {
+        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric inputClass=" + input.getClass().getName());
+
+        // Try DtEditorProxyInput (1C-specific) to get the real file
+        final IFile file = getFileFrom1cInput(input);
+        if (file == null) {
+            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric - input doesn't adapt to IFile");
             ourContext.clear();
             return;
         }
         final String path = file.getProjectRelativePath().toPortableString();
+        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric path=" + path);
 
         // Try to get document via IDocumentProvider adapter
         final IDocumentProvider provider = theEditor.getAdapter(IDocumentProvider.class);
-        if(provider == null) {
+        if (provider == null) {
+            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric - editor doesn't adapt to IDocumentProvider");
             ourContext.clear();
             return;
         }
+        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric providerClass=" + provider.getClass().getName());
         try {
             final org.eclipse.jface.text.IDocument doc = provider.getDocument(input);
-            if(doc == null) {
+            if (doc == null) {
+                System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric - provider returned null document");
                 ourContext.clear();
                 return;
             }
             final String text = doc.get();
-            
-            // Try to get caret line via ITextViewer or ISelectionProvider
+            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric docLength=" + text.length());
+
+            // Try to get caret/selection line via editor input's getSelection() (1C-specific)
             int caretLine = 1;
-            final ITextViewer viewer = theEditor.getAdapter(ITextViewer.class);
-            if(viewer != null) {
-                final org.eclipse.swt.custom.StyledText textWidget = viewer.getTextWidget();
-                if(textWidget != null) {
-                    caretLine = textWidget.getLineAtOffset(textWidget.getCaretOffset()) + 1;
+            try {
+                final java.lang.reflect.Method getSelection = input.getClass().getMethod("getSelection");
+                final Object sel = getSelection.invoke(input);
+                if (sel instanceof ISelection) {
+                    System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric has ISelection from input");
+                    if (sel instanceof TextSelection) {
+                        final TextSelection textSel = (TextSelection) sel;
+                        caretLine = textSel.getStartLine() + 1;
+                        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from input TextSelection=" + caretLine);
+                    }
                 }
-            } else {
-                // Try selection provider
-                final ISelectionProvider selProvider = theEditor.getAdapter(ISelectionProvider.class);
-                if(selProvider != null) {
-                    final org.eclipse.jface.viewers.ISelection sel = selProvider.getSelection();
-                    if(sel instanceof org.eclipse.jface.text.TextSelection) {
-                        caretLine = ((org.eclipse.jface.text.TextSelection)sel).getStartLine() + 1;
+            } catch (final Exception ignored) {
+                // not a 1C input with getSelection()
+            }
+
+            // Fallback: Try to get caret line via ITextViewer or ISelectionProvider on editor
+            if (caretLine == 1) {
+                final ITextViewer viewer = theEditor.getAdapter(ITextViewer.class);
+                if (viewer != null) {
+                    System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric has ITextViewer");
+                    final org.eclipse.swt.custom.StyledText textWidget = viewer.getTextWidget();
+                    if (textWidget != null) {
+                        caretLine = textWidget.getLineAtOffset(textWidget.getCaretOffset()) + 1;
+                        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from StyledText=" + caretLine);
+                    }
+                } else {
+                    System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric no ITextViewer, trying ISelectionProvider");
+                    // Try selection provider
+                    final ISelectionProvider selProvider = theEditor.getAdapter(ISelectionProvider.class);
+                    if (selProvider != null) {
+                        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric has ISelectionProvider");
+                        final ISelection sel = selProvider.getSelection();
+                        if (sel instanceof TextSelection) {
+                            caretLine = ((TextSelection) sel).getStartLine() + 1;
+                            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from TextSelection=" + caretLine);
+                        } else {
+                            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric selection is not TextSelection: " + sel);
+                        }
+                    } else {
+                        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric no ISelectionProvider");
                     }
                 }
             }
-            
+
             ourContext.show(path, caretLine, text);
-        } catch(final Exception ex) {
+            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric OK path=" + path + " line=" + caretLine + " chars=" + text.length());
+        } catch (final Exception ex) {
+            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric failed: " + ex);
+            ex.printStackTrace(System.err);
             ourContext.clear();
         }
+    }
+
+    /**
+     * Tries to extract IFile from 1C-specific editor inputs (DtEditorProxyInput, DtEditorInput, etc.).
+     *
+     * @param theInput editor input, may be a 1C proxy input
+     * @return the workspace file, or {@code null} if it cannot be determined
+     */
+    private IFile getFileFrom1cInput(final IEditorInput theInput) {
+        // 1. Standard IFile adapter - works for DtEditorInput
+        final IFile standard = theInput.getAdapter(IFile.class);
+        if (standard != null) {
+            return standard;
+        }
+        // 2. EMF model navigation: getModel() -> EObject -> eResource -> URI -> IFile
+        try {
+            final java.lang.reflect.Method getModel = theInput.getClass().getMethod("getModel");
+            final Object model = getModel.invoke(theInput);
+            if (model instanceof EObject) {
+                final EObject eObject = (EObject) model;
+                final Resource resource = eObject.eResource();
+                if (resource != null) {
+                    final org.eclipse.emf.common.util.URI uri = resource.getURI();
+                    if (uri.isPlatformResource()) {
+                        return ResourcesPlugin.getWorkspace().getRoot().getFile(new Path(uri.toPlatformString(true)));
+                    }
+                }
+            }
+        } catch (final Exception ignored) {
+            // not a 1C input with getModel()
+        }
+        return null;
     }
 
     /**
@@ -172,13 +313,21 @@ public final class ActiveEditorWatcher {
             if(editor == null) {
                 return;
             }
-            // Try ITextEditor first (standard Eclipse text editors)
+            System.err.println("[colleague] ActiveEditorWatcher: partActivated editorClass=" + editor.getClass().getName());
+            // Try XtextEditor first (1C EDT editors are Xtext-based)
+            final XtextEditor xtextEditor = editor.getAdapter(XtextEditor.class);
+            System.err.println("[colleague] ActiveEditorWatcher: XtextEditor adapter=" + xtextEditor);
+            if(xtextEditor != null) {
+                snapshotXtext(xtextEditor);
+                return;
+            }
             if(editor instanceof ITextEditor) {
                 snapshot((ITextEditor)editor);
                 return;
             }
             // Try to adapt to ITextEditor (some editors support this)
             final ITextEditor adapted = editor.getAdapter(ITextEditor.class);
+            System.err.println("[colleague] ActiveEditorWatcher: ITextEditor adapter=" + adapted);
             if(adapted != null) {
                 snapshot(adapted);
                 return;
@@ -197,7 +346,7 @@ public final class ActiveEditorWatcher {
                 return;
             }
             final IEditorPart editor = ((IEditorReference)theRef).getEditor(false);
-            if(editor instanceof ITextEditor) {
+            if(editor instanceof ITextEditor || editor.getAdapter(XtextEditor.class) != null) {
                 ourContext.clear();
             }
         }
@@ -224,8 +373,27 @@ public final class ActiveEditorWatcher {
                 return;
             }
             final IEditorPart editor = ((IEditorReference)theRef).getEditor(false);
+            if(editor == null) {
+                return;
+            }
+            System.err.println("[colleague] ActiveEditorWatcher: partInputChanged editorClass=" + editor.getClass().getName());
+            // Try XtextEditor first (1C EDT editors are Xtext-based)
+            final XtextEditor xtextEditor = editor.getAdapter(XtextEditor.class);
+            System.err.println("[colleague] ActiveEditorWatcher: XtextEditor adapter=" + xtextEditor);
+            if(xtextEditor != null) {
+                snapshotXtext(xtextEditor);
+                return;
+            }
             if(editor instanceof ITextEditor) {
                 snapshot((ITextEditor)editor);
+            } else {
+                final ITextEditor adapted = editor.getAdapter(ITextEditor.class);
+                System.err.println("[colleague] ActiveEditorWatcher: ITextEditor adapter=" + adapted);
+                if(adapted != null) {
+                    snapshot(adapted);
+                } else {
+                    snapshotGeneric(editor);
+                }
             }
         }
     }
