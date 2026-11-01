@@ -520,8 +520,12 @@ public class ColleagueView extends ViewPart {
         }
         ContactsPanel.Contact preferred = null;
         final String defaultId = LLMSettings.getDefaultProviderId();
+        // the default contact is the default provider's own default model:
+        // reading the model off the built-in local provider instead made the
+        // preference follow a provider the user may not even have as default,
+        // so the first model of the right provider won by listing order
         final com.mad.edt.colleague.llm.ProviderConfig defaultConfig =
-            LLMSettings.getConfig(LLMSettings.LOCAL_PROVIDER_ID);
+            LLMSettings.getConfig(defaultId);
         final String configured = defaultConfig == null ? null : defaultConfig.getDefaultModel();
         for(final ContactsPanel.Contact contact : theAvailable) {
             if(!contact.getProviderId().equals(defaultId)) {
