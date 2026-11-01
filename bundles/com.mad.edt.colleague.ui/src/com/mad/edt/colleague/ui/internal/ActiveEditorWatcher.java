@@ -5,6 +5,7 @@ import org.eclipse.core.resources.IResource;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.jface.text.ITextViewer;
 import org.eclipse.jface.text.TextViewer;
+import org.eclipse.jface.viewers.ISelectionProvider;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IEditorReference;
@@ -14,6 +15,7 @@ import org.eclipse.ui.IWorkbenchPartReference;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.IPartListener2;
 import org.eclipse.ui.texteditor.ITextEditor;
+import org.eclipse.ui.texteditor.IDocumentProvider;
 
 import com.mad.edt.colleague.chat.ActiveEditorContext;
 import com.mad.edt.colleague.context.ProjectContext;
@@ -100,6 +102,63 @@ public final class ActiveEditorWatcher {
     }
 
     /**
+     * Tries to extract text and caret position from a non-ITextEditor editor
+     * using common adapter patterns.
+     */
+    private void snapshotGeneric(final IEditorPart theEditor) {
+        // Try to get IFile from editor input
+        final IEditorInput input = theEditor.getEditorInput();
+        if(input == null) {
+            ourContext.clear();
+            return;
+        }
+        final IFile file = input.getAdapter(IFile.class);
+        if(file == null) {
+            ourContext.clear();
+            return;
+        }
+        final String path = file.getProjectRelativePath().toPortableString();
+
+        // Try to get document via IDocumentProvider adapter
+        final IDocumentProvider provider = theEditor.getAdapter(IDocumentProvider.class);
+        if(provider == null) {
+            ourContext.clear();
+            return;
+        }
+        try {
+            final org.eclipse.jface.text.IDocument doc = provider.getDocument(input);
+            if(doc == null) {
+                ourContext.clear();
+                return;
+            }
+            final String text = doc.get();
+            
+            // Try to get caret line via ITextViewer or ISelectionProvider
+            int caretLine = 1;
+            final ITextViewer viewer = theEditor.getAdapter(ITextViewer.class);
+            if(viewer != null) {
+                final org.eclipse.swt.custom.StyledText textWidget = viewer.getTextWidget();
+                if(textWidget != null) {
+                    caretLine = textWidget.getLineAtOffset(textWidget.getCaretOffset()) + 1;
+                }
+            } else {
+                // Try selection provider
+                final ISelectionProvider selProvider = theEditor.getAdapter(ISelectionProvider.class);
+                if(selProvider != null) {
+                    final org.eclipse.jface.viewers.ISelection sel = selProvider.getSelection();
+                    if(sel instanceof org.eclipse.jface.text.TextSelection) {
+                        caretLine = ((org.eclipse.jface.text.TextSelection)sel).getStartLine() + 1;
+                    }
+                }
+            }
+            
+            ourContext.show(path, caretLine, text);
+        } catch(final Exception ex) {
+            ourContext.clear();
+        }
+    }
+
+    /**
      * Tracks part activation, focusing on text editors.
      */
     private final class PartTracker implements IPartListener2 {
@@ -110,10 +169,22 @@ public final class ActiveEditorWatcher {
                 return;
             }
             final IEditorPart editor = ((IEditorReference)theRef).getEditor(false);
-            if(!(editor instanceof ITextEditor)) {
+            if(editor == null) {
                 return;
             }
-            snapshot((ITextEditor)editor);
+            // Try ITextEditor first (standard Eclipse text editors)
+            if(editor instanceof ITextEditor) {
+                snapshot((ITextEditor)editor);
+                return;
+            }
+            // Try to adapt to ITextEditor (some editors support this)
+            final ITextEditor adapted = editor.getAdapter(ITextEditor.class);
+            if(adapted != null) {
+                snapshot(adapted);
+                return;
+            }
+            // Fallback: try to get document and caret via generic adapters
+            snapshotGeneric(editor);
         }
 
         @Override
