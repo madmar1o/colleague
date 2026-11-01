@@ -82,19 +82,40 @@
             label="Спросить Colleague об этом"
             style="push"/>
       </menuContribution>
-      <menuContribution allPopups="false" locationURI="popup:org.eclipse.ui.editors#PopupMenu?after=additions">
+      <!-- Standard text editor context menu - use AbstractTextEditorContext like 1C:Workmate does -->
+      <menuContribution allPopups="false" locationURI="popup:#AbstractTextEditorContext?endof=group.open">
          <menu
-            id="com.mad.edt.colleague.ui.menu.editor"
+            id="com.mad.edt.colleague.ui.groupMenu"
             label="Colleague"
-            mnemonic="%colleagueMenuMnemonic">
+            icon="icons/obj16/colleague.png">
             <command
                commandId="com.mad.edt.colleague.ui.commands.explainSelection"
                label="Объяснить выделение"
-               style="push"/>
+               style="push"
+               tooltip="Explain the selected code"/>
             <command
                commandId="com.mad.edt.colleague.ui.commands.generateMethod"
                label="Сгенерировать метод"
-               style="push"/>
+               style="push"
+               tooltip="Generate a method from the selection"/>
+         </menu>
+      </menuContribution>
+      <!-- Xtext embedded editors (used by 1C BSL editor) -->
+      <menuContribution allPopups="false" locationURI="popup:xtext.embedded.editor">
+         <menu
+            id="com.mad.edt.colleague.ui.groupMenu"
+            label="Colleague"
+            icon="icons/obj16/colleague.png">
+            <command
+               commandId="com.mad.edt.colleague.ui.commands.explainSelection"
+               label="Объяснить выделение"
+               style="push"
+               tooltip="Explain the selected code"/>
+            <command
+               commandId="com.mad.edt.colleague.ui.commands.generateMethod"
+               label="Сгенерировать метод"
+               style="push"
+               tooltip="Generate a method from the selection"/>
          </menu>
       </menuContribution>
    </extension>
