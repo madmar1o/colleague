@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui.view;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -31,9 +32,11 @@ import org.osgi.framework.FrameworkUtil;
 
 import com.mad.edt.colleague.agent.AgentMemory;
 import com.mad.edt.colleague.agent.AgentMode;
+import com.mad.edt.colleague.agent.MetadataTools;
 import com.mad.edt.colleague.agents.AgentCatalog;
 import com.mad.edt.colleague.agents.AgentProfile;
 import com.mad.edt.colleague.agents.AgentProfileWriter;
+import com.mad.edt.colleague.chat.ContextBudget;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
 import com.mad.edt.colleague.context.ContextSource;
@@ -51,6 +54,7 @@ import com.mad.edt.colleague.skills.SkillDefinition;
 import com.mad.edt.colleague.skills.SkillLoader;
 import com.mad.edt.colleague.skills.SkillRegistry;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
+import com.mad.edt.colleague.ui.internal.ActiveEditorWatcher;
 import com.mad.edt.colleague.ui.internal.AgentsPanel;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
 import com.mad.edt.colleague.ui.internal.ChatSession;
@@ -115,6 +119,8 @@ public class ColleagueView extends ViewPart {
     private CTabFolder ourTabFolder;
     private CodeSearch ourCodeSearch;
     private ConfigurationOverview ourOverview;
+    /** Metadata tools of the open projects, rebuilt from the workspace per turn. */
+    private final MetadataTools ourMetadataTools = new MetadataTools(this::metadataRoots);
 
     /**
      * Remote tool catalog shared by every chat tab of this view: one set of
@@ -155,6 +161,9 @@ public class ColleagueView extends ViewPart {
 
     /** Debug-only HTTP transport for the chat page, open only by start-up flag. */
     private com.mad.edt.colleague.ui.internal.WebBridge ourWebBridge;
+
+    /** Tracks the active text editor for the autocontext. */
+    private final ActiveEditorWatcher ourActiveEditorWatcher = new ActiveEditorWatcher();
 
     private String ourLastAnswer = "";
     private ChatPanel ourLastAnsweredPanel;
@@ -299,6 +308,9 @@ public class ColleagueView extends ViewPart {
         }
         ourContacts.reload();
         scheduleAgentProbe();
+
+        // track the active editor for the autocontext
+        ourActiveEditorWatcher.attach(getViewSite().getPage());
     }
 
     /**
@@ -328,7 +340,8 @@ public class ColleagueView extends ViewPart {
             }
             ourProbeDone = true;
             AgentMode.setOn(true);
-            panel.setToolSupplier(() -> WorkspaceTools.readOnly(ourCodeSearch, ourOverview));
+            panel.setToolSupplier(() -> WorkspaceTools.readOnly(ourCodeSearch, ourOverview,
+                ourMetadataTools));
             System.err.println("[colleague] agent probe: edit mode on, read-only tools,"
                 + " sending the probe question");
             panel.fillQuestion("Сколько всего объектов метаданных в конфигурации этого"
@@ -449,6 +462,7 @@ public class ColleagueView extends ViewPart {
             ourWebBridge.close();
             ourWebBridge = null;
         }
+        // the ActiveEditorWatcher clears its snapshot on partClosed, nothing more needed
         if(ourAgents != null) {
             ourAgents.dispose();
         }
@@ -1123,13 +1137,36 @@ public class ColleagueView extends ViewPart {
         thePanel.attachMirrorTransport(ourWebBridge);
     }
 
+    /**
+     * Collects the metadata trees the agent tools may read: the {@code src}
+     * folder of every open EDT project, named by the project so answers carry
+     * a workspace-relative path. The list is rebuilt on every tool call, so a
+     * configuration opened after the chat started is searchable at once and a
+     * closed one disappears instead of failing the search.
+     *
+     * @return metadata roots of the open projects, empty when none is open
+     */
+    private List<MetadataTools.Root> metadataRoots() {
+        final List<MetadataTools.Root> roots = new ArrayList<>();
+        for(final IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
+            if(!project.isOpen() || project.getLocation() == null) {
+                continue;
+            }
+            final Path src = project.getLocation().toFile().toPath().resolve("src");
+            if(Files.isDirectory(src)) {
+                roots.add(new MetadataTools.Root(project.getName(), src));
+            }
+        }
+        return roots;
+    }
+
     private ChatPanel buildChatPanel(final CTabItem theTab, final Composite theBody,
         final ChatSession theSession, final ContactsPanel.Contact theContact) {
         final ChatPanel panel = new ChatPanel(theBody, theSession, theContact.getModel());
         panel.attachThemeAnchor(ourRoot);
         panel.setToolSupplier(() -> AgentMode.isOn()
-            ? WorkspaceTools.withWrite(ourCodeSearch, ourOverview)
-            : WorkspaceTools.readOnly(ourCodeSearch, ourOverview));
+            ? WorkspaceTools.withWrite(ourCodeSearch, ourOverview, ourMetadataTools)
+            : WorkspaceTools.readOnly(ourCodeSearch, ourOverview, ourMetadataTools));
         panel.setLessonMemory(lessonMemory());
         panel.setMcpCatalog(ourMcpCatalog);
         panel.setSkillSupplier(this::skillCatalog);
@@ -1186,10 +1223,28 @@ public class ColleagueView extends ViewPart {
                 return Status.OK_STATUS;
             }).schedule();
         }
-        if(overview.isEmpty()) {
+        final String editor = ourActiveEditorWatcher.render();
+        if(overview.isEmpty() && editor.isEmpty()) {
             return snippets;
         }
-        return snippets + "\n\nOpen 1C configuration in this workspace:\n" + overview;
+        final StringBuilder combined = new StringBuilder();
+        if(!snippets.isEmpty()) {
+            combined.append(snippets);
+        }
+        if(!overview.isEmpty()) {
+            if(combined.length() > 0) {
+                combined.append("\n\n");
+            }
+            combined.append("Open 1C configuration in this workspace:\n");
+            combined.append(overview);
+        }
+        if(!editor.isEmpty()) {
+            if(combined.length() > 0) {
+                combined.append("\n\n");
+            }
+            combined.append(editor);
+        }
+        return ContextBudget.trimMiddle(combined.toString(), 3_000);
     }
 
     /**
