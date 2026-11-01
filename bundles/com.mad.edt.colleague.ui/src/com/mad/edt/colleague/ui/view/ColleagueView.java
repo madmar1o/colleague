@@ -36,6 +36,7 @@ import com.mad.edt.colleague.agent.MetadataTools;
 import com.mad.edt.colleague.agents.AgentCatalog;
 import com.mad.edt.colleague.agents.AgentProfile;
 import com.mad.edt.colleague.agents.AgentProfileWriter;
+import com.mad.edt.colleague.chat.ContextBudget;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
 import com.mad.edt.colleague.context.ContextSource;
@@ -53,6 +54,7 @@ import com.mad.edt.colleague.skills.SkillDefinition;
 import com.mad.edt.colleague.skills.SkillLoader;
 import com.mad.edt.colleague.skills.SkillRegistry;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
+import com.mad.edt.colleague.ui.internal.ActiveEditorWatcher;
 import com.mad.edt.colleague.ui.internal.AgentsPanel;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
 import com.mad.edt.colleague.ui.internal.ChatSession;
@@ -159,6 +161,9 @@ public class ColleagueView extends ViewPart {
 
     /** Debug-only HTTP transport for the chat page, open only by start-up flag. */
     private com.mad.edt.colleague.ui.internal.WebBridge ourWebBridge;
+
+    /** Tracks the active text editor for the autocontext. */
+    private final ActiveEditorWatcher ourActiveEditorWatcher = new ActiveEditorWatcher();
 
     private String ourLastAnswer = "";
     private ChatPanel ourLastAnsweredPanel;
@@ -303,6 +308,9 @@ public class ColleagueView extends ViewPart {
         }
         ourContacts.reload();
         scheduleAgentProbe();
+
+        // track the active editor for the autocontext
+        ourActiveEditorWatcher.attach(getViewSite().getPage());
     }
 
     /**
@@ -454,6 +462,7 @@ public class ColleagueView extends ViewPart {
             ourWebBridge.close();
             ourWebBridge = null;
         }
+        // the ActiveEditorWatcher clears its snapshot on partClosed, nothing more needed
         if(ourAgents != null) {
             ourAgents.dispose();
         }
@@ -1214,10 +1223,28 @@ public class ColleagueView extends ViewPart {
                 return Status.OK_STATUS;
             }).schedule();
         }
-        if(overview.isEmpty()) {
+        final String editor = ourActiveEditorWatcher.render();
+        if(overview.isEmpty() && editor.isEmpty()) {
             return snippets;
         }
-        return snippets + "\n\nOpen 1C configuration in this workspace:\n" + overview;
+        final StringBuilder combined = new StringBuilder();
+        if(!snippets.isEmpty()) {
+            combined.append(snippets);
+        }
+        if(!overview.isEmpty()) {
+            if(combined.length() > 0) {
+                combined.append("\n\n");
+            }
+            combined.append("Open 1C configuration in this workspace:\n");
+            combined.append(overview);
+        }
+        if(!editor.isEmpty()) {
+            if(combined.length() > 0) {
+                combined.append("\n\n");
+            }
+            combined.append(editor);
+        }
+        return ContextBudget.trimMiddle(combined.toString(), 3_000);
     }
 
     /**
