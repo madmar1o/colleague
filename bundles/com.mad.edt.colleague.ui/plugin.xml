@@ -41,6 +41,14 @@
          id="com.mad.edt.colleague.ui.commands.insertAnswer"
          name="Insert Answer Into Editor"
          description="Insert the assistant answer at the editor cursor"/>
+      <command
+         id="com.mad.edt.colleague.ui.commands.explainSelection"
+         name="Explain Selection"
+         description="Explain the selected code in the editor"/>
+      <command
+         id="com.mad.edt.colleague.ui.commands.generateMethod"
+         name="Generate Method"
+         description="Generate a method from the selected code"/>
    </extension>
 
    <extension point="org.eclipse.ui.handlers">
@@ -53,6 +61,12 @@
       <handler
          commandId="com.mad.edt.colleague.ui.commands.insertAnswer"
          class="com.mad.edt.colleague.ui.handlers.InsertAnswerHandler"/>
+      <handler
+         commandId="com.mad.edt.colleague.ui.commands.explainSelection"
+         class="com.mad.edt.colleague.ui.handlers.ExplainSelectionHandler"/>
+      <handler
+         commandId="com.mad.edt.colleague.ui.commands.generateMethod"
+         class="com.mad.edt.colleague.ui.handlers.GenerateMethodHandler"/>
    </extension>
 
    <extension point="org.eclipse.ui.menus">
@@ -67,6 +81,21 @@
             commandId="com.mad.edt.colleague.ui.commands.askView"
             label="Спросить Colleague об этом"
             style="push"/>
+      </menuContribution>
+      <menuContribution allPopups="false" locationURI="popup:org.eclipse.ui.editors#PopupMenu?after=additions">
+         <menu
+            id="com.mad.edt.colleague.ui.menu.editor"
+            label="Colleague"
+            mnemonic="%colleagueMenuMnemonic">
+            <command
+               commandId="com.mad.edt.colleague.ui.commands.explainSelection"
+               label="Объяснить выделение"
+               style="push"/>
+            <command
+               commandId="com.mad.edt.colleague.ui.commands.generateMethod"
+               label="Сгенерировать метод"
+               style="push"/>
+         </menu>
       </menuContribution>
    </extension>
 
