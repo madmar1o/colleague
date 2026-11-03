@@ -1,25 +1,17 @@
 package com.mad.edt.colleague.ui.handlers;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.eclipse.core.commands.ExecutionEvent;
-import org.eclipse.core.commands.ExecutionException;
-import org.eclipse.jface.text.TextSelection;
-import org.eclipse.jface.viewers.ISelection;
-import org.eclipse.ui.IEditorPart;
-import org.eclipse.ui.IWorkbenchPage;
-import org.eclipse.ui.IWorkbenchWindow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import com.mad.edt.colleague.ui.view.ColleagueView;
-
 /**
- * Tests that editor actions "Explain selection" and "Generate method" build
- * prompts with the selected code and attach a read-only tool profile so the
- * model cannot write files.
+ * Tests that the editor actions "Explain selection" and "Generate method"
+ * build their prompts from the selected code alone: the read-only guarantee
+ * comes from the agent profile the handler opens the chat on, never from a
+ * text marker inside the prompt itself.
  */
 class EditorActionPromptsTest {
 
@@ -42,8 +34,7 @@ class EditorActionPromptsTest {
 
         assertNotNull(prompt);
         assertTrue(prompt.contains("Объясни"));
-        assertTrue(prompt.contains(selectedCode));
-        assertTrue(prompt.contains("read-only") || prompt.contains("read only"));
+        assertTrue(prompt.contains(selectedCode.trim()));
     }
 
     @Test
@@ -56,25 +47,25 @@ class EditorActionPromptsTest {
         final String prompt = generateHandler.buildPrompt(selectedCode);
 
         assertNotNull(prompt);
-        assertTrue(prompt.contains("Сгенерируй") || prompt.contains("Generate"));
-        assertTrue(prompt.contains("метод") || prompt.contains("method"));
-        assertTrue(prompt.contains(selectedCode));
-        assertTrue(prompt.contains("read-only") || prompt.contains("read only"));
+        assertTrue(prompt.contains("Сгенерируй"));
+        assertTrue(prompt.contains("метод"));
+        assertTrue(prompt.contains(selectedCode.trim()));
     }
 
     @Test
-    void explainSelectionHandlerDefaultPrompt() {
-        final String prompt = explainHandler.buildPrompt("");
-
-        assertNotNull(prompt);
-        assertTrue(prompt.contains("Объясни"));
+    void promptsCarryNoFakeProfileMarker() {
+        // the read-only right comes from the picked agent profile; a marker
+        // inside the prompt would only decorate the message without binding
+        // the model to anything
+        assertFalse(explainHandler.buildPrompt("Возврат 1;").contains("[read-only"));
+        assertFalse(generateHandler.buildPrompt("Возврат 1;").contains("[read-only"));
     }
 
     @Test
-    void generateMethodHandlerDefaultPrompt() {
-        final String prompt = generateHandler.buildPrompt("");
-
-        assertNotNull(prompt);
-        assertTrue(prompt.contains("Сгенерируй") || prompt.contains("Generate"));
+    void emptySelectionStillBuildsAnHonestPrompt() {
+        assertNotNull(explainHandler.buildPrompt(""));
+        assertNotNull(generateHandler.buildPrompt(""));
+        assertFalse(explainHandler.buildPrompt("").contains("[read-only"));
+        assertFalse(generateHandler.buildPrompt("").contains("[read-only"));
     }
 }

@@ -79,7 +79,7 @@
       <menuContribution allPopups="false" locationURI="popup:org.eclipse.ui.navigator.ProjectExplorer#PopupMenu?after=additions">
          <command
             commandId="com.mad.edt.colleague.ui.commands.askView"
-            label="Спросить Colleague об этом"
+            label="РЎРїСЂРѕСЃРёС‚СЊ Colleague РѕР± СЌС‚РѕРј"
             style="push"/>
       </menuContribution>
       <menuContribution allPopups="false" locationURI="popup:org.eclipse.ui.editors#PopupMenu?after=additions">
@@ -89,11 +89,11 @@
             mnemonic="%colleagueMenuMnemonic">
             <command
                commandId="com.mad.edt.colleague.ui.commands.explainSelection"
-               label="Объяснить выделение"
+               label="РћР±СЉСЏСЃРЅРёС‚СЊ РІС‹РґРµР»РµРЅРёРµ"
                style="push"/>
             <command
                commandId="com.mad.edt.colleague.ui.commands.generateMethod"
-               label="Сгенерировать метод"
+               label="РЎРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РјРµС‚РѕРґ"
                style="push"/>
          </menu>
       </menuContribution>
