@@ -6,6 +6,7 @@ import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -50,6 +51,7 @@ import com.mad.edt.colleague.agent.subagent.SubagentRegistry;
 import com.mad.edt.colleague.agent.subagent.SubagentTool;
 import com.mad.edt.colleague.agents.AgentProfile;
 import com.mad.edt.colleague.agents.ToolPolicy;
+import com.mad.edt.colleague.chat.ChatFileLink;
 import com.mad.edt.colleague.chat.ContextBudget;
 import com.mad.edt.colleague.chat.EscapeSequence;
 import com.mad.edt.colleague.chat.PageCatalogEvents;
@@ -161,6 +163,8 @@ public final class ChatPanel {
      * back arrow since the agents page became the chat's way back.
      */
     private Runnable ourOnOpenSettings;
+    /** opens a workspace file cited by an answer link in the editor */
+    private BiConsumer<String, Integer> ourOnOpenFile;
     private Supplier<List<IToolExecutor>> ourToolSupplier;
 
     /**
@@ -336,6 +340,16 @@ public final class ChatPanel {
      */
     public void setOnOpenSettings(final Runnable theOnOpenSettings) {
         ourOnOpenSettings = theOnOpenSettings;
+    }
+
+    /**
+     * @param theOnOpenFile invoked on the UI thread when the page clicks a
+     *            {@code path:line} link of an answer; takes the
+     *            workspace-relative path and the 1-based line, {@code 0}
+     *            line meaning "just open the file"
+     */
+    public void setOnOpenFile(final BiConsumer<String, Integer> theOnOpenFile) {
+        ourOnOpenFile = theOnOpenFile;
     }
 
     /**
@@ -706,6 +720,16 @@ public final class ChatPanel {
             }
             if(ourOnBack != null) {
                 ourOnBack.run();
+            }
+        }
+
+        @Override
+        public void openFile(final String thePath, final int theLine) {
+            // the page hands over text from the model's answer, so the path
+            // goes through the same workspace guard the file tools use before
+            // anything tries to open it
+            if(ourOnOpenFile != null && ChatFileLink.isWorkspaceSafe(thePath)) {
+                ourOnOpenFile.accept(thePath, Integer.valueOf(theLine));
             }
         }
 

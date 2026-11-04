@@ -8,8 +8,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
@@ -26,7 +28,9 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.ui.PartInitException;
+import org.eclipse.ui.ide.IDE;
 import org.eclipse.ui.part.ViewPart;
+import org.eclipse.ui.texteditor.ITextEditor;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.FrameworkUtil;
 
@@ -1224,6 +1228,8 @@ public class ColleagueView extends ViewPart {
             "back arrow", theContact.getDisplayName()));
         panel.setOnOpenSettings(() -> showMobilePage(ourContactsArea,
             "gear", theContact.getDisplayName()));
+        // a clicked path:line link of an answer jumps the editor to that spot
+        panel.setOnOpenFile(this::openWorkspaceFile);
         // an agent tab speaks as its agent from the first turn, not only
         // after the chip was touched
         panel.setInitialAgent(theContact.getAgentName());
@@ -1245,6 +1251,35 @@ public class ColleagueView extends ViewPart {
             }
         });
         return panel;
+    }
+
+    /**
+     * Opens a workspace file cited by a {@code path:line} link of an answer
+     * and moves the caret to the cited line. The page-side guard already
+     * rejected paths leaving the workspace; here the file must also exist in
+     * the workspace tree, otherwise the click stays a no-op with a trace
+     * instead of an error dialog — a model can cite a path it hallucinated.
+     *
+     * @param thePath workspace-relative path, project segment first
+     * @param theLine 1-based line to reveal, {@code 0} opens without a jump
+     */
+    private void openWorkspaceFile(final String thePath, final int theLine) {
+        final IPath path = new org.eclipse.core.runtime.Path(thePath);
+        final IFile file = ResourcesPlugin.getWorkspace().getRoot().getFile(path);
+        if(!file.exists() || file.getLocation() == null) {
+            System.err.println("[colleague] answer link skipped, no such file: " + thePath);
+            return;
+        }
+        try {
+            final ITextEditor editor = (ITextEditor)IDE.openEditor(getSite().getWorkbenchWindow()
+                .getActivePage(), file);
+            if(theLine > 0 && editor != null) {
+                editor.setHighlightRange(theLine, 1, true);
+            }
+        } catch(final PartInitException ex) {
+            System.err.println("[colleague] answer link could not open " + thePath + ": "
+                + ex.getMessage());
+        }
     }
 
     /**
