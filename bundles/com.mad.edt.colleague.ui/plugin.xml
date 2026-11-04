@@ -82,11 +82,16 @@
             label="Спросить Colleague об этом"
             style="push"/>
       </menuContribution>
-      <menuContribution allPopups="false" locationURI="popup:#BslEditorContext?after=additions">
+      <menuContribution allPopups="true" locationURI="popup:org.eclipse.ui.popup.any?after=additions">
          <menu
             id="com.mad.edt.colleague.ui.menu.editor"
             label="Colleague"
             mnemonic="%colleagueMenuMnemonic">
+            <visibleWhen checkEnabled="false">
+               <with variable="selection">
+                  <instanceof value="org.eclipse.jface.text.ITextSelection"/>
+               </with>
+            </visibleWhen>
             <command
                commandId="com.mad.edt.colleague.ui.commands.explainSelection"
                label="Объяснить выделение"
