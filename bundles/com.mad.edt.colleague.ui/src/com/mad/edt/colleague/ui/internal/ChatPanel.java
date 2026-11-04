@@ -54,6 +54,7 @@ import com.mad.edt.colleague.chat.ContextBudget;
 import com.mad.edt.colleague.chat.EscapeSequence;
 import com.mad.edt.colleague.chat.PageCatalogEvents;
 import com.mad.edt.colleague.chat.PageCommandHandler;
+import com.mad.edt.colleague.chat.PendingInputFill;
 import com.mad.edt.colleague.chat.StreamBatcher;
 import com.mad.edt.colleague.chat.TurnController;
 import com.mad.edt.colleague.commands.CommandDefinition;
@@ -144,6 +145,8 @@ public final class ChatPanel {
      */
     private volatile List<ChatMessage> ourInterruptedConversation = List.of();
     private String ourCachedQuestion = "";
+    /** question staged for a chat page that has not announced itself yet. */
+    private final PendingInputFill ourPendingFill = new PendingInputFill();
     private boolean ourBusy;
     private boolean ourPageProofDone;
     private final TurnController ourTurns = new TurnController();
@@ -268,9 +271,17 @@ public final class ChatPanel {
     public void fillQuestion(final String theQuestion) {
         ourCachedQuestion = theQuestion;
         if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
-            final JsonObject payload = new JsonObject();
-            payload.addProperty("text", theQuestion);
-            pushNow("input", payload);
+            if(ourBridge.isReady()) {
+                final JsonObject payload = new JsonObject();
+                payload.addProperty("text", theQuestion);
+                pushNow("input", payload);
+            } else {
+                // the page defines its event entry point only once it has
+                // loaded: an input event pushed now would be dropped by the
+                // script channel, so it waits here for the bridgeReady
+                // hand-off instead
+                ourPendingFill.stage(theQuestion);
+            }
             return;
         }
         if(ourQuestion != null && !ourQuestion.isDisposed()) {
@@ -620,6 +631,14 @@ public final class ChatPanel {
         public void bridgeReady() {
             pushHistory();
             pushCatalogEvent();
+            // a question staged while the page was still loading arrives now,
+            // when its event entry point actually exists
+            final String stagedFill = ourPendingFill.drain();
+            if(!stagedFill.isEmpty()) {
+                final JsonObject stagedPayload = new JsonObject();
+                stagedPayload.addProperty("text", stagedFill);
+                pushNow("input", stagedPayload);
+            }
             setStatus(AgentMode.isOn()
                 ? "Режим правки ВКЛЮЧЁН — агент с инструментами проекта"
                 : "Готов к работе");
