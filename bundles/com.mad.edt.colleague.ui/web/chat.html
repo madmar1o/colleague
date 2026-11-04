@@ -578,7 +578,20 @@ function now() {
     m = ("0" + d.getMinutes()).slice(-2);
   return h + ":" + m;
 }
-function scrollDown() { msgs.scrollTop = msgs.scrollHeight; }
+function scrollDown() {
+  msgs.scrollTop = msgs.scrollHeight;
+  /* A finished answer re-renders (meta line, code blocks) after the push that
+     triggered this call, so pin again once the browser laid that out: one rAF
+     per frame until the pin stops moving. Without it the last line can end up
+     under the composer and the reader thinks the view stopped short. */
+  var lastHeight = -1, tries = 0;
+  (function pin() {
+    if (msgs.scrollHeight === lastHeight || tries > 3) { return; }
+    lastHeight = msgs.scrollHeight; tries++;
+    msgs.scrollTop = msgs.scrollHeight;
+    window.requestAnimationFrame(pin);
+  })();
+}
 /* Stick-to-bottom feed: the view follows new text only while the user was
    already near the bottom; scrolling up releases the grip and the down-arrow
    button appears to jump back. */
@@ -586,7 +599,19 @@ function nearBottom() {
   return msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 60;
 }
 var btnBottom = document.getElementById("btnbottom");
+/* The arrow floats above whatever bottom stack the page shows at the moment:
+   composer, hint, status and catalog lines all change height as modes and
+   statuses arrive. A fixed offset used to land the arrow right on the send
+   button, so measure the real stack instead. */
+function placeBottomBtn() {
+  var comp = document.getElementById("composer");
+  var hint = document.querySelector(".hint");
+  var stack = comp.offsetHeight + (hint ? hint.offsetHeight : 0) + 12;
+  btnBottom.style.bottom = stack + "px";
+}
+window.addEventListener("resize", placeBottomBtn);
 msgs.addEventListener("scroll", function () {
+  placeBottomBtn();
   btnBottom.style.display = nearBottom() ? "none" : "block";
 });
 btnBottom.addEventListener("click", function () { scrollDown(); });
