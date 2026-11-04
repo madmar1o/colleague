@@ -101,6 +101,9 @@ public class ColleagueView extends ViewPart {
     /** Resource/project context staged together with the question. */
     private static volatile String ourPendingContext;
 
+    /** Agent profile name the staged question should run on. */
+    private static volatile String ourPendingProfile;
+
     /** The single visible instance (the view is not multiplicable). */
     private static volatile ColleagueView ourInstance;
 
@@ -192,10 +195,31 @@ public class ColleagueView extends ViewPart {
     }
 
     /**
+     * Stages the agent profile the next staged question should run on: the
+     * chat opens on (or switches to) a tab of that profile instead of the
+     * default agent.
+     *
+     * @param theProfileName profile name from the agent catalog, empty or
+     *            {@code null} to keep the default routing
+     */
+    public static void stageProfile(final String theProfileName) {
+        ourPendingProfile = theProfileName == null ? "" : theProfileName.trim();
+    }
+
+    /**
      * @return the currently visible instance or {@code null}
      */
     public static ColleagueView getInstance() {
         return ourInstance;
+    }
+
+    /**
+     * @return the merged agent catalog behind the agents page, never
+     *         {@code null}; handlers use it to pick the profile a staged
+     *         question should run on
+     */
+    public List<AgentProfile> getAgentCatalog() {
+        return profileCatalog();
     }
 
     @Override
@@ -333,7 +357,7 @@ public class ColleagueView extends ViewPart {
             if(ourProbeDone || ourTabFolder.isDisposed()) {
                 return;
             }
-            final ChatPanel panel = targetPanelForStaged();
+            final ChatPanel panel = targetPanelForStaged(null);
             if(panel == null) {
                 System.err.println("[colleague] agent probe skipped: no chat panel yet");
                 return;
@@ -485,10 +509,13 @@ public class ColleagueView extends ViewPart {
 
     /**
      * Applies a question and context staged after this instance was created:
-     * they go into the active (or default) chat tab without sending them.
+     * they go into the active (or default) chat tab without sending them. A
+     * staged profile name reroutes the question into a tab of that profile.
      */
     public void applyStaged() {
-        final ChatPanel panel = targetPanelForStaged();
+        final String stagedProfile = ourPendingProfile;
+        ourPendingProfile = null;
+        final ChatPanel panel = targetPanelForStaged(stagedProfile);
         if(panel == null) {
             return;
         }
@@ -504,15 +531,31 @@ public class ColleagueView extends ViewPart {
         }
     }
 
-    private ChatPanel targetPanelForStaged() {
+    /**
+     * Resolves the panel a staged question belongs to: with a staged profile
+     * name the chat opens on that profile's tab (reusing an open one),
+     * otherwise the active tab or the default contact as before.
+     *
+     * @param theProfileName staged profile name, empty or {@code null} for
+     *            the default routing
+     * @return the panel to fill, {@code null} when no chat can be opened
+     */
+    private ChatPanel targetPanelForStaged(final String theProfileName) {
         if(ourTabFolder.isDisposed()) {
             return null;
+        }
+        final ContactsPanel.Contact preferred = ourDefaultContactCache;
+        if(theProfileName != null && !theProfileName.isEmpty() && preferred != null) {
+            final AgentProfile profile = findProfile(theProfileName);
+            if(profile != null) {
+                return openContactNow(new ContactsPanel.Contact(preferred.getProviderId(),
+                    agentModelFor(profile, preferred), profile.getName()));
+            }
         }
         final CTabItem active = ourTabFolder.getSelection();
         if(active != null && active.getData() instanceof ChatPanel) {
             return (ChatPanel)active.getData();
         }
-        final ContactsPanel.Contact preferred = ourDefaultContactCache;
         if(preferred != null) {
             return openContactNow(preferred);
         }

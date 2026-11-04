@@ -79,15 +79,20 @@
       <menuContribution allPopups="false" locationURI="popup:org.eclipse.ui.navigator.ProjectExplorer#PopupMenu?after=additions">
          <command
             commandId="com.mad.edt.colleague.ui.commands.askView"
-            label="Спросить Colleague об этом"
+            label="Отправить в Colleague"
             style="push"/>
       </menuContribution>
-      <!-- Standard text editor context menu - use AbstractTextEditorContext like 1C:Workmate does -->
-      <menuContribution allPopups="false" locationURI="popup:#AbstractTextEditorContext?endof=group.open">
+      <menuContribution allPopups="true" locationURI="popup:org.eclipse.ui.popup.any?after=additions">
          <menu
             id="com.mad.edt.colleague.ui.groupMenu"
             label="Colleague"
-            icon="icons/obj16/colleague.png">
+            icon="icons/obj16/colleague.png"
+            mnemonic="%colleagueMenuMnemonic">
+            <visibleWhen checkEnabled="false">
+               <with variable="selection">
+                  <instanceof value="org.eclipse.jface.text.ITextSelection"/>
+               </with>
+            </visibleWhen>
             <command
                commandId="com.mad.edt.colleague.ui.commands.explainSelection"
                label="Объяснить выделение"
