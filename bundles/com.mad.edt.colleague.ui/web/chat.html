@@ -116,6 +116,8 @@ main {
 }
 .ticks { color: #58b7f0; letter-spacing: -3px; font-weight: 700; }
 .copylink { color: var(--muted); cursor: pointer; font-size: 11px; }
+.filelink { color: var(--accent); cursor: pointer; text-decoration: underline;
+  text-decoration-style: dotted; }
 .smallavatar {
   width: 30px; height: 30px; border-radius: 50%; flex: none; font-size: 12px;
   display: flex; align-items: center; justify-content: center; color: #fff;
@@ -516,7 +518,21 @@ function inlineMd(s) {
   s = s.replace(/~~([^~\n]+)~~/g, "<s>$1</s>");
   s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,
     '<a href="#" onclick="return false;">$1</a>');
+  /* path:line citations of workspace files become editor jumps. The
+     lookbehind keeps URLs out: a markdown link's href value is already
+     rendered as an attribute at this point, and a schema://host pair ends
+     in "//" before the first path segment. Java re-checks the path. */
+  s = s.replace(/(?<!<code class="inline">)(?<![\w:.\/-])(?<!href=")((?:[\w\u0400-\u04FF][\w\u0400-\u04FF._-]*\/)+[\w\u0400-\u04FF][\w\u0400-\u04FF._-]*):\d{1,7}/g,
+    function (m) {
+      var cut = m.lastIndexOf(":");
+      var path = m.substring(0, cut), line = m.substring(cut + 1);
+      return '<span class="filelink" onclick="openFileLink(\'' +
+        encodeURIComponent(path) + "'," + line + ')">' + m + "</span>";
+    });
   return s;
+}
+function openFileLink(encodedPath, line) {
+  apiCall("openFile", { path: decodeURIComponent(encodedPath), line: String(line) });
 }
 function copyPre(node) {
   var pre = node.closest("pre");
