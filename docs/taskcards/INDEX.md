@@ -72,10 +72,10 @@
 
 | Задача | Статус | Зависимости | Git-ветка | Карточка | Точка Qdrant |
 |---|---|---|---|---|---|
-| PP-E1 Контекст активного редактора для автоконтекста | pending | нет | `feature/pp-e1-active-editor` | `docs/taskcards/PP-E1.md` | `10000000-0000-4000-8000-000000000019` |
-| PP-E2 Explain-selection / generate-method из меню редактора | pending | PP-F3 (профиль read-only) | `feature/pp-e2-editor-actions` | `docs/taskcards/PP-E2.md` | `10000000-0000-4000-8000-000000000020` |
-| PP-E3 Инструменты агента find_metadata / read_metadata | pending | нет | `feature/pp-e3-metadata-tools` | `docs/taskcards/PP-E3.md` | `10000000-0000-4000-8000-000000000021` |
-| PP-E4 Клик путь:строка в ответе чата открывает редактор | pending | PP-P1 (мост уже умеет push), PP-E1 (не обязателен) | `feature/pp-e4-open-in-editor` | `docs/taskcards/PP-E4.md` | `10000000-0000-4000-8000-000000000022` |
+| PP-E1 Контекст активного редактора для автоконтекста | done | нет | `feature/pp-e1-active-editor` | `docs/taskcards/PP-E1.md` | `10000000-0000-4000-8000-000000000019` |
+| PP-E2 Explain-selection / generate-method из меню редактора | done | PP-F3 (профиль read-only) | `feature/pp-e2-editor-actions` | `docs/taskcards/PP-E2.md` | `10000000-0000-4000-8000-000000000020` |
+| PP-E3 Инструменты агента find_metadata / read_metadata | done | нет | `feature/pp-e3-metadata-tools` | `docs/taskcards/PP-E3.md` | `10000000-0000-4000-8000-000000000021` |
+| PP-E4 Клик путь:строка в ответе чата открывает редактор | in_progress | PP-P1 (мост уже умеет push), PP-E1 (не обязателен) | `feature/pp-e4-open-in-editor` | `docs/taskcards/PP-E4.md` | `10000000-0000-4000-8000-000000000022` |
 
 
 Примечание: карточки задач лежат в соответствующих feature-ветках (коммит `docs: task card ...`)
