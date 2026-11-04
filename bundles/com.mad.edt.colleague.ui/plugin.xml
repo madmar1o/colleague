@@ -12,6 +12,7 @@
       <view
          class="com.mad.edt.colleague.ui.view.ColleagueView"
          category="com.mad.edt.colleague.ui.category"
+         icon="icons/obj16/colleague.png"
          id="com.mad.edt.colleague.ui.view.ColleagueView"
          inject="true"
          name="Colleague Assistant"
