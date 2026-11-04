@@ -101,8 +101,8 @@ class PageCommandHandlerTest {
         }
 
         @Override
-        public void openFile(final String thePath, final int theLine) {
-            calls.add("openFile|" + thePath + "|" + theLine);
+        public void openInEditor(final String thePath, final int theLine) {
+            calls.add("openInEditor|" + thePath + "|" + theLine);
         }
     }
 
@@ -214,8 +214,8 @@ class PageCommandHandlerTest {
         final PageCommandHandler handler = handlerWith(actions);
         handler.handle("openFile", args("path", "Catalogs/Orders/Orders.xml", "line", "7"));
         handler.handle("openFile", args("path", "Catalogs/Orders/Orders.xml"));
-        assertEquals(List.of("openFile|Catalogs/Orders/Orders.xml|7",
-            "openFile|Catalogs/Orders/Orders.xml|0"), actions.calls,
+        assertEquals(List.of("openInEditor|Catalogs/Orders/Orders.xml|7",
+            "openInEditor|Catalogs/Orders/Orders.xml|0"), actions.calls,
             "the page sends path and line, a missing line arrives as zero");
     }
 

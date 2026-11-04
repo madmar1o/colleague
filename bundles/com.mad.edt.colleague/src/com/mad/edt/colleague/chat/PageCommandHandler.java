@@ -103,7 +103,7 @@ public final class PageCommandHandler {
          * @param theLine 1-based line to open, {@code 0} when the page sent
          *            none and the editor should just open the file
          */
-        void openFile(String thePath, int theLine);
+        void openInEditor(String thePath, int theLine);
     }
 
     private static final String[] FOCUS_STATE_FIELDS = {"ae", "hf", "kd", "qvlen", "ch",
@@ -176,7 +176,7 @@ public final class PageCommandHandler {
                 actions.openSettings();
                 return;
             case "openFile":
-                actions.openFile(argument(theArgument, "path"),
+                actions.openInEditor(argument(theArgument, "path"),
                     positiveLine(argument(theArgument, "line")));
                 return;
             default:

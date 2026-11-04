@@ -51,7 +51,6 @@ import com.mad.edt.colleague.agent.subagent.SubagentRegistry;
 import com.mad.edt.colleague.agent.subagent.SubagentTool;
 import com.mad.edt.colleague.agents.AgentProfile;
 import com.mad.edt.colleague.agents.ToolPolicy;
-import com.mad.edt.colleague.chat.ChatFileLink;
 import com.mad.edt.colleague.chat.ContextBudget;
 import com.mad.edt.colleague.chat.EscapeSequence;
 import com.mad.edt.colleague.chat.PageCatalogEvents;
@@ -59,6 +58,7 @@ import com.mad.edt.colleague.chat.PageCommandHandler;
 import com.mad.edt.colleague.chat.PendingInputFill;
 import com.mad.edt.colleague.chat.StreamBatcher;
 import com.mad.edt.colleague.chat.TurnController;
+import com.mad.edt.colleague.chat.WorkspacePathGuard;
 import com.mad.edt.colleague.commands.CommandDefinition;
 import com.mad.edt.colleague.commands.SlashCommands;
 import com.mad.edt.colleague.llm.ChatMessage;
@@ -724,11 +724,11 @@ public final class ChatPanel {
         }
 
         @Override
-        public void openFile(final String thePath, final int theLine) {
+        public void openInEditor(final String thePath, final int theLine) {
             // the page hands over text from the model's answer, so the path
             // goes through the same workspace guard the file tools use before
             // anything tries to open it
-            if(ourOnOpenFile != null && ChatFileLink.isWorkspaceSafe(thePath)) {
+            if(ourOnOpenFile != null && WorkspacePathGuard.isSafe(thePath)) {
                 ourOnOpenFile.accept(thePath, Integer.valueOf(theLine));
             }
         }
