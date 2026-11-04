@@ -41,6 +41,14 @@
          id="com.mad.edt.colleague.ui.commands.insertAnswer"
          name="Insert Answer Into Editor"
          description="Insert the assistant answer at the editor cursor"/>
+      <command
+         id="com.mad.edt.colleague.ui.commands.explainSelection"
+         name="Explain Selection"
+         description="Explain the selected code in the editor"/>
+      <command
+         id="com.mad.edt.colleague.ui.commands.generateMethod"
+         name="Generate Method"
+         description="Generate a method from the selected code"/>
    </extension>
 
    <extension point="org.eclipse.ui.handlers">
@@ -53,6 +61,12 @@
       <handler
          commandId="com.mad.edt.colleague.ui.commands.insertAnswer"
          class="com.mad.edt.colleague.ui.handlers.InsertAnswerHandler"/>
+      <handler
+         commandId="com.mad.edt.colleague.ui.commands.explainSelection"
+         class="com.mad.edt.colleague.ui.handlers.ExplainSelectionHandler"/>
+      <handler
+         commandId="com.mad.edt.colleague.ui.commands.generateMethod"
+         class="com.mad.edt.colleague.ui.handlers.GenerateMethodHandler"/>
    </extension>
 
    <extension point="org.eclipse.ui.menus">
@@ -65,8 +79,49 @@
       <menuContribution allPopups="false" locationURI="popup:org.eclipse.ui.navigator.ProjectExplorer#PopupMenu?after=additions">
          <command
             commandId="com.mad.edt.colleague.ui.commands.askView"
-            label="Спросить Colleague об этом"
+            label="Отправить в Colleague"
             style="push"/>
+      </menuContribution>
+      <menuContribution allPopups="true" locationURI="popup:org.eclipse.ui.popup.any?after=additions">
+         <menu
+            id="com.mad.edt.colleague.ui.groupMenu"
+            label="Colleague"
+            icon="icons/obj16/colleague.png"
+            mnemonic="%colleagueMenuMnemonic">
+            <visibleWhen checkEnabled="false">
+               <with variable="selection">
+                  <instanceof value="org.eclipse.jface.text.ITextSelection"/>
+               </with>
+            </visibleWhen>
+            <command
+               commandId="com.mad.edt.colleague.ui.commands.explainSelection"
+               label="Объяснить выделение"
+               style="push"
+               tooltip="Explain the selected code"/>
+            <command
+               commandId="com.mad.edt.colleague.ui.commands.generateMethod"
+               label="Сгенерировать метод"
+               style="push"
+               tooltip="Generate a method from the selection"/>
+         </menu>
+      </menuContribution>
+      <!-- Xtext embedded editors (used by 1C BSL editor) -->
+      <menuContribution allPopups="false" locationURI="popup:xtext.embedded.editor">
+         <menu
+            id="com.mad.edt.colleague.ui.groupMenu"
+            label="Colleague"
+            icon="icons/obj16/colleague.png">
+            <command
+               commandId="com.mad.edt.colleague.ui.commands.explainSelection"
+               label="Объяснить выделение"
+               style="push"
+               tooltip="Explain the selected code"/>
+            <command
+               commandId="com.mad.edt.colleague.ui.commands.generateMethod"
+               label="Сгенерировать метод"
+               style="push"
+               tooltip="Generate a method from the selection"/>
+         </menu>
       </menuContribution>
    </extension>
 
