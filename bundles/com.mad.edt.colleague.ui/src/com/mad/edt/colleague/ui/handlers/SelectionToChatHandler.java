@@ -10,8 +10,6 @@ import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.handlers.HandlerUtil;
 
-import com.mad.edt.colleague.agents.AgentProfile;
-import com.mad.edt.colleague.agents.ReadOnlyProfile;
 import com.mad.edt.colleague.ui.view.ColleagueView;
 
 /**
@@ -35,10 +33,11 @@ public abstract class SelectionToChatHandler extends AbstractHandler {
         final String selectedCode = getSelectedText(editor);
         try {
             final ColleagueView view = (ColleagueView) page.showView(ColleagueView.ID);
-            final AgentProfile readOnly = ReadOnlyProfile.firstReadOnly(view.getAgentCatalog());
             ColleagueView.stageQuestion(buildPrompt(selectedCode));
             ColleagueView.stageContext(selectedCode);
-            ColleagueView.stageProfile(readOnly == null ? "" : readOnly.getName());
+            // Prefer the read-only code-explainer profile; fall back to its
+            // name so the tab is still created even before the catalog loads.
+            ColleagueView.stageProfile("code-explainer");
             view.applyStaged();
         } catch (final PartInitException ex) {
             throw new ExecutionException("cannot open the assistant view", ex);
