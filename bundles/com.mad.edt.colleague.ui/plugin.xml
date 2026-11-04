@@ -79,21 +79,21 @@
       <menuContribution allPopups="false" locationURI="popup:org.eclipse.ui.navigator.ProjectExplorer#PopupMenu?after=additions">
          <command
             commandId="com.mad.edt.colleague.ui.commands.askView"
-            label="РЎРїСЂРѕСЃРёС‚СЊ Colleague РѕР± СЌС‚РѕРј"
+            label="Спросить Colleague об этом"
             style="push"/>
       </menuContribution>
-      <menuContribution allPopups="false" locationURI="popup:org.eclipse.ui.editors#PopupMenu?after=additions">
+      <menuContribution allPopups="false" locationURI="popup:#BslEditorContext?after=additions">
          <menu
             id="com.mad.edt.colleague.ui.menu.editor"
             label="Colleague"
             mnemonic="%colleagueMenuMnemonic">
             <command
                commandId="com.mad.edt.colleague.ui.commands.explainSelection"
-               label="РћР±СЉСЏСЃРЅРёС‚СЊ РІС‹РґРµР»РµРЅРёРµ"
+               label="Объяснить выделение"
                style="push"/>
             <command
                commandId="com.mad.edt.colleague.ui.commands.generateMethod"
-               label="РЎРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РјРµС‚РѕРґ"
+               label="Сгенерировать метод"
                style="push"/>
          </menu>
       </menuContribution>
