@@ -588,6 +588,20 @@ public class ColleagueView extends ViewPart {
             return;
         }
         ContactsPanel.Contact preferred = null;
+        // a pair remembered from a previous session wins while it still
+        // exists among the available contacts; a stale pair (removed model)
+        // falls back to the provider default-model choice below
+        final String lastProvider = com.mad.edt.colleague.llm.ProviderStore.lastUsedProvider();
+        final String lastModel = com.mad.edt.colleague.llm.ProviderStore.lastUsedModel();
+        if(!lastProvider.isEmpty() && !lastModel.isEmpty()) {
+            for(final ContactsPanel.Contact contact : theAvailable) {
+                if(contact.getProviderId().equals(lastProvider)
+                    && contact.getModel().equals(lastModel)) {
+                    preferred = contact;
+                    break;
+                }
+            }
+        }
         final String defaultId = LLMSettings.getDefaultProviderId();
         // the default contact is the default provider's own default model:
         // reading the model off the built-in local provider instead made the
@@ -1008,6 +1022,10 @@ public class ColleagueView extends ViewPart {
         if(ourTabFolder.isDisposed()) {
             return null;
         }
+        // the user opened this pair: it becomes the default the next session
+        // restores; sessions started by the launch flag never feed this
+        com.mad.edt.colleague.llm.ProviderStore.rememberLastUsed(
+            theContact.getProviderId(), theContact.getModel());
         final CTabItem existing = existingTabFor(theContact);
         if(existing != null) {
             return existing.getData() instanceof ChatPanel ? (ChatPanel)existing.getData() : null;
