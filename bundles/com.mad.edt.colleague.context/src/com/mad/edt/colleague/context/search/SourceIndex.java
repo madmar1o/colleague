@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.context.search;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -37,6 +38,9 @@ public final class SourceIndex {
      * @return {@code true} when the file belongs in the indexes
      */
     public static boolean isIndexable(final String theLowerName, final long theSize) {
+        if(theSize == 0L) {
+            return false;
+        }
         final int dot = theLowerName.lastIndexOf('.');
         return dot >= 0 && OUR_EXTENSIONS.contains(theLowerName.substring(dot + 1));
     }
@@ -101,13 +105,18 @@ public final class SourceIndex {
                 }
                 final IFile file = (IFile)resource;
                 final String name = file.getName().toLowerCase(Locale.ROOT);
-                final int dot = name.lastIndexOf('.');
-                if(dot < 0 || !OUR_EXTENSIONS.contains(name.substring(dot + 1))) {
-                    return false;
-                }
                 final Path location = file.getLocation() == null ? null
                     : file.getLocation().toFile().toPath();
                 if(location == null || !Files.isReadable(location)) {
+                    return false;
+                }
+                final long size;
+                try {
+                    size = Files.size(location);
+                } catch (final IOException ex) {
+                    return false;
+                }
+                if(!isIndexable(name, size)) {
                     return false;
                 }
                 collected.add(new Entry(location, file.getProjectRelativePath().toPortableString()));
