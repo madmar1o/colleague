@@ -264,9 +264,12 @@ public final class QdrantClient {
         final JsonObject valued = new JsonObject();
         valued.addProperty("key", theField);
         valued.add("match", match);
+        // the store spells the empty-keyword condition with the key inside
+        // the is_empty object, unlike the match condition above
         final JsonObject absent = new JsonObject();
-        absent.addProperty("key", theAbsentField);
-        absent.add("is_empty", new JsonObject());
+        final JsonObject empty = new JsonObject();
+        empty.addProperty("key", theAbsentField);
+        absent.add("is_empty", empty);
         final JsonArray must = new JsonArray();
         must.add(valued);
         must.add(absent);

@@ -79,11 +79,13 @@ class QdrantPointsContractTest {
         Assertions.assertEquals("http://store.test/collections/" + COLLECTION
             + "/points/delete?wait=true", call.getUrl());
         // the point must match the value under one key and carry the second
-        // key as empty: exactly the older generation of chunks
+        // key as empty: exactly the older generation of chunks; the store
+        // spells the empty keyword with the key inside is_empty, verified
+        // against a live server, the flat form is rejected there
         Assertions.assertEquals(
             JsonParser.parseString("{\"filter\":{\"must\":["
                 + "{\"key\":\"path\",\"match\":{\"value\":\"a.bsl\"}},"
-                + "{\"key\":\"location\",\"is_empty\":{}}]}}").getAsJsonObject(),
+                + "{\"is_empty\":{\"key\":\"location\"}}]}}").getAsJsonObject(),
             JsonParser.parseString(call.getJsonBody()).getAsJsonObject());
     }
 

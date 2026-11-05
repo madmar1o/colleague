@@ -325,8 +325,7 @@ class VectorIndexTest {
         final String deleteBody = storeTransport.callAt(1).getJsonBody();
         assertTrue(deleteBody.contains("\"key\":\"path\""), deleteBody);
         assertTrue(deleteBody.contains("\"value\":\"a.bsl\""), deleteBody);
-        assertTrue(deleteBody.contains("\"key\":\"location\""), deleteBody);
-        assertTrue(deleteBody.contains("\"is_empty\":{}"), deleteBody);
+        assertTrue(deleteBody.contains("\"is_empty\":{\"key\":\"location\"}"), deleteBody);
         assertTrue(storeTransport.callAt(1).getUrl().endsWith("/points/delete?wait=true"),
             storeTransport.callAt(1).getUrl());
         // the file is re-embedded from scratch, now carrying its location
