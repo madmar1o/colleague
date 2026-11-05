@@ -25,6 +25,21 @@ public final class ProviderStore {
     private static final String KEY_DEFAULT = "default-provider";
 
     /**
+     * The provider and model the user actually talked to last, stored as one
+     * {@code provider\u0000model} pair. Reported live on 2026-11-05: a new
+     * session surfaced the build-time default model instead of the one the
+     * user had been working with.
+     */
+    private static final String KEY_LAST_USED = "last-used";
+
+    /**
+     * The separator inside the last-used pair. It is the same one the chat
+     * tab registry uses for its tab keys, so a stored pair reads the same
+     * way a tab key does.
+     */
+    private static final char LAST_USED_SEPARATOR = '\u0000';
+
+    /**
      * Start-up flag naming which registered provider this session talks to.
      * The plug-in never decides the model runtime itself: the flag is how a
      * person (or a verification run) says so without editing the stored
@@ -108,6 +123,70 @@ public final class ProviderStore {
             }
             return current;
         }
+    }
+
+    /**
+     * Remembers the provider and model the user opened a chat with. Incomplete
+     * input is not a user decision: a blank provider or a blank model leaves
+     * the stored pair untouched, and a forged separator inside a value is
+     * ignored the same way, so only complete pairs can ever be stored. The
+     * write flushes immediately; a backing-store failure leaves the pair in
+     * memory for the next save to retry.
+     *
+     * @param theProvider provider id of the opened chat
+     * @param theModel model name of the opened chat
+     */
+    public static synchronized void rememberLastUsed(final String theProvider,
+        final String theModel) {
+        if(!isUsablePart(theProvider) || !isUsablePart(theModel)) {
+            return;
+        }
+        final Preferences preferences = node();
+        preferences.put(KEY_LAST_USED, theProvider + LAST_USED_SEPARATOR + theModel);
+        try {
+            preferences.flush();
+        } catch (final BackingStoreException ex) {
+            // preferences remain in memory; next save retries
+        }
+    }
+
+    /** @return the provider of the last-used pair, empty when there is none */
+    public static synchronized String lastUsedProvider() {
+        return parseLastUsed()[0];
+    }
+
+    /** @return the model of the last-used pair, empty when there is none */
+    public static synchronized String lastUsedModel() {
+        return parseLastUsed()[1];
+    }
+
+    /**
+     * Reads the stored pair once and splits it; a missing, malformed or
+     * single-segment value reads as "no data", never as an exception — a
+     * corrupted preferences entry must not break the startup path that
+     * consults the pair.
+     *
+     * @return two elements, first the provider, second the model, empty
+     *         strings when the stored value is not a usable pair
+     */
+    private static String[] parseLastUsed() {
+        final String raw = node().get(KEY_LAST_USED, "");
+        final int separator = raw.indexOf(LAST_USED_SEPARATOR);
+        if(separator <= 0 || separator >= raw.length() - 1) {
+            return new String[] {"", ""};
+        }
+        return new String[] {raw.substring(0, separator),
+            raw.substring(separator + 1)};
+    }
+
+    /**
+     * @param thePart candidate value of one half of a pair
+     * @return whether the value is complete: non-null, not blank, and without
+     *         the pair separator inside it
+     */
+    private static boolean isUsablePart(final String thePart) {
+        return thePart != null && !thePart.isBlank()
+            && thePart.indexOf(LAST_USED_SEPARATOR) < 0;
     }
 
     private ProviderStore() {
