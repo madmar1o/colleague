@@ -161,4 +161,56 @@ class ConversationStoreTest {
         assertEquals(4, new ConversationStore(storeFile()).load(TAB_KEY).size(),
             "the first save rewrites the corrupt file into a working one");
     }
+
+    /**
+     * The live incident of 2026-11-05: a provider stream broke leaving an
+     * assistant message with an empty text, and the store wrote the silent
+     * turn into the durable file, where it surfaced as a blank bubble after
+     * every restart. A turn that said nothing is not a memory: neither empty
+     * answers nor empty questions belong in the stored transcript.
+     */
+    @Test
+    void anEmptyTurnIsNotPersisted() {
+        final ConversationStore store = new ConversationStore(storeFile());
+        final List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.user("вопрос"));
+        messages.add(ChatMessage.assistant("нормальный ответ"));
+        messages.add(ChatMessage.assistant(""));
+        messages.add(ChatMessage.user("   "));
+        store.save(TAB_KEY, messages);
+
+        final List<ChatMessage> loaded = new ConversationStore(storeFile()).load(TAB_KEY);
+        assertEquals(2, loaded.size(),
+            "empty texts are not a memory either side of the exchange");
+        assertEquals("вопрос", loaded.get(0).getContent());
+        assertEquals("нормальный ответ", loaded.get(1).getContent());
+    }
+
+    /**
+     * Transcripts saved by earlier builds may already carry the blank turn:
+     * the loader skips it on the way out, so a same-day save/load cycle makes
+     * an old file heal itself without a migration.
+     */
+    @Test
+    void aStoredEmptyTurnIsSkippedOnLoad() throws IOException {
+        final com.google.gson.JsonArray transcript = new com.google.gson.JsonArray();
+        final com.google.gson.JsonObject user = new com.google.gson.JsonObject();
+        user.addProperty("role", ChatMessage.ROLE_USER);
+        user.addProperty("content", "вопрос");
+        final com.google.gson.JsonObject assistant = new com.google.gson.JsonObject();
+        assistant.addProperty("role", ChatMessage.ROLE_ASSISTANT);
+        assistant.addProperty("content", "");
+        transcript.add(user);
+        transcript.add(assistant);
+        final com.google.gson.JsonObject sessions = new com.google.gson.JsonObject();
+        sessions.add(TAB_KEY, transcript);
+        final com.google.gson.JsonObject document = new com.google.gson.JsonObject();
+        document.add("sessions", sessions);
+        Files.writeString(storeFile(), new com.google.gson.Gson().toJson(document));
+
+        final List<ChatMessage> loaded = new ConversationStore(storeFile()).load(TAB_KEY);
+        assertEquals(1, loaded.size(), "the blank assistant turn must not come back");
+        assertEquals(ChatMessage.ROLE_USER, loaded.get(0).getRole());
+        assertEquals("вопрос", loaded.get(0).getContent());
+    }
 }
