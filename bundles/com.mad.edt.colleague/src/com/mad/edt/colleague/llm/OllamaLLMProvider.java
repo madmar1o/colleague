@@ -402,10 +402,8 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
     }
 
     /**
-     * An upper bound on what the message list costs the runtime's tokenizer:
-     * mixed plain and source text tokenizes at well under one token per
-     * character, and a flat margin covers the chat template wrapped around
-     * the messages.
+     * An upper bound on what the message list costs the runtime's tokenizer,
+     * by the shared character-length rule of {@link PromptTokens}.
      *
      * @param theMessages the message list going into this call
      * @return estimated token count
@@ -418,7 +416,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
                 characters += content.length();
             }
         }
-        return characters * 3 / 5 + 256;
+        return PromptTokens.estimateForCharacters(characters);
     }
 
     private JsonObject buildBody(final ChatRequest theRequest, final boolean theStreaming,
