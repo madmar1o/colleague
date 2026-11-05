@@ -250,8 +250,8 @@ class VectorIndexTest {
         assertEquals(1, report.failed());
         // the two neighbors are tracked, the failed file stays retryable
         assertEquals(2, ourIndex.trackedFileCount());
-        assertNotNull(ourIndex.fingerprintOf("g1.bsl"));
-        assertNull(ourIndex.fingerprintOf("bad.bsl"));
+        assertNotNull(ourIndex.fingerprintOf(good1.toString()));
+        assertNull(ourIndex.fingerprintOf(bad.toString()));
     }
 
     @Test
@@ -287,7 +287,8 @@ class VectorIndexTest {
         Files.writeString(file, numberedFile(30), StandardCharsets.UTF_8);
         final String hash = sha256Hex(numberedFile(30).getBytes(StandardCharsets.UTF_8));
         storeTransport.answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"a.bsl\","
-            + "\"hash\":\"" + hash + "\"}}],\"next_page_offset\":null}}");
+            + "\"location\":\"" + jsonEscape(file.toString()) + "\",\"hash\":\"" + hash
+            + "\"}}],\"next_page_offset\":null}}");
         final VectorIndex ourIndex = index();
         ourIndex.restoreFingerprints();
         assertEquals(1, ourIndex.trackedFileCount());
@@ -301,6 +302,43 @@ class VectorIndexTest {
         // skipping is decided without any further store or embed traffic
         assertEquals(storeCalls, storeTransport.getCallCount());
         assertEquals(0, embedTransport.getCallCount());
+    }
+
+    @Test
+    void chunksWrittenBeforeTheLocationFieldAreDroppedAndNotAdopted(@TempDir final Path theDir)
+        throws IOException, IndexFailure {
+        // points of an older generation carry only the display path: their
+        // fingerprint cannot be trusted, because two projects may share that
+        // path; the walk deletes those points instead of adopting them, and
+        // the file is embedded afresh with a location-tagged payload
+        final Path file = theDir.resolve("a.bsl");
+        Files.writeString(file, numberedFile(30), StandardCharsets.UTF_8);
+        final String hash = sha256Hex(numberedFile(30).getBytes(StandardCharsets.UTF_8));
+        storeTransport.answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"a.bsl\","
+            + "\"hash\":\"" + hash + "\"}}],\"next_page_offset\":null}}");
+        storeOk();
+        final VectorIndex ourIndex = index();
+        assertEquals(0, ourIndex.restoreFingerprints());
+        assertEquals(0, ourIndex.trackedFileCount());
+        // the walk cost one scroll plus one targeted delete of the stale point
+        assertEquals(2, storeTransport.getCallCount());
+        final String deleteBody = storeTransport.callAt(1).getJsonBody();
+        assertTrue(deleteBody.contains("\"key\":\"path\""), deleteBody);
+        assertTrue(deleteBody.contains("\"value\":\"a.bsl\""), deleteBody);
+        assertTrue(deleteBody.contains("\"key\":\"location\""), deleteBody);
+        assertTrue(deleteBody.contains("\"is_empty\":{}"), deleteBody);
+        assertTrue(storeTransport.callAt(1).getUrl().endsWith("/points/delete?wait=true"),
+            storeTransport.callAt(1).getUrl());
+        // the file is re-embedded from scratch, now carrying its location
+        storeOk();
+        embedVectors(1);
+        storeOk();
+        final UpdateReport report = ourIndex.update(List.of(sourceOf(file, "a.bsl")));
+        assertEquals(1, report.reembedded());
+        assertEquals(0, report.purged());
+        assertTrue(storeTransport.callAt(3).getJsonBody().contains(
+            "\"location\":\"" + jsonEscape(file.toString()) + '"'),
+            storeTransport.callAt(3).getJsonBody());
     }
 
     @Test
@@ -319,7 +357,8 @@ class VectorIndexTest {
         final List<SourceFile> both = List.of(
             sourceOf(alpha, "cfg/x.bsl"), sourceOf(beta, "cfg/x.bsl"));
         final VectorIndex ourIndex = index();
-        // alpha: clear, embed, write; beta: clear, embed, write
+        // alpha: clear, write; beta: clear, write (each embed rides the
+        // embedding transport, not the store one)
         storeOk();
         embedVectors(1);
         storeOk();
@@ -334,10 +373,10 @@ class VectorIndexTest {
         assertTrue(clearAlpha.contains("\"key\":\"location\""), clearAlpha);
         assertTrue(clearAlpha.contains("\"" + jsonEscape(alpha.toString()) + '"'),
             clearAlpha);
-        final String writeAlpha = storeTransport.callAt(2).getJsonBody();
+        final String writeAlpha = storeTransport.callAt(1).getJsonBody();
         assertTrue(writeAlpha.contains("\"location\":\"" + jsonEscape(alpha.toString())
             + '"'), writeAlpha);
-        final String writeBeta = storeTransport.callAt(5).getJsonBody();
+        final String writeBeta = storeTransport.callAt(3).getJsonBody();
         assertTrue(writeBeta.contains("\"location\":\"" + jsonEscape(beta.toString())
             + '"'), writeBeta);
         // the two files of one display path get distinct point keys, so they
@@ -347,7 +386,7 @@ class VectorIndexTest {
         report = ourIndex.update(both);
         assertEquals(0, report.reembedded());
         assertEquals(2, report.skipped());
-        assertEquals(6, storeTransport.getCallCount());
+        assertEquals(4, storeTransport.getCallCount());
         assertEquals(2, embedTransport.getCallCount());
         // restart emulation: the walk over the stored chunks sees the same
         // display path twice under distinct locations, adopts both, and
@@ -366,7 +405,7 @@ class VectorIndexTest {
         assertEquals(0, report.reembedded());
         assertEquals(2, report.skipped());
         // the rebooted pass stayed silent beyond the walk itself
-        assertEquals(7, storeTransport.getCallCount());
+        assertEquals(5, storeTransport.getCallCount());
         assertEquals(2, embedTransport.getCallCount());
     }
 
