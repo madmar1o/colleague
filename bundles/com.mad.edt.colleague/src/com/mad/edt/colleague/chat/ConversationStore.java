@@ -102,6 +102,11 @@ public final class ConversationStore {
             if(role == null || content == null) {
                 continue;
             }
+            // rows written by earlier builds may carry a blank turn: skip it
+            // on the way out, an old file heals itself without a migration
+            if(!ChatMessage.ROLE_SYSTEM.equals(role) && content.isBlank()) {
+                continue;
+            }
             loaded.add(replay(role, content));
         }
         return loaded;
@@ -123,12 +128,19 @@ public final class ConversationStore {
      * Only the dialog itself is worth a restart: user and assistant texts
      * stay, the digest that replaced the folded-away turns stays, while the
      * per-turn workspace context (re-attached fresh every turn anyway) and
-     * the tool-call plumbing of one agent run are dropped.
+     * the tool-call plumbing of one agent run are dropped. A turn that said
+     * nothing is not a memory either: a broken provider stream must not
+     * leave a blank bubble in the durable transcript (the 2026-11-05 live
+     * incident behind K2).
      *
      * @param theMessage message of a live conversation snapshot
      * @return {@code true} when this message belongs in the stored transcript
      */
     private static boolean worthRemembering(final ChatMessage theMessage) {
+        final String content = theMessage.getContent();
+        if(content == null || content.isBlank()) {
+            return false;
+        }
         if(ChatMessage.ROLE_USER.equals(theMessage.getRole())) {
             return true;
         }
@@ -136,7 +148,7 @@ public final class ConversationStore {
             return !theMessage.hasToolCalls();
         }
         return ChatMessage.ROLE_SYSTEM.equals(theMessage.getRole())
-            && theMessage.getContent().startsWith(Conversation.DIGEST_MARKER);
+            && content.startsWith(Conversation.DIGEST_MARKER);
     }
 
     /**
