@@ -929,14 +929,26 @@ public class ColleagueView extends ViewPart {
      * @param theContact provider, model and agent triple to open
      */
     private void openContact(final ContactsPanel.Contact theContact) {
+        // the user picked this pair on the contacts page: it becomes the
+        // remembered default for the next session; automatic opens (the
+        // launch auto-chat, profile cards) go through openChatFor and do not
+        // rewrite the memory
+        com.mad.edt.colleague.llm.ProviderStore.rememberLastUsed(
+            theContact.getProviderId(), theContact.getModel());
+        openChatFor(theContact);
+    }
+
+    /**
+     * Opens a chat tab without touching the remembered default: the automatic
+     * paths (launch auto-chat, agent cards) route here, so the stored pair
+     * keeps reflecting the user's own picks only.
+     *
+     * @param theContact provider, model and agent triple to open
+     */
+    private void openChatFor(final ContactsPanel.Contact theContact) {
         if(ourTabFolder.isDisposed()) {
             return;
         }
-        // the user picked this pair from the contacts page: it becomes the
-        // remembered default for the next session, on both the create path
-        // and the return-to-existing-tab path
-        com.mad.edt.colleague.llm.ProviderStore.rememberLastUsed(
-            theContact.getProviderId(), theContact.getModel());
         if(existingTabFor(theContact) != null) {
             return;
         }
@@ -975,7 +987,9 @@ public class ColleagueView extends ViewPart {
         final AgentProfile profile = theName == null || theName.isEmpty()
             ? null : findProfile(theName);
         final String model = agentModelFor(profile, preferred);
-        openContact(new ContactsPanel.Contact(preferred.getProviderId(), model,
+        // the automatic path must not rewrite the remembered default: only
+        // a pick on the contacts page is a user decision
+        openChatFor(new ContactsPanel.Contact(preferred.getProviderId(), model,
             profile == null ? "" : profile.getName()));
     }
 
@@ -1027,10 +1041,6 @@ public class ColleagueView extends ViewPart {
         if(ourTabFolder.isDisposed()) {
             return null;
         }
-        // the user opened this pair: it becomes the default the next session
-        // restores; sessions started by the launch flag never feed this
-        com.mad.edt.colleague.llm.ProviderStore.rememberLastUsed(
-            theContact.getProviderId(), theContact.getModel());
         final CTabItem existing = existingTabFor(theContact);
         if(existing != null) {
             return existing.getData() instanceof ChatPanel ? (ChatPanel)existing.getData() : null;
