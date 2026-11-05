@@ -13,7 +13,6 @@ bundles/
                                  диалоговая память (M2/M3/M9)
   com.mad.edt.colleague.context/ контекст проекта: поиск + семантический
                                  индекс модулей (M4/M8/M10)
-  com.mad.edt.colleague.ui.common/    общие UI-хелперы (M4)
   com.mad.edt.colleague.ui/           view/команды EDT, страницы-HTML (M4/M9)
   *.tests/                            тестовые фрагменты: JUnit 5 в реакторе (M10.5)
 features/com.mad.edt.colleague.feature/
