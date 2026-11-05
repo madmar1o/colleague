@@ -604,9 +604,18 @@ var btnBottom = document.getElementById("btnbottom");
    statuses arrive. A fixed offset used to land the arrow right on the send
    button, so measure the real stack instead. */
 function placeBottomBtn() {
-  var comp = document.getElementById("composer");
-  var hint = document.querySelector(".hint");
-  var stack = comp.offsetHeight + (hint ? hint.offsetHeight : 0) + 12;
+  /* The status line and the catalog strip sit between the feed and the
+     composer, both may be shown or hidden in any combination, so instead of
+     naming parts by hand the arrow steps over every sibling of the feed that
+     is actually visible. */
+  var stack = 12;
+  var node = document.getElementById("btnbottom").nextElementSibling;
+  while (node) {
+    if (node.offsetParent) {
+      stack += node.offsetHeight;
+    }
+    node = node.nextElementSibling;
+  }
   btnBottom.style.bottom = stack + "px";
 }
 window.addEventListener("resize", placeBottomBtn);
