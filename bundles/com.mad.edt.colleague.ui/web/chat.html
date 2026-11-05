@@ -116,6 +116,8 @@ main {
 }
 .ticks { color: #58b7f0; letter-spacing: -3px; font-weight: 700; }
 .copylink { color: var(--muted); cursor: pointer; font-size: 11px; }
+.filelink { color: var(--accent); cursor: pointer; text-decoration: underline;
+  text-decoration-style: dotted; }
 .smallavatar {
   width: 30px; height: 30px; border-radius: 50%; flex: none; font-size: 12px;
   display: flex; align-items: center; justify-content: center; color: #fff;
@@ -220,7 +222,7 @@ button.send.stop { background: var(--error); }
   animation: blink 1s infinite;
 }
 button.scrollbottom {
-  position: fixed; right: 16px; bottom: 96px; width: 34px; height: 34px;
+  position: fixed; right: 32px; bottom: 96px; width: 34px; height: 34px;
   border-radius: 50%; border: 1px solid var(--line); background: var(--panel2);
   color: var(--text); font-size: 15px; line-height: 1; cursor: pointer;
   display: none; box-shadow: 0 2px 8px rgba(0,0,0,.3); z-index: 5;
@@ -509,14 +511,55 @@ function mdBlocks(src) {
   return out;
 }
 function inlineMd(s) {
-  s = s.replace(/`([^`\n]+)`/g, '<code class="inline">$1</code>');
-  s = s.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
-  s = s.replace(/(^|[\s(])__([^_\n]+)__(?=$|[\s).,!?])/g, "$1<b>$2</b>");
-  s = s.replace(/(^|\s)\*([^*\n]+)\*/g, "$1<i>$2</i>");
-  s = s.replace(/~~([^~\n]+)~~/g, "<s>$1</s>");
-  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,
-    '<a href="#" onclick="return false;">$1</a>');
-  return s;
+  /* code spans are cut out first: a path written inside backticks is literal
+     text the reader may want to copy, not a citation to jump through */
+  var parts = s.split(/`([^`\n]+)`/g), out = "";
+  for (var i = 0; i < parts.length; i++) {
+    var t = parts[i];
+    t = t.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+    t = t.replace(/(^|[\s(])__([^_\n]+)__(?=$|[\s).,!?])/g, "$1<b>$2</b>");
+    t = t.replace(/(^|\s)\*([^*\n]+)\*/g, "$1<i>$2</i>");
+    t = t.replace(/~~([^~\n]+)~~/g, "<s>$1</s>");
+    if (i % 2 === 0) {
+      t = t.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,
+        '<a href="#" onclick="return false;">$1</a>');
+      t = linkifyPaths(t);
+    } else {
+      t = '<code class="inline">' + t + "</code>";
+    }
+    out += t;
+  }
+  return out;
+}
+/* path:line citations of workspace files become editor jumps. The lookbehind
+   keeps URLs out: their host part is preceded by "//". A token is rendered as
+   a link only when its path passes the same workspace rules Java checks on
+   the click, so a citation that could never open stays plain text. */
+function linkifyPaths(s) {
+  return s.replace(/(?<![\w:.\/-])((?:[\w\u0400-\u04FF][\w\u0400-\u04FF._-]*\/)+[\w\u0400-\u04FF][\w\u0400-\u04FF._-]*):\d{1,7}(?![\w\/])/g,
+    function (m) {
+      var cut = m.lastIndexOf(":");
+      var path = m.substring(0, cut), line = m.substring(cut + 1);
+      if (!pathIsWorkspaceSafe(path)) { return m; }
+      return '<span class="filelink" onclick="openFileLink(\'' +
+        encodeURIComponent(path) + "'," + line + ')">' + m + "</span>";
+    });
+}
+/* mirrors WorkspacePathGuard.isSafe on the Java side: workspace-relative with
+   a project segment, no drive letters, no absolute start, no dot hops. */
+function pathIsWorkspaceSafe(p) {
+  if (!p || p.charAt(0) === "/" || p.indexOf("\\") >= 0 || p.indexOf(":") >= 0) {
+    return false;
+  }
+  var segs = p.split("/");
+  if (segs.length < 2) { return false; }
+  for (var i = 0; i < segs.length; i++) {
+    if (!segs[i] || segs[i] === "." || segs[i] === "..") { return false; }
+  }
+  return true;
+}
+function openFileLink(encodedPath, line) {
+  apiCall("openFile", { path: decodeURIComponent(encodedPath), line: String(line) });
 }
 function copyPre(node) {
   var pre = node.closest("pre");
@@ -535,7 +578,20 @@ function now() {
     m = ("0" + d.getMinutes()).slice(-2);
   return h + ":" + m;
 }
-function scrollDown() { msgs.scrollTop = msgs.scrollHeight; }
+function scrollDown() {
+  msgs.scrollTop = msgs.scrollHeight;
+  /* A finished answer re-renders (meta line, code blocks) after the push that
+     triggered this call, so pin again once the browser laid that out: one rAF
+     per frame until the pin stops moving. Without it the last line can end up
+     under the composer and the reader thinks the view stopped short. */
+  var lastHeight = -1, tries = 0;
+  (function pin() {
+    if (msgs.scrollHeight === lastHeight || tries > 3) { return; }
+    lastHeight = msgs.scrollHeight; tries++;
+    msgs.scrollTop = msgs.scrollHeight;
+    window.requestAnimationFrame(pin);
+  })();
+}
 /* Stick-to-bottom feed: the view follows new text only while the user was
    already near the bottom; scrolling up releases the grip and the down-arrow
    button appears to jump back. */
@@ -543,7 +599,28 @@ function nearBottom() {
   return msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 60;
 }
 var btnBottom = document.getElementById("btnbottom");
+/* The arrow floats above whatever bottom stack the page shows at the moment:
+   composer, hint, status and catalog lines all change height as modes and
+   statuses arrive. A fixed offset used to land the arrow right on the send
+   button, so measure the real stack instead. */
+function placeBottomBtn() {
+  /* The status line and the catalog strip sit between the feed and the
+     composer, both may be shown or hidden in any combination, so instead of
+     naming parts by hand the arrow steps over every sibling of the feed that
+     is actually visible. */
+  var stack = 12;
+  var node = document.getElementById("btnbottom").nextElementSibling;
+  while (node) {
+    if (node.offsetParent) {
+      stack += node.offsetHeight;
+    }
+    node = node.nextElementSibling;
+  }
+  btnBottom.style.bottom = stack + "px";
+}
+window.addEventListener("resize", placeBottomBtn);
 msgs.addEventListener("scroll", function () {
+  placeBottomBtn();
   btnBottom.style.display = nearBottom() ? "none" : "block";
 });
 btnBottom.addEventListener("click", function () { scrollDown(); });

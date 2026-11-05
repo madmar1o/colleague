@@ -1,0 +1,22 @@
+{"cases":[
+  { "path": "Catalogs/Orders/Orders.xml", "safe": true },
+  { "path": "CommonModule/Ext/Module.bsl", "safe": true },
+  { "path": "Проект/ОбщийМодуль/Модуль.bsl", "safe": true },
+  { "path": "ERPУправление_холдингом_демо/src/CommonModules/ZipАрхивы/Module.bsl", "safe": true },
+  { "path": "src/CommonModules/ЮТКоллекции/Module.bsl?не-файл", "safe": true },
+  { "path": "p/к./,.,.,x", "safe": true },
+  { "path": "Proj/ ./x.bsl", "safe": true },
+  { "path": "Proj/ /x.bsl", "safe": true },
+  { "path": "README.md", "safe": false },
+  { "path": "", "safe": false },
+  { "path": "a/b//c.x", "safe": false },
+  { "path": "../outside.bsl", "safe": false },
+  { "path": "Proj/secret/../../x.bsl", "safe": false },
+  { "path": "/abs/path/x.bsl", "safe": false },
+  { "path": "C:/Windows/x.bsl", "safe": false },
+  { "path": "D:\\data\\x.bsl", "safe": false },
+  { "path": "Proj\\Modules\\x.bsl", "safe": false },
+  { "path": "Proj//Modules/x.bsl", "safe": false },
+  { "path": "./Proj/x.bsl", "safe": false }
+]
+}

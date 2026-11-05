@@ -99,6 +99,11 @@ class PageCommandHandlerTest {
         public void openSettings() {
             calls.add("openSettings");
         }
+
+        @Override
+        public void openInEditor(final String thePath, final int theLine) {
+            calls.add("openInEditor|" + thePath + "|" + theLine);
+        }
     }
 
     /** page arguments as name-value pairs, missing name arrives as null */
@@ -201,6 +206,17 @@ class PageCommandHandlerTest {
         final PageCommandHandler handler = handlerWith(actions);
         handler.handle("openSettings", args());
         assertEquals(List.of("openSettings"), actions.calls);
+    }
+
+    @Test
+    void fileLinkClickCarriesPathAndLineToThePanel() {
+        final RecordingActions actions = new RecordingActions();
+        final PageCommandHandler handler = handlerWith(actions);
+        handler.handle("openFile", args("path", "Catalogs/Orders/Orders.xml", "line", "7"));
+        handler.handle("openFile", args("path", "Catalogs/Orders/Orders.xml"));
+        assertEquals(List.of("openInEditor|Catalogs/Orders/Orders.xml|7",
+            "openInEditor|Catalogs/Orders/Orders.xml|0"), actions.calls,
+            "the page sends path and line, a missing line arrives as zero");
     }
 
     @Test

@@ -239,12 +239,15 @@ class SemanticIndexTest {
             SemanticIndex.forTesting("colleague_reboot", store, embed);
         final Path file = theDir.resolve("x.bsl");
         Files.writeString(file, "line1\nline2\nline3");
-        // the store payload of yesterday's session carries the file hash
+        // the store payload of yesterday's session carries the file hash and
+        // the absolute location the chunk belongs to
         store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
         store.answer(200, "{\"result\":{\"config\":{\"params\":{\"vectors\":"
             + "{\"size\":4,\"distance\":\"Cosine\"}}}}}");
         store.answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"src/x.bsl\","
-            + "\"hash\":\"" + sha256Hex(Files.readAllBytes(file)) + "\"}}],\"next_page_offset\":null}}");
+            + "\"location\":\"" + file.toString().replace("\\", "\\\\") + "\","
+            + "\"hash\":\"" + sha256Hex(Files.readAllBytes(file))
+            + "\"}}],\"next_page_offset\":null}}");
         probeFourDimensions(embed);
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());

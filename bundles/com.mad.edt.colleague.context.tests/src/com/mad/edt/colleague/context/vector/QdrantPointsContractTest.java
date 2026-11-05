@@ -66,6 +66,30 @@ class QdrantPointsContractTest {
     }
 
     @Test
+    @DisplayName("delete-without-field demands the value match and the empty marker")
+    void deleteWithMissingFieldShape() throws Exception {
+        final ScriptedHttpTransport transport =
+            new ScriptedHttpTransport().answer(200, "{\"status\":\"ok\",\"result\":{}}");
+
+        new QdrantClient("http://store.test", 1_000, transport)
+            .deleteChunksWithoutField(COLLECTION, "path", "a.bsl", "location");
+
+        final HttpCallSpec call = transport.callAt(0);
+        Assertions.assertEquals("POST", call.getMethod());
+        Assertions.assertEquals("http://store.test/collections/" + COLLECTION
+            + "/points/delete?wait=true", call.getUrl());
+        // the point must match the value under one key and carry the second
+        // key as empty: exactly the older generation of chunks; the store
+        // spells the empty keyword with the key inside is_empty, verified
+        // against a live server, the flat form is rejected there
+        Assertions.assertEquals(
+            JsonParser.parseString("{\"filter\":{\"must\":["
+                + "{\"key\":\"path\",\"match\":{\"value\":\"a.bsl\"}},"
+                + "{\"is_empty\":{\"key\":\"location\"}}]}}").getAsJsonObject(),
+            JsonParser.parseString(call.getJsonBody()).getAsJsonObject());
+    }
+
+    @Test
     @DisplayName("search sends the query vector and turns answers into payload hits")
     void searchShapeAndParsing() throws Exception {
         final ScriptedHttpTransport transport = new ScriptedHttpTransport()

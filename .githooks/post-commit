@@ -1,0 +1,12 @@
+#!/bin/sh
+# post-commit: фиксируем git-событие и асинхронно просим пересканировать проект.
+# Журнал событий — вне репозитория: ../notes/git-events.log
+LOG="/c/open-project/Colleague Project/notes/git-events.log"
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+HEAD=$(git rev-parse --short HEAD 2>/dev/null)
+SUBJ=$(git log -1 --pretty=%s 2>/dev/null)
+echo "$(date -Iseconds) event=post-commit branch=$BRANCH head=$HEAD subject=\"$SUBJ\"" >> "$LOG"
+# фоновый пересчёт SonarQube (не блокирует коммит)
+powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass \
+  -File 'C:\open-project\Colleague Project\tools\sonar_track.ps1' >/dev/null 2>&1 &
+exit 0

@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui.view;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -7,8 +8,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
@@ -25,15 +28,19 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.ui.PartInitException;
+import org.eclipse.ui.ide.IDE;
 import org.eclipse.ui.part.ViewPart;
+import org.eclipse.ui.texteditor.ITextEditor;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.FrameworkUtil;
 
 import com.mad.edt.colleague.agent.AgentMemory;
 import com.mad.edt.colleague.agent.AgentMode;
+import com.mad.edt.colleague.agent.MetadataTools;
 import com.mad.edt.colleague.agents.AgentCatalog;
 import com.mad.edt.colleague.agents.AgentProfile;
 import com.mad.edt.colleague.agents.AgentProfileWriter;
+import com.mad.edt.colleague.chat.ContextBudget;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
 import com.mad.edt.colleague.context.ContextSource;
@@ -43,6 +50,7 @@ import com.mad.edt.colleague.context.SemanticSettings;
 import com.mad.edt.colleague.commands.CommandDefinition;
 import com.mad.edt.colleague.commands.CommandLoader;
 import com.mad.edt.colleague.commands.SlashCommands;
+import com.mad.edt.colleague.chat.ConversationStore;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
 import com.mad.edt.colleague.llm.LLMSettings;
 import com.mad.edt.colleague.llm.ProviderConfig;
@@ -51,6 +59,7 @@ import com.mad.edt.colleague.skills.SkillDefinition;
 import com.mad.edt.colleague.skills.SkillLoader;
 import com.mad.edt.colleague.skills.SkillRegistry;
 import com.mad.edt.colleague.ui.ColleagueUIPlugin;
+import com.mad.edt.colleague.ui.internal.ActiveEditorWatcher;
 import com.mad.edt.colleague.ui.internal.AgentsPanel;
 import com.mad.edt.colleague.ui.internal.ChatPanel;
 import com.mad.edt.colleague.ui.internal.ChatSession;
@@ -97,6 +106,9 @@ public class ColleagueView extends ViewPart {
     /** Resource/project context staged together with the question. */
     private static volatile String ourPendingContext;
 
+    /** Agent profile name the staged question should run on. */
+    private static volatile String ourPendingProfile;
+
     /** The single visible instance (the view is not multiplicable). */
     private static volatile ColleagueView ourInstance;
 
@@ -115,6 +127,8 @@ public class ColleagueView extends ViewPart {
     private CTabFolder ourTabFolder;
     private CodeSearch ourCodeSearch;
     private ConfigurationOverview ourOverview;
+    /** Metadata tools of the open projects, rebuilt from the workspace per turn. */
+    private final MetadataTools ourMetadataTools = new MetadataTools(this::metadataRoots);
 
     /**
      * Remote tool catalog shared by every chat tab of this view: one set of
@@ -129,6 +143,13 @@ public class ColleagueView extends ViewPart {
      * later sessions from a file in the plugin's state area.
      */
     private AgentMemory ourLessonMemory;
+
+    /**
+     * Durable transcripts of chat tabs, opened once per workbench session
+     * over a file in the plug-in's state area; see {@link #transcriptStore()}.
+     */
+    private com.mad.edt.colleague.chat.ConversationStore ourTranscriptStore;
+
     private SemanticIndex ourSemantic;
     private volatile boolean ourOverviewStale;
 
@@ -155,6 +176,9 @@ public class ColleagueView extends ViewPart {
 
     /** Debug-only HTTP transport for the chat page, open only by start-up flag. */
     private com.mad.edt.colleague.ui.internal.WebBridge ourWebBridge;
+
+    /** Tracks the active text editor for the autocontext. */
+    private final ActiveEditorWatcher ourActiveEditorWatcher = new ActiveEditorWatcher();
 
     private String ourLastAnswer = "";
     private ChatPanel ourLastAnsweredPanel;
@@ -183,10 +207,31 @@ public class ColleagueView extends ViewPart {
     }
 
     /**
+     * Stages the agent profile the next staged question should run on: the
+     * chat opens on (or switches to) a tab of that profile instead of the
+     * default agent.
+     *
+     * @param theProfileName profile name from the agent catalog, empty or
+     *            {@code null} to keep the default routing
+     */
+    public static void stageProfile(final String theProfileName) {
+        ourPendingProfile = theProfileName == null ? "" : theProfileName.trim();
+    }
+
+    /**
      * @return the currently visible instance or {@code null}
      */
     public static ColleagueView getInstance() {
         return ourInstance;
+    }
+
+    /**
+     * @return the merged agent catalog behind the agents page, never
+     *         {@code null}; handlers use it to pick the profile a staged
+     *         question should run on
+     */
+    public List<AgentProfile> getAgentCatalog() {
+        return profileCatalog();
     }
 
     @Override
@@ -299,6 +344,9 @@ public class ColleagueView extends ViewPart {
         }
         ourContacts.reload();
         scheduleAgentProbe();
+
+        // track the active editor for the autocontext
+        ourActiveEditorWatcher.attach(getViewSite().getPage());
     }
 
     /**
@@ -321,14 +369,15 @@ public class ColleagueView extends ViewPart {
             if(ourProbeDone || ourTabFolder.isDisposed()) {
                 return;
             }
-            final ChatPanel panel = targetPanelForStaged();
+            final ChatPanel panel = targetPanelForStaged(null);
             if(panel == null) {
                 System.err.println("[colleague] agent probe skipped: no chat panel yet");
                 return;
             }
             ourProbeDone = true;
             AgentMode.setOn(true);
-            panel.setToolSupplier(() -> WorkspaceTools.readOnly(ourCodeSearch, ourOverview));
+            panel.setToolSupplier(() -> WorkspaceTools.readOnly(ourCodeSearch, ourOverview,
+                ourMetadataTools));
             System.err.println("[colleague] agent probe: edit mode on, read-only tools,"
                 + " sending the probe question");
             panel.fillQuestion("Сколько всего объектов метаданных в конфигурации этого"
@@ -449,6 +498,7 @@ public class ColleagueView extends ViewPart {
             ourWebBridge.close();
             ourWebBridge = null;
         }
+        // the ActiveEditorWatcher clears its snapshot on partClosed, nothing more needed
         if(ourAgents != null) {
             ourAgents.dispose();
         }
@@ -471,10 +521,13 @@ public class ColleagueView extends ViewPart {
 
     /**
      * Applies a question and context staged after this instance was created:
-     * they go into the active (or default) chat tab without sending them.
+     * they go into the active (or default) chat tab without sending them. A
+     * staged profile name reroutes the question into a tab of that profile.
      */
     public void applyStaged() {
-        final ChatPanel panel = targetPanelForStaged();
+        final String stagedProfile = ourPendingProfile;
+        ourPendingProfile = null;
+        final ChatPanel panel = targetPanelForStaged(stagedProfile);
         if(panel == null) {
             return;
         }
@@ -490,15 +543,31 @@ public class ColleagueView extends ViewPart {
         }
     }
 
-    private ChatPanel targetPanelForStaged() {
+    /**
+     * Resolves the panel a staged question belongs to: with a staged profile
+     * name the chat opens on that profile's tab (reusing an open one),
+     * otherwise the active tab or the default contact as before.
+     *
+     * @param theProfileName staged profile name, empty or {@code null} for
+     *            the default routing
+     * @return the panel to fill, {@code null} when no chat can be opened
+     */
+    private ChatPanel targetPanelForStaged(final String theProfileName) {
         if(ourTabFolder.isDisposed()) {
             return null;
+        }
+        final ContactsPanel.Contact preferred = ourDefaultContactCache;
+        if(theProfileName != null && !theProfileName.isEmpty() && preferred != null) {
+            final AgentProfile profile = findProfile(theProfileName);
+            if(profile != null) {
+                return openContactNow(new ContactsPanel.Contact(preferred.getProviderId(),
+                    agentModelFor(profile, preferred), profile.getName()));
+            }
         }
         final CTabItem active = ourTabFolder.getSelection();
         if(active != null && active.getData() instanceof ChatPanel) {
             return (ChatPanel)active.getData();
         }
-        final ContactsPanel.Contact preferred = ourDefaultContactCache;
         if(preferred != null) {
             return openContactNow(preferred);
         }
@@ -519,6 +588,20 @@ public class ColleagueView extends ViewPart {
             return;
         }
         ContactsPanel.Contact preferred = null;
+        // a pair remembered from a previous session wins while it still
+        // exists among the available contacts; a stale pair (removed model)
+        // falls back to the provider default-model choice below
+        final String lastProvider = com.mad.edt.colleague.llm.ProviderStore.lastUsedProvider();
+        final String lastModel = com.mad.edt.colleague.llm.ProviderStore.lastUsedModel();
+        if(!lastProvider.isEmpty() && !lastModel.isEmpty()) {
+            for(final ContactsPanel.Contact contact : theAvailable) {
+                if(contact.getProviderId().equals(lastProvider)
+                    && contact.getModel().equals(lastModel)) {
+                    preferred = contact;
+                    break;
+                }
+            }
+        }
         final String defaultId = LLMSettings.getDefaultProviderId();
         // the default contact is the default provider's own default model:
         // reading the model off the built-in local provider instead made the
@@ -601,6 +684,23 @@ public class ColleagueView extends ViewPart {
             ourLessonMemory = new AgentMemory(state.resolve("agent-lessons.txt"));
         }
         return ourLessonMemory;
+    }
+
+    /**
+     * @return the durable transcripts of chat tabs, opened once per workbench
+     *         session over a JSON document in the plugin's state area; when
+     *         the state area is unavailable the temporary directory keeps the
+     *         document working in a degraded way instead of failing the view
+     */
+    private ConversationStore transcriptStore() {
+        if(ourTranscriptStore == null) {
+            final ColleagueUIPlugin plugin = ColleagueUIPlugin.getDefault();
+            final Path state = plugin != null
+                ? plugin.getStateLocation().toFile().toPath()
+                : Paths.get(System.getProperty("java.io.tmpdir"));
+            ourTranscriptStore = new ConversationStore(state.resolve("chat-sessions.json"));
+        }
+        return ourTranscriptStore;
     }
 
     /**
@@ -829,6 +929,23 @@ public class ColleagueView extends ViewPart {
      * @param theContact provider, model and agent triple to open
      */
     private void openContact(final ContactsPanel.Contact theContact) {
+        // the user picked this pair on the contacts page: it becomes the
+        // remembered default for the next session; automatic opens (the
+        // launch auto-chat, profile cards) go through openChatFor and do not
+        // rewrite the memory
+        com.mad.edt.colleague.llm.ProviderStore.rememberLastUsed(
+            theContact.getProviderId(), theContact.getModel());
+        openChatFor(theContact);
+    }
+
+    /**
+     * Opens a chat tab without touching the remembered default: the automatic
+     * paths (launch auto-chat, agent cards) route here, so the stored pair
+     * keeps reflecting the user's own picks only.
+     *
+     * @param theContact provider, model and agent triple to open
+     */
+    private void openChatFor(final ContactsPanel.Contact theContact) {
         if(ourTabFolder.isDisposed()) {
             return;
         }
@@ -870,7 +987,9 @@ public class ColleagueView extends ViewPart {
         final AgentProfile profile = theName == null || theName.isEmpty()
             ? null : findProfile(theName);
         final String model = agentModelFor(profile, preferred);
-        openContact(new ContactsPanel.Contact(preferred.getProviderId(), model,
+        // the automatic path must not rewrite the remembered default: only
+        // a pick on the contacts page is a user decision
+        openChatFor(new ContactsPanel.Contact(preferred.getProviderId(), model,
             profile == null ? "" : profile.getName()));
     }
 
@@ -1123,14 +1242,38 @@ public class ColleagueView extends ViewPart {
         thePanel.attachMirrorTransport(ourWebBridge);
     }
 
+    /**
+     * Collects the metadata trees the agent tools may read: the {@code src}
+     * folder of every open EDT project, named by the project so answers carry
+     * a workspace-relative path. The list is rebuilt on every tool call, so a
+     * configuration opened after the chat started is searchable at once and a
+     * closed one disappears instead of failing the search.
+     *
+     * @return metadata roots of the open projects, empty when none is open
+     */
+    private List<MetadataTools.Root> metadataRoots() {
+        final List<MetadataTools.Root> roots = new ArrayList<>();
+        for(final IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
+            if(!project.isOpen() || project.getLocation() == null) {
+                continue;
+            }
+            final Path src = project.getLocation().toFile().toPath().resolve("src");
+            if(Files.isDirectory(src)) {
+                roots.add(new MetadataTools.Root(project.getName(), src));
+            }
+        }
+        return roots;
+    }
+
     private ChatPanel buildChatPanel(final CTabItem theTab, final Composite theBody,
         final ChatSession theSession, final ContactsPanel.Contact theContact) {
         final ChatPanel panel = new ChatPanel(theBody, theSession, theContact.getModel());
         panel.attachThemeAnchor(ourRoot);
         panel.setToolSupplier(() -> AgentMode.isOn()
-            ? WorkspaceTools.withWrite(ourCodeSearch, ourOverview)
-            : WorkspaceTools.readOnly(ourCodeSearch, ourOverview));
+            ? WorkspaceTools.withWrite(ourCodeSearch, ourOverview, ourMetadataTools)
+            : WorkspaceTools.readOnly(ourCodeSearch, ourOverview, ourMetadataTools));
         panel.setLessonMemory(lessonMemory());
+        panel.attachTranscriptStore(transcriptStore(), theContact.getKey());
         panel.setMcpCatalog(ourMcpCatalog);
         panel.setSkillSupplier(this::skillCatalog);
         panel.setCommandSupplier(this::commandsCatalog);
@@ -1144,6 +1287,8 @@ public class ColleagueView extends ViewPart {
             "back arrow", theContact.getDisplayName()));
         panel.setOnOpenSettings(() -> showMobilePage(ourContactsArea,
             "gear", theContact.getDisplayName()));
+        // a clicked path:line link of an answer jumps the editor to that spot
+        panel.setOnOpenFile(this::openWorkspaceFile);
         // an agent tab speaks as its agent from the first turn, not only
         // after the chip was touched
         panel.setInitialAgent(theContact.getAgentName());
@@ -1168,6 +1313,35 @@ public class ColleagueView extends ViewPart {
     }
 
     /**
+     * Opens a workspace file cited by a {@code path:line} link of an answer
+     * and moves the caret to the cited line. The page-side guard already
+     * rejected paths leaving the workspace; here the file must also exist in
+     * the workspace tree, otherwise the click stays a no-op with a trace
+     * instead of an error dialog — a model can cite a path it hallucinated.
+     *
+     * @param thePath workspace-relative path, project segment first
+     * @param theLine 1-based line to reveal, {@code 0} opens without a jump
+     */
+    private void openWorkspaceFile(final String thePath, final int theLine) {
+        final IPath path = new org.eclipse.core.runtime.Path(thePath);
+        final IFile file = ResourcesPlugin.getWorkspace().getRoot().getFile(path);
+        if(!file.exists() || file.getLocation() == null) {
+            System.err.println("[colleague] answer link skipped, no such file: " + thePath);
+            return;
+        }
+        try {
+            final ITextEditor editor = (ITextEditor)IDE.openEditor(getSite().getWorkbenchWindow()
+                .getActivePage(), file);
+            if(theLine > 0 && editor != null) {
+                editor.setHighlightRange(theLine, 1, true);
+            }
+        } catch(final PartInitException ex) {
+            System.err.println("[colleague] answer link could not open " + thePath + ": "
+                + ex.getMessage());
+        }
+    }
+
+    /**
      * Automatic context for a question when none was attached by hand: code
      * search snippets for the question text, plus the workspace configuration
      * picture so the model always knows which configuration it is talking
@@ -1186,10 +1360,28 @@ public class ColleagueView extends ViewPart {
                 return Status.OK_STATUS;
             }).schedule();
         }
-        if(overview.isEmpty()) {
+        final String editor = ourActiveEditorWatcher.render();
+        if(overview.isEmpty() && editor.isEmpty()) {
             return snippets;
         }
-        return snippets + "\n\nOpen 1C configuration in this workspace:\n" + overview;
+        final StringBuilder combined = new StringBuilder();
+        if(!snippets.isEmpty()) {
+            combined.append(snippets);
+        }
+        if(!overview.isEmpty()) {
+            if(combined.length() > 0) {
+                combined.append("\n\n");
+            }
+            combined.append("Open 1C configuration in this workspace:\n");
+            combined.append(overview);
+        }
+        if(!editor.isEmpty()) {
+            if(combined.length() > 0) {
+                combined.append("\n\n");
+            }
+            combined.append(editor);
+        }
+        return ContextBudget.trimMiddle(combined.toString(), 3_000);
     }
 
     /**
@@ -1215,8 +1407,9 @@ public class ColleagueView extends ViewPart {
      * Searchable files for one semantic refresh pass. A live check can cap
      * the pass with {@code -Dcolleague.semantic.max-files=N} so a huge
      * workspace indexes a representative subset instead of every file; file
-     * fingerprints only live inside one session, so a capped pass never
-     * purges what earlier sessions stored.
+     * fingerprints persist across sessions through the stored chunk payload,
+     * so a capped pass also purges the files beyond the cap: point it only
+     * at a disposable collection.
      *
      * @return file source for {@link SemanticIndex#refreshAndLog}
      */

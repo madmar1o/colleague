@@ -56,14 +56,17 @@ public final class QdrantClient {
     /**
      * Deterministic point key for one chunk of one file, so re-upserting the
      * same chunk overwrites it and no bookkeeping outside the store is needed.
+     * The key must be unique across the whole collection, so callers feed it
+     * the absolute file location, not a project-relative display path two
+     * projects could share.
      *
-     * @param thePath workspace-relative file path
+     * @param theKey unique per-file key (the file location)
      * @param theChunkIndex zero-based chunk number
      * @return UUID-formatted id accepted by the store
      */
-    public static String pointId(final String thePath, final int theChunkIndex) {
+    public static String pointId(final String theKey, final int theChunkIndex) {
         return UUID.nameUUIDFromBytes(
-            (thePath + '#' + theChunkIndex).getBytes(StandardCharsets.UTF_8)).toString();
+            (theKey + '#' + theChunkIndex).getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     /**
@@ -235,6 +238,41 @@ public final class QdrantClient {
         condition.add("match", match);
         final JsonArray must = new JsonArray();
         must.add(condition);
+        final JsonObject filter = new JsonObject();
+        filter.add("must", must);
+        final JsonObject body = new JsonObject();
+        body.add("filter", filter);
+        call("POST", "/collections/" + theCollection + "/points/delete?wait=true", body);
+    }
+
+    /**
+     * Deletes every point whose payload carries the given field value while
+     * the other named field is absent or empty in it. This clears the chunks
+     * an older generation wrote before the second field existed, without
+     * touching the current points of the same file.
+     *
+     * @param theCollection collection name
+     * @param theField payload field to match
+     * @param theValue exact field value
+     * @param theAbsentField payload field that must be missing in the point
+     * @throws QdrantException when the delete fails
+     */
+    public void deleteChunksWithoutField(final String theCollection, final String theField,
+        final String theValue, final String theAbsentField) throws QdrantException {
+        final JsonObject match = new JsonObject();
+        match.addProperty("value", theValue);
+        final JsonObject valued = new JsonObject();
+        valued.addProperty("key", theField);
+        valued.add("match", match);
+        // the store spells the empty-keyword condition with the key inside
+        // the is_empty object, unlike the match condition above
+        final JsonObject absent = new JsonObject();
+        final JsonObject empty = new JsonObject();
+        empty.addProperty("key", theAbsentField);
+        absent.add("is_empty", empty);
+        final JsonArray must = new JsonArray();
+        must.add(valued);
+        must.add(absent);
         final JsonObject filter = new JsonObject();
         filter.add("must", must);
         final JsonObject body = new JsonObject();

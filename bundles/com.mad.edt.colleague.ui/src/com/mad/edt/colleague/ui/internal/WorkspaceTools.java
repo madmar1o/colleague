@@ -30,6 +30,7 @@ import com.google.gson.JsonParser;
 import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.ChatMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
+import com.mad.edt.colleague.agent.MetadataTools;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
 import com.mad.edt.colleague.edit.EditScript;
@@ -55,25 +56,33 @@ public final class WorkspaceTools {
      *
      * @param theSearch shared workspace code search
      * @param theOverview cached configuration picture of the workspace
+     * @param theMetadata configuration metadata tools of the open projects
      * @return tool executors for the agent loop
      */
     public static List<IToolExecutor> readOnly(final CodeSearch theSearch,
-        final ConfigurationOverview theOverview) {
-        return List.of(new SearchCodeTool(theSearch), new ListFilesTool(),
-            new ReadFileTool(), new DescribeConfigurationTool(theOverview));
+        final ConfigurationOverview theOverview, final MetadataTools theMetadata) {
+        final List<IToolExecutor> tools = new ArrayList<>();
+        tools.add(new SearchCodeTool(theSearch));
+        tools.add(new ListFilesTool());
+        tools.add(new ReadFileTool());
+        tools.add(new DescribeConfigurationTool(theOverview));
+        tools.addAll(theMetadata.tools());
+        return List.copyOf(tools);
     }
 
     /**
-     * Same as {@link #readOnly(CodeSearch, ConfigurationOverview)} plus the
-     * guarded write and edit tools.
+     * Same as {@link #readOnly(CodeSearch, ConfigurationOverview, MetadataTools)}
+     * plus the guarded write and edit tools.
      *
      * @param theSearch shared workspace code search
      * @param theOverview cached configuration picture of the workspace
+     * @param theMetadata configuration metadata tools of the open projects
      * @return tool executors including code writing and diff-based editing
      */
     public static List<IToolExecutor> withWrite(final CodeSearch theSearch,
-        final ConfigurationOverview theOverview) {
-        final List<IToolExecutor> tools = new ArrayList<>(readOnly(theSearch, theOverview));
+        final ConfigurationOverview theOverview, final MetadataTools theMetadata) {
+        final List<IToolExecutor> tools = new ArrayList<>(readOnly(theSearch, theOverview,
+            theMetadata));
         tools.add(new WriteFileTool());
         tools.add(new EditFileTool());
         return tools;

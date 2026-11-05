@@ -10,6 +10,8 @@ import com.mad.edt.colleague.llm.ChatRequest;
 import com.mad.edt.colleague.llm.ChatResult;
 import com.mad.edt.colleague.llm.ILLMProvider;
 import com.mad.edt.colleague.llm.LLMException;
+import com.mad.edt.colleague.llm.PromptTokens;
+import com.mad.edt.colleague.llm.ProviderConfig;
 
 /**
  * Stateful conversation: keeps the message history and replays it with every
@@ -26,6 +28,21 @@ public final class Conversation {
      * cost predictable for a local model.
      */
     public static final int MAX_HISTORY_MESSAGES = 40;
+
+    /**
+     * Share of the model window a prompt may fill before the history is
+     * compacted ahead of the request. The remaining thirty percent pays for
+     * the generated answer and absorbs the error of the character-based
+     * token estimate: compacting exactly at the window edge would let the
+     * runtime cut the oldest turns in silence.
+     */
+    public static final int COMPACT_AT_PERCENT = 70;
+
+    /**
+     * Prefix of the per-turn workspace context message; the token estimate
+     * counts it because it travels with every request.
+     */
+    private static final String CONTEXT_PREFIX = "Workspace context:\n";
 
     /**
      * First line of the digest message that replaces compacted turns: the
@@ -145,12 +162,13 @@ public final class Conversation {
                 + provider.getConfig().getId()
                 + "': pick one in the settings and save the provider");
         }
+        compactForPrompt(theContext, theQuestion);
         final ChatRequest.Builder request = ChatRequest.builder(model);
         if(systemPrompt != null && !systemPrompt.isEmpty()) {
             request.addMessage(ChatMessage.system(systemPrompt));
         }
         final ChatMessage contextMessage = theContext != null && !theContext.isEmpty()
-            ? ChatMessage.system("Workspace context:\n" + theContext) : null;
+            ? ChatMessage.system(CONTEXT_PREFIX + theContext) : null;
         for(final ChatMessage message : history) {
             request.addMessage(message);
         }
@@ -263,6 +281,22 @@ public final class Conversation {
     }
 
     /**
+     * Seeds the memory from a transcript restored after a restart: whatever
+     * this conversation held is replaced by the stored dialog, oldest first.
+     * The cap on replayed history is not applied here - trimming would fold
+     * away exactly the restored turns the user expects to continue from;
+     * the next finished exchange trims as usual.
+     *
+     * @param theMessages stored dialog to continue from, may be empty
+     */
+    public void restoreHistory(final List<ChatMessage> theMessages) {
+        history.clear();
+        if(theMessages != null) {
+            history.addAll(theMessages);
+        }
+    }
+
+    /**
      * Reasoning-capable models produce their chain of thought in a separate
      * stream field; the assistant history keeps only the final answer, so the
      * reasoning pass is requested and shown to the user collapsed apart from
@@ -278,17 +312,96 @@ public final class Conversation {
     }
 
     /**
-     * Folds the oldest turns that no longer fit the cap into one digest
-     * message kept at the front: silently discarding them would leave the
-     * model without any trace of what the conversation was about, while the
-     * digest costs one short system message. Every later compaction merges
-     * its share into that same digest so there is always exactly one, and
-     * the most recent turns always stay verbatim.
+     * Folds the oldest turns that no longer fit the message cap into one
+     * digest message kept at the front: silently discarding them would leave
+     * the model without any trace of what the conversation was about, while
+     * the digest costs one short system message. Every later compaction
+     * merges its share into that same digest so there is always exactly one.
+     * The cap is a hard bound on the replayed list; the token threshold is
+     * checked separately with every outgoing prompt.
      */
     private void trimHistory() {
         if(history.size() <= MAX_HISTORY_MESSAGES) {
             return;
         }
+        foldOldest(history.size() - KEEP_RECENT_MESSAGES);
+    }
+
+    /**
+     * Rebuilds the digest before a request when the prompt estimated at the
+     * moment of sending would fill more than {@link #COMPACT_AT_PERCENT}
+     * percent of the model window. The estimate comes from
+     * {@link PromptTokens}: the same character-length upper bound the request
+     * builder uses to size the runtime window, counting the system prompt,
+     * the replayed history, this turn's workspace context and the question.
+     * Compacting at seventy percent leaves the rest of the window for the
+     * generated answer and for the error of the character-based estimate, so
+     * the runtime never has to cut the oldest turns away on its own. The
+     * oldest exchange folds first and the loop stops as soon as the prompt
+     * fits; the last exchange always stays verbatim.
+     *
+     * @param theContext project/resource description attached to this turn,
+     *        may be {@code null}
+     * @param theQuestion question text, may be {@code null}
+     */
+    private void compactForPrompt(final String theContext, final String theQuestion) {
+        final int limit = promptTokenLimit();
+        while(estimatedPromptTokens(theContext, theQuestion) > limit) {
+            final int from = !history.isEmpty() && isDigest(history.get(0)) ? 1 : 0;
+            final int foldUntil = Math.min(history.size() - 2, from + 2);
+            if(foldUntil <= from) {
+                // only the last exchange is left: the question or the
+                // attached context alone exceeds the threshold, folding
+                // cannot make this request any smaller
+                return;
+            }
+            foldOldest(foldUntil);
+        }
+    }
+
+    /**
+     * @return the token count a prompt may fill before compaction: seventy
+     *         percent of the window the provider is asked to load, or of the
+     *         conservative local default when the endpoint does not declare
+     *         a window
+     */
+    private int promptTokenLimit() {
+        final int window = provider != null && provider.getConfig() != null
+            ? provider.getConfig().getContextWindowTokens() : 0;
+        final int effectiveWindow = window > 0 ? window : ProviderConfig.DEFAULT_LOCAL_CONTEXT_TOKENS;
+        return effectiveWindow * COMPACT_AT_PERCENT / 100;
+    }
+
+    /**
+     * @param theContext project/resource description attached to this turn,
+     *        may be {@code null}
+     * @param theQuestion question text, may be {@code null}
+     * @return estimated token count of the request this turn would send
+     */
+    private int estimatedPromptTokens(final String theContext, final String theQuestion) {
+        int characters = systemPrompt != null ? systemPrompt.length() : 0;
+        if(theContext != null && !theContext.isEmpty()) {
+            characters += CONTEXT_PREFIX.length() + theContext.length();
+        }
+        if(theQuestion != null) {
+            characters += theQuestion.length();
+        }
+        for(final ChatMessage message : history) {
+            characters += message.getContent().length();
+        }
+        return PromptTokens.estimateForCharacters(characters);
+    }
+
+    /**
+     * Folds the history prefix down to the given exclusive end index into
+     * one digest message kept at the front, merging any earlier digest, so
+     * there is always exactly one digest and the retained tail stays
+     * verbatim.
+     *
+     * @param theFoldUntil exclusive index the prefix is folded up to, at
+     *        least one and at most the history size
+     */
+    private void foldOldest(final int theFoldUntil) {
         final StringBuilder body = new StringBuilder();
         int from = 0;
         if(isDigest(history.get(0))) {
@@ -297,8 +410,7 @@ public final class Conversation {
             body.append(digestBody(history.get(0))).append('\n');
             from = 1;
         }
-        final int foldUntil = history.size() - KEEP_RECENT_MESSAGES;
-        for(int index = from; index < foldUntil; index++) {
+        for(int index = from; index < theFoldUntil; index++) {
             final ChatMessage message = history.get(index);
             final String label;
             if(ChatMessage.ROLE_USER.equals(message.getRole())) {
@@ -315,7 +427,7 @@ public final class Conversation {
         // the old digest (index 0) is cleared with the fold too: its notes
         // already went into body, and re-inserting at index 0 keeps exactly
         // one digest at the front
-        history.subList(0, foldUntil).clear();
+        history.subList(0, theFoldUntil).clear();
         history.add(0, ChatMessage.system(DIGEST_MARKER + "\n"
             + ContextBudget.trimMiddle(body.toString().strip(), DIGEST_MAX_CHARS)));
     }

@@ -94,6 +94,16 @@ public final class PageCommandHandler {
          * fresh question.
          */
         void continueTurn();
+
+        /**
+         * The page clicked a {@code path:line} reference from an answer: the
+         * view opens that workspace file in the editor at the given line.
+         *
+         * @param thePath workspace-relative file path as the page sent it
+         * @param theLine 1-based line to open, {@code 0} when the page sent
+         *            none and the editor should just open the file
+         */
+        void openInEditor(String thePath, int theLine);
     }
 
     private static final String[] FOCUS_STATE_FIELDS = {"ae", "hf", "kd", "qvlen", "ch",
@@ -165,6 +175,10 @@ public final class PageCommandHandler {
             case "openSettings":
                 actions.openSettings();
                 return;
+            case "openFile":
+                actions.openInEditor(argument(theArgument, "path"),
+                    positiveLine(argument(theArgument, "line")));
+                return;
             default:
                 return;
         }
@@ -186,6 +200,23 @@ public final class PageCommandHandler {
             state.append(field).append('=').append(argument(theArgument, field));
         }
         return state.toString();
+    }
+
+    /**
+     * Reads the page-supplied line number. Anything that is not a positive
+     * number settles on {@code 0}: the editor then opens the file without a
+     * line jump instead of failing on the page's text.
+     *
+     * @param theValue line text as the page sent it
+     * @return the positive line number, {@code 0} when there is none
+     */
+    private static int positiveLine(final String theValue) {
+        try {
+            final int line = Integer.parseInt(theValue.trim());
+            return line > 0 ? line : 0;
+        } catch(final NumberFormatException ex) {
+            return 0;
+        }
     }
 
     private static String argument(final Function<String, String> theArgument,
