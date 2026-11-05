@@ -26,6 +26,21 @@ public final class SourceIndex {
     /** Hard cap on collected files, protects huge project trees. */
     public static final int MAX_ENTRIES = 60_000;
 
+    /**
+     * Decides whether one workspace file may enter the indexes: only names
+     * with a known source extension, and never a zero-length file - a blank
+     * module has nothing to search and nothing to embed, and its stale
+     * semantic points are purged by location once it drops out of the walk.
+     *
+     * @param theLowerName lower-cased file name including the extension
+     * @param theSize file size in bytes, zero for a blank module
+     * @return {@code true} when the file belongs in the indexes
+     */
+    public static boolean isIndexable(final String theLowerName, final long theSize) {
+        final int dot = theLowerName.lastIndexOf('.');
+        return dot >= 0 && OUR_EXTENSIONS.contains(theLowerName.substring(dot + 1));
+    }
+
     /** Immutable snapshot of one indexed file. */
     public static final class Entry {
 
