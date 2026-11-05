@@ -932,6 +932,11 @@ public class ColleagueView extends ViewPart {
         if(ourTabFolder.isDisposed()) {
             return;
         }
+        // the user picked this pair from the contacts page: it becomes the
+        // remembered default for the next session, on both the create path
+        // and the return-to-existing-tab path
+        com.mad.edt.colleague.llm.ProviderStore.rememberLastUsed(
+            theContact.getProviderId(), theContact.getModel());
         if(existingTabFor(theContact) != null) {
             return;
         }
