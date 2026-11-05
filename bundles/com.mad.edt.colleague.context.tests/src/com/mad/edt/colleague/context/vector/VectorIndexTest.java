@@ -1,6 +1,7 @@
 package com.mad.edt.colleague.context.vector;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -300,6 +301,84 @@ class VectorIndexTest {
         // skipping is decided without any further store or embed traffic
         assertEquals(storeCalls, storeTransport.getCallCount());
         assertEquals(0, embedTransport.getCallCount());
+    }
+
+    @Test
+    void collidingProjectRelativePathsStaySeparateAcrossARestart(@TempDir final Path theDir)
+        throws IOException, IndexFailure {
+        // two projects of one workspace hold the same project-relative path
+        // with different content: the fingerprint, the point key and the
+        // clear filter must all follow the absolute location, never the
+        // shared display path
+        final Path alpha = theDir.resolve("projA").resolve("cfg").resolve("x.bsl");
+        final Path beta = theDir.resolve("projB").resolve("cfg").resolve("x.bsl");
+        Files.createDirectories(alpha.getParent());
+        Files.createDirectories(beta.getParent());
+        Files.writeString(alpha, numberedFile(30), StandardCharsets.UTF_8);
+        Files.writeString(beta, numberedFile(45), StandardCharsets.UTF_8);
+        final List<SourceFile> both = List.of(
+            sourceOf(alpha, "cfg/x.bsl"), sourceOf(beta, "cfg/x.bsl"));
+        final VectorIndex ourIndex = index();
+        // alpha: clear, embed, write; beta: clear, embed, write
+        storeOk();
+        embedVectors(1);
+        storeOk();
+        storeOk();
+        embedVectors(1);
+        storeOk();
+        UpdateReport report = ourIndex.update(both);
+        assertEquals(2, report.reembedded());
+        assertEquals(0, report.skipped());
+        // the clear names the location field, the payload carries it too
+        final String clearAlpha = storeTransport.callAt(0).getJsonBody();
+        assertTrue(clearAlpha.contains("\"key\":\"location\""), clearAlpha);
+        assertTrue(clearAlpha.contains("\"" + jsonEscape(alpha.toString()) + '"'),
+            clearAlpha);
+        final String writeAlpha = storeTransport.callAt(2).getJsonBody();
+        assertTrue(writeAlpha.contains("\"location\":\"" + jsonEscape(alpha.toString())
+            + '"'), writeAlpha);
+        final String writeBeta = storeTransport.callAt(5).getJsonBody();
+        assertTrue(writeBeta.contains("\"location\":\"" + jsonEscape(beta.toString())
+            + '"'), writeBeta);
+        // the two files of one display path get distinct point keys, so they
+        // cannot overwrite each other's chunks
+        assertNotEquals(pointKeyOf(writeAlpha), pointKeyOf(writeBeta));
+        // second pass in the same session: both fingerprints survive apart
+        report = ourIndex.update(both);
+        assertEquals(0, report.reembedded());
+        assertEquals(2, report.skipped());
+        assertEquals(6, storeTransport.getCallCount());
+        assertEquals(2, embedTransport.getCallCount());
+        // restart emulation: the walk over the stored chunks sees the same
+        // display path twice under distinct locations, adopts both, and
+        // neither file is re-embedded afterwards
+        ourIndex.forgetFingerprints();
+        storeTransport.answer(200, "{\"result\":{\"points\":["
+            + "{\"payload\":{\"path\":\"cfg/x.bsl\",\"location\":\""
+            + jsonEscape(alpha.toString()) + "\",\"hash\":\""
+            + sha256Hex(Files.readAllBytes(alpha)) + "\"}},"
+            + "{\"payload\":{\"path\":\"cfg/x.bsl\",\"location\":\""
+            + jsonEscape(beta.toString()) + "\",\"hash\":\""
+            + sha256Hex(Files.readAllBytes(beta)) + "\"}}],"
+            + "\"next_page_offset\":null}}");
+        assertEquals(2, ourIndex.restoreFingerprints());
+        report = ourIndex.update(both);
+        assertEquals(0, report.reembedded());
+        assertEquals(2, report.skipped());
+        // the rebooted pass stayed silent beyond the walk itself
+        assertEquals(7, storeTransport.getCallCount());
+        assertEquals(2, embedTransport.getCallCount());
+    }
+
+    /** @return the JSON-escaped absolute path as it appears inside a body */
+    private static String jsonEscape(final String thePath) {
+        return thePath.replace("\\", "\\\\");
+    }
+
+    /** @return the point key of the first upserted point in a write body */
+    private static String pointKeyOf(final String theWriteBody) {
+        final int start = theWriteBody.indexOf("\"id\":\"") + 6;
+        return theWriteBody.substring(start, theWriteBody.indexOf('"', start));
     }
 
     @Test
