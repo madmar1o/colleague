@@ -52,6 +52,7 @@ import com.mad.edt.colleague.agent.subagent.SubagentTool;
 import com.mad.edt.colleague.agents.AgentProfile;
 import com.mad.edt.colleague.agents.ToolPolicy;
 import com.mad.edt.colleague.chat.ContextBudget;
+import com.mad.edt.colleague.chat.ConversationStore;
 import com.mad.edt.colleague.chat.EscapeSequence;
 import com.mad.edt.colleague.chat.PageCatalogEvents;
 import com.mad.edt.colleague.chat.PageCommandHandler;
@@ -214,6 +215,16 @@ public final class ChatPanel {
      * current adapters, see {@link McpCatalog}.
      */
     private McpCatalog ourMcpCatalog;
+
+    /**
+     * Durable transcript store of the workbench session; once attached, this
+     * chat's dialog survives closing the tab and restarting the workbench.
+     * {@code null} until the view attaches it.
+     */
+    private ConversationStore ourTranscriptStore;
+
+    /** Contact key this tab's dialog is stored under, empty until attached. */
+    private String ourTranscriptKey = "";
 
     /**
      * The step plan this chat keeps visible across its turns: the model
@@ -421,6 +432,22 @@ public final class ChatPanel {
     }
 
     /**
+     * Attaches the durable transcript store to this tab: the dialog is saved
+     * under the given contact key after every final answer and when the tab
+     * closes, and a transcript left by an earlier workbench session is put
+     * back when this tab's session does not remember the dialog itself.
+     *
+     * @param theStore shared transcript store of the workbench session,
+     *            {@code null} for none
+     * @param theKey contact key this tab's dialog is stored under
+     */
+    public void attachTranscriptStore(final ConversationStore theStore, final String theKey) {
+        ourTranscriptStore = theStore;
+        ourTranscriptKey = theKey == null ? "" : theKey;
+        restoreTranscript();
+    }
+
+    /**
      * @param theSupplier takes the question text and produces search snippets
      *            for it when no context was attached manually; runs on a
      *            background thread
@@ -441,6 +468,11 @@ public final class ChatPanel {
     /** Clears the conversation and the stored session history. */
     private void reset() {
         ourSession.reset();
+        if(ourTranscriptStore != null && !ourTranscriptKey.isEmpty()) {
+            // a dialog the user cleared from the screen must not come back
+            // on the next start: the durable copy goes with the live one
+            ourTranscriptStore.forget(ourTranscriptKey);
+        }
         ourLastAnswer = "";
         ourInterruptedConversation = List.of();
         if(ourBridge != null) {
@@ -453,6 +485,48 @@ public final class ChatPanel {
         }
         ourStyleRanges.clear();
         setStatus("Диалог сброшен");
+    }
+
+    /**
+     * Hands this tab's current dialog to the durable store. Safe from any
+     * thread: the store serialises its own document, and a failing write
+     * costs persistence only, never the live conversation.
+     */
+    private void persistTranscript() {
+        if(ourTranscriptStore == null || ourTranscriptKey.isEmpty()) {
+            return;
+        }
+        ourTranscriptStore.save(ourTranscriptKey, ourSession.snapshotHistory());
+    }
+
+    /**
+     * Puts back a dialog left by an earlier workbench session when this
+     * tab's session does not remember one: the stored turns become the
+     * conversation's memory and are replayed to the page (or the plain-text
+     * fallback), so a restart does not erase what the dialog worked through.
+     */
+    private void restoreTranscript() {
+        if(ourTranscriptStore == null || ourTranscriptKey.isEmpty()
+            || !ourSession.snapshotHistory().isEmpty()) {
+            return;
+        }
+        final List<ChatMessage> stored = ourTranscriptStore.load(ourTranscriptKey);
+        if(stored.isEmpty()) {
+            return;
+        }
+        ourSession.restoreHistory(stored);
+        if(ourBridge != null) {
+            pushHistory();
+        } else if(ourConversation != null && !ourConversation.isDisposed()) {
+            for(final ChatMessage message : stored) {
+                if(ChatMessage.ROLE_USER.equals(message.getRole())) {
+                    appendLine("Вы: " + message.getContent());
+                } else if(ChatMessage.ROLE_ASSISTANT.equals(message.getRole())) {
+                    appendLine("Colleague: " + message.getContent());
+                }
+            }
+        }
+        setStatus("Восстановлен диалог прошлой сессии: " + stored.size() + " сообщений");
     }
 
     /**
@@ -1362,6 +1436,10 @@ public final class ChatPanel {
                     }
                 }
                 setStatus(stats);
+                // the exchange is complete and already in the session's
+                // memory: hand it to the durable store before the turn ends,
+                // so a crash or restart right after an answer loses nothing
+                persistTranscript();
                 return Status.OK_STATUS;
             } catch (final Exception ex) {
                 final boolean aborted = ourTurns.isAborted();
@@ -1450,6 +1528,10 @@ public final class ChatPanel {
                     pushNow("answer", payload);
                 }
                 setStatus(stats);
+                // the exchange is complete and already in the session's
+                // memory: hand it to the durable store before the turn ends,
+                // so a crash or restart right after an answer loses nothing
+                persistTranscript();
                 return Status.OK_STATUS;
             } catch (final Exception ex) {
                 if(!ourTurns.isAborted() && ourTurns.isCurrent(turn)) {
@@ -1959,6 +2041,9 @@ public final class ChatPanel {
     /** Releases the SWT controls. */
     public void dispose() {
         OUR_PANELS.remove(this);
+        // the tab is closing: whatever its dialog worked through should still
+        // be there when the workbench or the tab itself comes back
+        persistTranscript();
         if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
             ourBridge.getControl().dispose();
         }

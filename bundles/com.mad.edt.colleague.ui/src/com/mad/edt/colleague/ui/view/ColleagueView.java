@@ -50,6 +50,7 @@ import com.mad.edt.colleague.context.SemanticSettings;
 import com.mad.edt.colleague.commands.CommandDefinition;
 import com.mad.edt.colleague.commands.CommandLoader;
 import com.mad.edt.colleague.commands.SlashCommands;
+import com.mad.edt.colleague.chat.ConversationStore;
 import com.mad.edt.colleague.llm.LLMProviderFactory;
 import com.mad.edt.colleague.llm.LLMSettings;
 import com.mad.edt.colleague.llm.ProviderConfig;
@@ -142,6 +143,13 @@ public class ColleagueView extends ViewPart {
      * later sessions from a file in the plugin's state area.
      */
     private AgentMemory ourLessonMemory;
+
+    /**
+     * Durable transcripts of chat tabs, opened once per workbench session
+     * over a file in the plug-in's state area; see {@link #transcriptStore()}.
+     */
+    private com.mad.edt.colleague.chat.ConversationStore ourTranscriptStore;
+
     private SemanticIndex ourSemantic;
     private volatile boolean ourOverviewStale;
 
@@ -662,6 +670,23 @@ public class ColleagueView extends ViewPart {
             ourLessonMemory = new AgentMemory(state.resolve("agent-lessons.txt"));
         }
         return ourLessonMemory;
+    }
+
+    /**
+     * @return the durable transcripts of chat tabs, opened once per workbench
+     *         session over a JSON document in the plugin's state area; when
+     *         the state area is unavailable the temporary directory keeps the
+     *         document working in a degraded way instead of failing the view
+     */
+    private ConversationStore transcriptStore() {
+        if(ourTranscriptStore == null) {
+            final ColleagueUIPlugin plugin = ColleagueUIPlugin.getDefault();
+            final Path state = plugin != null
+                ? plugin.getStateLocation().toFile().toPath()
+                : Paths.get(System.getProperty("java.io.tmpdir"));
+            ourTranscriptStore = new ConversationStore(state.resolve("chat-sessions.json"));
+        }
+        return ourTranscriptStore;
     }
 
     /**
@@ -1215,6 +1240,7 @@ public class ColleagueView extends ViewPart {
             ? WorkspaceTools.withWrite(ourCodeSearch, ourOverview, ourMetadataTools)
             : WorkspaceTools.readOnly(ourCodeSearch, ourOverview, ourMetadataTools));
         panel.setLessonMemory(lessonMemory());
+        panel.attachTranscriptStore(transcriptStore(), theContact.getKey());
         panel.setMcpCatalog(ourMcpCatalog);
         panel.setSkillSupplier(this::skillCatalog);
         panel.setCommandSupplier(this::commandsCatalog);
