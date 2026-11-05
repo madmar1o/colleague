@@ -1407,8 +1407,9 @@ public class ColleagueView extends ViewPart {
      * Searchable files for one semantic refresh pass. A live check can cap
      * the pass with {@code -Dcolleague.semantic.max-files=N} so a huge
      * workspace indexes a representative subset instead of every file; file
-     * fingerprints only live inside one session, so a capped pass never
-     * purges what earlier sessions stored.
+     * fingerprints persist across sessions through the stored chunk payload,
+     * so a capped pass also purges the files beyond the cap: point it only
+     * at a disposable collection.
      *
      * @return file source for {@link SemanticIndex#refreshAndLog}
      */

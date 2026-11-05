@@ -9,8 +9,10 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.google.gson.JsonObject;
 import com.mad.edt.colleague.context.vector.EmbeddingClient.EmbeddingException;
@@ -46,6 +48,14 @@ public class VectorIndex {
 
     /** Payload field carrying the content hash of the file owning a chunk. */
     public static final String HASH_FIELD = "hash";
+
+    /**
+     * Payload field carrying the absolute location of the file owning a
+     * chunk. Two projects of one workspace may hold the same project-relative
+     * display path, so fingerprints, point keys and clear filters all follow
+     * this location instead of the shared display path.
+     */
+    public static final String LOCATION_FIELD = "location";
 
     /**
      * Consecutive per-file failures after which a pass gives up: when the
@@ -299,11 +309,11 @@ public class VectorIndex {
         int consecutiveFailures = 0;
         final List<String> present = new ArrayList<>(theFiles.size());
         for(final SourceFile file : theFiles) {
-            present.add(file.displayPath());
+            present.add(file.location().toString());
             try {
                 final byte[] content = Files.readAllBytes(file.location());
                 final String hash = sha256(content);
-                final FileState known = states.get(file.displayPath());
+                final FileState known = states.get(file.location().toString());
                 if(known != null && known.ourHash.equals(hash)) {
                     skipped++;
                 } else {
@@ -339,10 +349,10 @@ public class VectorIndex {
             }
         }
         int purged = 0;
-        for(final String path : new ArrayList<>(states.keySet())) {
-            if(!present.contains(path)) {
-                purge(path);
-                states.remove(path);
+        for(final String location : new ArrayList<>(states.keySet())) {
+            if(!present.contains(location)) {
+                purge(location);
+                states.remove(location);
                 purged++;
             }
         }
@@ -461,28 +471,49 @@ public class VectorIndex {
      * Adopts the fingerprints the store already carries in the payload of
      * every stored chunk, so a freshly started session skips the files an
      * earlier one embedded instead of re-embedding the whole workspace.
+     * Chunks written before the location field existed carry no location:
+     * their fingerprints cannot be keyed safely (two projects may share the
+     * display path), so those points are deleted instead and the files are
+     * embedded afresh with location-tagged chunks in this session's pass.
      *
      * @return number of files whose fingerprint was adopted
-     * @throws IndexFailure when the store refuses the walk
+     * @throws IndexFailure when the store refuses the walk or a cleanup
      */
     public int restoreFingerprints() throws IndexFailure {
         final List<JsonObject> payloads;
         try {
-            payloads = store.scrollPayloads(collection, List.of(PATH_FIELD, HASH_FIELD));
+            payloads = store.scrollPayloads(collection,
+                List.of(PATH_FIELD, HASH_FIELD, LOCATION_FIELD));
         } catch (final QdrantException ex) {
             throw new IndexFailure("cannot walk stored chunks: " + ex.getMessage(), ex);
         }
         int adopted = 0;
+        final Set<String> legacyPaths = new LinkedHashSet<>();
         for(final JsonObject payload : payloads) {
             final String path = text(payload, PATH_FIELD);
             final String hash = text(payload, HASH_FIELD);
-            if(path.isEmpty() || hash.isEmpty()) {
+            final String location = text(payload, LOCATION_FIELD);
+            if(location.isEmpty()) {
+                if(!path.isEmpty()) {
+                    legacyPaths.add(path);
+                }
                 continue;
             }
-            if(!states.containsKey(path)) {
+            if(hash.isEmpty()) {
+                continue;
+            }
+            if(!states.containsKey(location)) {
                 adopted++;
             }
-            states.put(path, new FileState(hash));
+            states.put(location, new FileState(hash));
+        }
+        for(final String path : legacyPaths) {
+            try {
+                store.deleteChunksWithoutField(collection, PATH_FIELD, path, LOCATION_FIELD);
+            } catch (final QdrantException ex) {
+                throw new IndexFailure("cannot drop pre-location chunks of " + path
+                    + ": " + ex.getMessage(), ex);
+            }
         }
         return adopted;
     }
@@ -495,8 +526,9 @@ public class VectorIndex {
      */
     private void reembed(final SourceFile theFile, final byte[] theContent, final String theHash)
         throws IndexFailure {
+        final String location = theFile.location().toString();
         try {
-            store.deleteByField(collection, PATH_FIELD, theFile.displayPath());
+            store.deleteByField(collection, LOCATION_FIELD, location);
         } catch (final QdrantException ex) {
             throw new IndexFailure("cannot clear stale chunks of " + theFile.displayPath()
                 + ": " + ex.getMessage(), ex);
@@ -505,7 +537,7 @@ public class VectorIndex {
             chunker.split(new String(theContent, StandardCharsets.UTF_8));
         if(chunks.isEmpty()) {
             // the file went blank: deleting its points was all it needs
-            states.put(theFile.displayPath(), new FileState(theHash));
+            states.put(location, new FileState(theHash));
             return;
         }
         final List<String> texts = new ArrayList<>(chunks.size());
@@ -534,8 +566,9 @@ public class VectorIndex {
             payload.addProperty("chunk", Integer.valueOf(index));
             payload.addProperty("modified", Long.valueOf(modified));
             payload.addProperty(HASH_FIELD, theHash);
+            payload.addProperty(LOCATION_FIELD, location);
             payload.addProperty("text", chunk.getText());
-            points.add(new Point(QdrantClient.pointId(theFile.displayPath(), index),
+            points.add(new Point(QdrantClient.pointId(location, index),
                 vectors.get(index), payload));
         }
         try {
@@ -544,7 +577,7 @@ public class VectorIndex {
             throw new IndexFailure("cannot store chunks of " + theFile.displayPath() + ": "
                 + ex.getMessage(), ex);
         }
-        states.put(theFile.displayPath(), new FileState(theHash));
+        states.put(location, new FileState(theHash));
     }
 
     /**
@@ -587,19 +620,19 @@ public class VectorIndex {
     /**
      * Removes every chunk of one file and forgets its fingerprint.
      *
-     * @param theDisplayPath workspace-relative file path
+     * @param theLocation absolute file location as stored in the payload
      * @throws IndexFailure when the store rejects the delete
      */
-    public void removeFile(final String theDisplayPath) throws IndexFailure {
-        purge(theDisplayPath);
-        states.remove(theDisplayPath);
+    public void removeFile(final String theLocation) throws IndexFailure {
+        purge(theLocation);
+        states.remove(theLocation);
     }
 
-    private void purge(final String theDisplayPath) throws IndexFailure {
+    private void purge(final String theLocation) throws IndexFailure {
         try {
-            store.deleteByField(collection, PATH_FIELD, theDisplayPath);
+            store.deleteByField(collection, LOCATION_FIELD, theLocation);
         } catch (final QdrantException ex) {
-            throw new IndexFailure("cannot delete chunks of " + theDisplayPath + ": "
+            throw new IndexFailure("cannot delete chunks of " + theLocation + ": "
                 + ex.getMessage(), ex);
         }
     }
@@ -617,9 +650,12 @@ public class VectorIndex {
         return states.size();
     }
 
-    /** @return fingerprint of one file, {@code null} when untracked */
-    String fingerprintOf(final String theDisplayPath) {
-        final FileState state = states.get(theDisplayPath);
+    /**
+     * @param theLocation absolute file location used as the fingerprint key
+     * @return fingerprint of one file, {@code null} when untracked
+     */
+    String fingerprintOf(final String theLocation) {
+        final FileState state = states.get(theLocation);
         return state == null ? null : state.ourHash;
     }
 
