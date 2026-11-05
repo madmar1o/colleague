@@ -588,6 +588,20 @@ public class ColleagueView extends ViewPart {
             return;
         }
         ContactsPanel.Contact preferred = null;
+        // a pair remembered from a previous session wins while it still
+        // exists among the available contacts; a stale pair (removed model)
+        // falls back to the provider default-model choice below
+        final String lastProvider = com.mad.edt.colleague.llm.ProviderStore.lastUsedProvider();
+        final String lastModel = com.mad.edt.colleague.llm.ProviderStore.lastUsedModel();
+        if(!lastProvider.isEmpty() && !lastModel.isEmpty()) {
+            for(final ContactsPanel.Contact contact : theAvailable) {
+                if(contact.getProviderId().equals(lastProvider)
+                    && contact.getModel().equals(lastModel)) {
+                    preferred = contact;
+                    break;
+                }
+            }
+        }
         final String defaultId = LLMSettings.getDefaultProviderId();
         // the default contact is the default provider's own default model:
         // reading the model off the built-in local provider instead made the
@@ -915,6 +929,23 @@ public class ColleagueView extends ViewPart {
      * @param theContact provider, model and agent triple to open
      */
     private void openContact(final ContactsPanel.Contact theContact) {
+        // the user picked this pair on the contacts page: it becomes the
+        // remembered default for the next session; automatic opens (the
+        // launch auto-chat, profile cards) go through openChatFor and do not
+        // rewrite the memory
+        com.mad.edt.colleague.llm.ProviderStore.rememberLastUsed(
+            theContact.getProviderId(), theContact.getModel());
+        openChatFor(theContact);
+    }
+
+    /**
+     * Opens a chat tab without touching the remembered default: the automatic
+     * paths (launch auto-chat, agent cards) route here, so the stored pair
+     * keeps reflecting the user's own picks only.
+     *
+     * @param theContact provider, model and agent triple to open
+     */
+    private void openChatFor(final ContactsPanel.Contact theContact) {
         if(ourTabFolder.isDisposed()) {
             return;
         }
@@ -956,7 +987,9 @@ public class ColleagueView extends ViewPart {
         final AgentProfile profile = theName == null || theName.isEmpty()
             ? null : findProfile(theName);
         final String model = agentModelFor(profile, preferred);
-        openContact(new ContactsPanel.Contact(preferred.getProviderId(), model,
+        // the automatic path must not rewrite the remembered default: only
+        // a pick on the contacts page is a user decision
+        openChatFor(new ContactsPanel.Contact(preferred.getProviderId(), model,
             profile == null ? "" : profile.getName()));
     }
 
