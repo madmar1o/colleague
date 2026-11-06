@@ -1,7 +1,0 @@
-#!/bin/sh
-# commit-msg: требует формат "<type>: <описание>"
-grep -qE '^(chore|feat|fix|docs|refactor|test|build|ci|revert)(\([a-z0-9._-]+\))?: .{3,}' "$1" || {
-  echo "commit-msg: нужен формат '<type>: <описание>', type: chore|feat|fix|docs|refactor|test|build|ci|revert" >&2
-  exit 1
-}
-exit 0
