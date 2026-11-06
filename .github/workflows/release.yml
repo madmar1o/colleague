@@ -1,0 +1,81 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: [self-hosted, windows, x64, colleague]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Java 17
+        shell: powershell
+        run: |
+          if (Test-Path 'C:\Program Files\Zulu\zulu-17') {
+            "JAVA_HOME=C:\Program Files\Zulu\zulu-17" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "$env:JAVA_HOME\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+
+      - name: Build and test
+        shell: powershell
+        run: .\mvnw.cmd -B clean verify
+
+      - name: Package update site
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $site = 'repositories/target/repository'
+          if (-not (Test-Path $site)) { throw "update site was not built: $site" }
+          $zip = "colleague-update-site-${{ github.ref_name }}.zip"
+          Compress-Archive -Path "$site/*" -DestinationPath $zip -Force
+          "packaged $zip"
+
+      - name: Checksums
+        shell: powershell
+        run: |
+          Get-ChildItem -File -Filter 'colleague-update-site-*.zip' | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          } | Set-Content 'SHA256SUMS' -Encoding ascii
+          Get-Content 'SHA256SUMS'
+
+      - name: Release notes from conventional commits
+        shell: powershell
+        run: |
+          $prev = ''
+          $tags = git tag --sort=-creatordate | Where-Object { $_ -ne '${{ github.ref_name }}' }
+          if ($tags) { $prev = $tags[0] }
+          $range = if ($prev) { "$prev..HEAD" } else { 'HEAD' }
+          $lines = git log --format='%s' $range
+          $groups = [ordered]@{ feat = 'Features'; fix = 'Fixes'; docs = 'Documentation'; refactor = 'Refactoring'; test = 'Tests'; chore = 'Chores'; build = 'Build'; ci = 'CI'; revert = 'Reverts' }
+          $md = @("# Colleague ${{ github.ref_name }}", '', "Changes since $range", '')
+          foreach ($k in $groups.Keys) {
+            $items = $lines | Where-Object { $_ -match "^$k(\(|:)" }
+            if ($items) { $md += "## $($groups[$k])"; $items | ForEach-Object { $md += "- $_" }; $md += '' }
+          }
+          $md | Set-Content 'RELEASE_NOTES.md' -Encoding utf8
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Colleague ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            colleague-update-site-*.zip
+            SHA256SUMS
+
+      - name: Publish update site to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: repositories/target/repository
+          publish_branch: gh-pages
+          commit_message: 'docs: update site ${{ github.ref_name }}'

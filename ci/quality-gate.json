@@ -1,0 +1,7 @@
+﻿{
+    "maxNewCriticals":  0,
+    "maxNewBlockers":  0,
+    "minCoverage":  70,
+    "failOnRuleIncrease":  true,
+    "allowMissingCoverage":  true
+}

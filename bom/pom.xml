@@ -17,6 +17,8 @@
 
   <properties>
     <tycho.version>4.0.13</tycho.version>
+    <jacoco.version>0.8.12</jacoco.version>
+    <argLine></argLine>
 
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
@@ -100,6 +102,17 @@
           <groupId>org.eclipse.tycho</groupId>
           <artifactId>tycho-surefire-plugin</artifactId>
           <version>${tycho.version}</version>
+          <configuration>
+            <!-- JaCoCo prepare-agent writes the agent options into argLine;
+                 the property is defined empty in <properties> so a build
+                 without coverage still starts the tests normally. -->
+            <argLine>${argLine}</argLine>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.jacoco</groupId>
+          <artifactId>jacoco-maven-plugin</artifactId>
+          <version>${jacoco.version}</version>
         </plugin>
         <plugin>
           <groupId>org.eclipse.tycho</groupId>

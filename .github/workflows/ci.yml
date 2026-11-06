@@ -1,0 +1,167 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast checks that need no build. Everything runs on the single
+  # self-hosted runner. GitHub-hosted runners could build through the public
+  # p2 repositories (edt.1c.ru, download.eclipse.org) but cannot reach the
+  # local SonarQube, so a hosted fallback path would only duplicate the build
+  # half of the pipeline and was removed as redundant.
+  # Fork pull requests are skipped by design: untrusted code must never run on
+  # the self-hosted machine (see docs/ci/SETUP-GITHUB.md).
+  hygiene:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, windows, x64, colleague]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Conventional commit subjects
+        shell: powershell
+        run: |
+          if ("${{ github.event_name }}" -eq 'pull_request') {
+            $range = '${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}'
+          } else {
+            $before = '${{ github.event.before }}'
+            git rev-parse --verify --quiet $before | Out-Null
+            if ($LASTEXITCODE -eq 0) { $range = "$before..${{ github.sha }}" } else { $range = 'HEAD~1..HEAD' }
+          }
+          $pattern = '^(chore|feat|fix|docs|refactor|test|build|ci|revert)(\([a-z0-9._-]+\))?: .{3,}'
+          $bad = @(git log --format=%s $range | Where-Object { $_ -notmatch $pattern })
+          if ($bad.Count -gt 0) { $bad | ForEach-Object { Write-Host "bad subject: $_" }; exit 1 }
+          Write-Host "subjects OK: $range"
+
+      - name: Repository is free of third-party AI product names
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/sanitize_check.ps1
+
+      - name: No tracked secrets or oversized files
+        shell: powershell
+        run: |
+          $bad = 0
+          foreach ($f in (git ls-files)) {
+            if ($f -match '\.(env|key|pem|token)$' -or $f -match 'credential|secret') { Write-Host "forbidden file: $f"; $bad = 1 }
+            if ((Test-Path -LiteralPath $f -PathType Leaf) -and ((Get-Item -LiteralPath $f).Length -gt 1048576)) { Write-Host "over 1MB: $f"; $bad = 1 }
+          }
+          exit $bad
+
+  # Full Tycho build and the whole test suite. Self-hosted because the target
+  # platform and the Maven cache are already warm on the build machine.
+  build-test:
+    needs: hygiene
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, windows, x64, colleague]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
+
+      - name: Java 17
+        shell: powershell
+        run: |
+          if (Test-Path 'C:\Program Files\Zulu\zulu-17') {
+            "JAVA_HOME=C:\Program Files\Zulu\zulu-17" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "$env:JAVA_HOME\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+          java -version
+
+      - name: Build and test
+        shell: powershell
+        run: .\mvnw.cmd -B clean verify
+
+      - name: Path guard canon (JS vs Java)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/test_path_guard.ps1
+
+      - name: Aggregate JaCoCo coverage
+        shell: powershell
+        continue-on-error: true
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/jacoco_report.ps1
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          if-no-files-found: warn
+          path: |
+            bundles/*/target/surefire-reports/**
+            bundles/*/target/site/jacoco/**
+            out/ci/jacoco.xml
+
+  # SonarQube gate. Runs after the build so the analysis uses fresh classes.
+  # Community Edition has no branch analysis, so the branch is analysed into a
+  # dedicated throwaway project key and compared with the committed baseline.
+  sonar-gate:
+    needs: build-test
+    runs-on: [self-hosted, windows, x64, colleague]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: test-reports
+          path: ci-artifacts
+
+      - name: Scan and gate
+        shell: powershell
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ref = if ($env:GITHUB_HEAD_REF) { $env:GITHUB_HEAD_REF } else { $env:GITHUB_REF_NAME }
+          Write-Host "analysing $ref"
+          $cov = 'ci-artifacts/out/ci/jacoco.xml'
+          if (Test-Path $cov) {
+            powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/sonar_scan.ps1 -ProjectKey colleague-edt-ci -ExtraProps "-Dsonar.coverage.jacoco.xmlReportPaths=$cov"
+          } else {
+            Write-Host "no coverage artifact; analysis runs without coverage"
+            powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/sonar_scan.ps1 -ProjectKey colleague-edt-ci
+          }
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $rule = ''
+          if ($ref -match '(?i)sonar[-_/]?(S\d{3,5})') { $rule = $Matches[1] }
+          elseif ($ref -match '(?i)\b(S\d{3,5})\b') { $rule = $Matches[1] }
+          if ($rule) {
+            Write-Host "fix-branch gate for rule $rule"
+            powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/sonar_gate.ps1 -Rule $rule
+          } else {
+            powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/sonar_gate.ps1
+          }
+          exit $LASTEXITCODE
+
+      - name: Delete throwaway CI project
+        if: always()
+        shell: powershell
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          $tok = $env:SONAR_TOKEN
+          if (-not $tok -and (Test-Path "$env:USERPROFILE\.sonar\dsh-scan-token.txt")) {
+            $tok = (Get-Content "$env:USERPROFILE\.sonar\dsh-scan-token.txt" -Raw).Trim()
+          }
+          if (-not $tok) { exit 0 }
+          $cred = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${tok}:"))
+          Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:9000/api/projects/delete?project=colleague-edt-ci' `
+            -Headers @{ Authorization = "Basic $cred" } | Out-Null

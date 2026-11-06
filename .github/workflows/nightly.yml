@@ -1,0 +1,86 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: '0 22 * * *'   # 05:00 Asia/Bangkok
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  nightly:
+    runs-on: [self-hosted, windows, x64, colleague]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Java 17
+        shell: powershell
+        run: |
+          if (Test-Path 'C:\Program Files\Zulu\zulu-17') {
+            "JAVA_HOME=C:\Program Files\Zulu\zulu-17" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "$env:JAVA_HOME\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+
+      - name: Full build and tests
+        shell: powershell
+        run: .\mvnw.cmd -B clean verify
+
+      - name: Scan main into the main project
+        shell: powershell
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/sonar_scan.ps1 -ProjectKey colleague-edt
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Drift report against the committed baseline
+        id: drift
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $issuesFile = 'out/sonar/colleague-edt-issues.json'
+          $issues = Get-Content $issuesFile -Raw | ConvertFrom-Json
+          $current = @{}
+          foreach ($g in ($issues | Group-Object rule)) { $current[$g.Name] = $g.Count }
+          $baseline = Get-Content 'ci/sonar-baseline.json' -Raw | ConvertFrom-Json
+          $was = @{}
+          foreach ($p in $baseline.counts.PSObject.Properties) { $was[$p.Name] = [int]$p.Value }
+          $rows = @()
+          foreach ($key in ($current.Keys + $was.Keys | Sort-Object -Unique)) {
+            $now = 0; if ($current.ContainsKey($key)) { $now = $current[$key] }
+            $then = 0; if ($was.ContainsKey($key)) { $then = $was[$key] }
+            if ($now -ne $then) { $rows += [pscustomobject]@{ rule = $key; was = $then; now = $now } }
+          }
+          $md = @("# Sonar drift $(Get-Date -Format yyyy-MM-dd)", '', "total was $($baseline.total), now $($issues.Count)", '')
+          if ($rows.Count -eq 0) { $md += 'No drift against the committed baseline.' }
+          else { $rows | ForEach-Object { $md += "- $($_.rule): $($_.was) -> $($_.now)" } }
+          $md | Set-Content 'out/sonar/drift.md' -Encoding utf8
+          Get-Content 'out/sonar/drift.md'
+          "drift=$(if ($rows.Count -gt 0) { 'true' } else { 'false' })" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "total=$($issues.Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Quality gate on main
+        id: gate
+        shell: powershell
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/sonar_gate.ps1 -ProjectKey colleague-edt -IssuesFile out/sonar/colleague-edt-issues.json
+          "result=$LASTEXITCODE" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          exit 0
+
+      - name: Open an issue when main is not green
+        if: steps.drift.outputs.drift == 'true' || steps.gate.outputs.result != '0'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $body = (Get-Content 'out/sonar/drift.md' -Raw) + "`n`nGate exit code: ${{ steps.gate.outputs.result }}"
+          $body | Out-File -FilePath drift-body.md -Encoding utf8
+          gh issue create --title "Sonar drift on main ($(Get-Date -Format yyyy-MM-dd))" --body-file drift-body.md --repo $env:GITHUB_REPOSITORY

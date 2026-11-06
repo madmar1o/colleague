@@ -1,0 +1,4 @@
+﻿# Allow-list for sanitize_check.ps1: one regular expression per line, matched
+# against tracked file paths (not content). Keep it empty unless a path is
+# legitimately impossible to rename.
+^LICENSE$
