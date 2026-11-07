@@ -59,7 +59,9 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
      * @param theStatus HTTP status the endpoint answered
      * @return text appended to the message, empty when there is nothing to add
      */
+    @SuppressWarnings("java:S3516")
     protected String failureHint(final int theStatus) {
+        // Contract: default implementation returns empty hint; dialects override.
         return "";
     }
 

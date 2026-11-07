@@ -58,12 +58,12 @@ public final class MemoryTool implements IToolExecutor {
             parsed = null;
         }
         if(parsed == null || !parsed.isJsonObject()) {
-            return noteError();
+            return NOTE_ERROR;
         }
         final JsonElement value = parsed.getAsJsonObject().get("note");
         final String note = value == null || !value.isJsonPrimitive() ? null : value.getAsString();
         if(note == null || note.isBlank()) {
-            return noteError();
+            return NOTE_ERROR;
         }
         if(!memory.addLesson(note)) {
             return "Already in the lesson memory, nothing new stored; it keeps "
@@ -77,7 +77,5 @@ public final class MemoryTool implements IToolExecutor {
         return theCount == 1 ? " lesson" : " lessons";
     }
 
-    private static String noteError() {
-        return "ERROR: pass a non-empty note";
-    }
+    private static final String NOTE_ERROR = "ERROR: pass a non-empty note";
 }
