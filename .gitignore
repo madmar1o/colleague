@@ -26,3 +26,5 @@ local.properties
 
 # Tycho consumer pom written by tycho-packaging
 .tycho-consumer-pom.xml
+
+out/
