@@ -96,11 +96,11 @@ public final class PlanTool implements IToolExecutor {
             parsed = null;
         }
         if(parsed == null || !parsed.isJsonObject()) {
-            return itemsError();
+            return ITEMS_ERROR;
         }
         final JsonElement items = parsed.getAsJsonObject().get("items");
         if(items == null || !items.isJsonArray() || items.getAsJsonArray().isEmpty()) {
-            return itemsError();
+            return ITEMS_ERROR;
         }
         final List<Step> plan = new ArrayList<>();
         for(final JsonElement entry : items.getAsJsonArray()) {
@@ -141,7 +141,5 @@ public final class PlanTool implements IToolExecutor {
         return value == null || !value.isJsonPrimitive() ? null : value.getAsString();
     }
 
-    private static String itemsError() {
-        return "ERROR: items must be a non-empty array of {content, status} objects";
-    }
+    private static final String ITEMS_ERROR = "ERROR: items must be a non-empty array of {content, status} objects";
 }

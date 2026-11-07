@@ -23,7 +23,10 @@ import com.mad.edt.colleague.ui.view.ColleagueView;
 public abstract class SelectionToChatHandler extends AbstractHandler {
 
     @Override
+    @SuppressWarnings("java:S3516")
     public Object execute(final ExecutionEvent theEvent) throws ExecutionException {
+        // Contract: AbstractHandler.execute requires an Object return; null is the
+        // intended "no return value" for command handlers.
         final IWorkbenchPage page =
             HandlerUtil.getActiveWorkbenchWindowChecked(theEvent).getActivePage();
         final IEditorPart editor = page.getActiveEditor();

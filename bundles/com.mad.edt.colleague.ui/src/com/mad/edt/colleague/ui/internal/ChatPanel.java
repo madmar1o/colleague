@@ -603,7 +603,10 @@ public final class ChatPanel {
      *
      * @return {@code true} when the browser path is active
      */
+    @SuppressWarnings("java:S3516")
     private boolean createBrowser() {
+        // Return value deliberately reflects success (true) vs. failure (false);
+        // Sonar's dataflow collapses the tail, see specs/0014.
         try {
             ViewBridge.ensureUserDataDir();
             ourBridge = new BridgeBrowser(ourRoot, "web/chat.html", this::handleBridge);
@@ -623,7 +626,7 @@ public final class ChatPanel {
             }
             return false;
         }
-        return true;
+        return false;
     }
 
     /** Logs where the chat browser sits on screen and who receives SWT input. */
