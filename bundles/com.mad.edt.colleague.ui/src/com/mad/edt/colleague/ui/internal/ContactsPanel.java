@@ -267,8 +267,6 @@ public final class ContactsPanel {
     private void handleBridge(final String theMethod, final JsonObject theArguments) {
         switch(theMethod) {
             case "bridgeReady":
-                reload();
-                return;
             case "refresh":
                 reload();
                 return;

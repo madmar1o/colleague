@@ -75,7 +75,7 @@ public final class QdrantClient {
     public boolean isAlive() {
         try {
             final JsonObject response = call("GET", "/collections", null);
-            return response != null && response.has("result");
+            return response.has("result");
         } catch (final QdrantException ex) {
             return false;
         }
@@ -330,7 +330,7 @@ public final class QdrantClient {
         final JsonObject result =
             call("POST", "/collections/" + theCollection + "/points/search", body);
         final List<Hit> hits = new ArrayList<>();
-        if(result != null && result.has("result")) {
+        if(result.has("result")) {
             for(final com.google.gson.JsonElement element : result.getAsJsonArray("result")) {
                 final JsonObject hit = element.getAsJsonObject();
                 final JsonObject payload = hit.getAsJsonObject("payload");
@@ -372,8 +372,7 @@ public final class QdrantClient {
             }
             final JsonObject result =
                 call("POST", "/collections/" + theCollection + "/points/scroll", body);
-            final JsonObject page =
-                result == null ? null : result.getAsJsonObject("result");
+            final JsonObject page = result.getAsJsonObject("result");
             if(page == null || !page.has("points")) {
                 break;
             }
@@ -403,7 +402,7 @@ public final class QdrantClient {
             body.addProperty("exact", Boolean.TRUE);
             final JsonObject result =
                 call("POST", "/collections/" + theCollection + "/points/count", body);
-            if(result != null && result.has("result")
+            if(result.has("result")
                 && result.getAsJsonObject("result").has("count")) {
                 return result.getAsJsonObject("result").get("count").getAsLong();
             }
