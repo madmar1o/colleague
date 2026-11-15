@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.mad.edt.colleague.context.vector.ScriptedHttpTransport;
+import com.mad.edt.colleague.context.vector.VectorIndex;
 import com.mad.edt.colleague.context.vector.VectorIndex.UpdateReport;
 
 /**
@@ -312,6 +313,73 @@ class SemanticIndexTest {
         embed.answer(500, "{\"error\":\"runtime hiccup\"}");
         final String logLine = index.refreshAndLog(sources);
         assertTrue(logLine.contains("failed 1"), logLine);
+    }
+
+    @Test
+    void refreshGivingUpThePassMarksTheLayerUnready(@TempDir final Path theDir)
+        throws Exception {
+        final ScriptedHttpTransport store = new ScriptedHttpTransport();
+        final ScriptedHttpTransport embed = new ScriptedHttpTransport();
+        final SemanticIndex index =
+            SemanticIndex.forTesting("colleague_giveup", store, embed);
+        probeFourDimensions(embed);
+        storeCollectionOk(store, 4);
+        store.answer(200, "{\"result\":{\"points\":[],\"next_page_offset\":null}}");
+        index.prepare();
+        assertTrue(index.isReady(), index.getStatus());
+
+        // every one of the consecutive files trips over the refusing embedder,
+        // so the pass gives up per VectorIndex's own budget
+        final SemanticIndex.FileSource sources = acceptor -> {
+            for(int i = 0; i < VectorIndex.MAX_CONSECUTIVE_FILE_FAILURES; i++) {
+                try {
+                    final Path file = theDir.resolve("f" + i + ".bsl");
+                    Files.writeString(file, "line1\nline2\nline3");
+                    acceptor.accept(file, "f" + i + ".bsl");
+                } catch (final java.io.IOException ex) {
+                    throw new IllegalStateException(ex);
+                }
+            }
+        };
+        for(int i = 0; i < VectorIndex.MAX_CONSECUTIVE_FILE_FAILURES; i++) {
+            store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
+            embed.answer(500, "{\"error\":\"runtime hiccup\"}");
+        }
+        assertThrows(SemanticIndex.SemanticFailure.class, () -> index.refreshFrom(sources));
+        // the failed pass must not leave a "live" flag behind: the next hybrid
+        // question has to fall back to keywords only, not search a half-written
+        // collection (audit spec 0004, the markFailed defect)
+        assertFalse(index.isReady(), index.getStatus());
+        assertNull(index.readyIndex(), index.getStatus());
+        final HybridContextSource hybrid =
+            new HybridContextSource(new KeywordStub("keyword only\n"), index::readyIndex);
+        assertEquals("keyword only\n", hybrid.gather("q"));
+    }
+
+    @Test
+    void runtimeHiccupDuringRefreshMarksTheLayerUnready(@TempDir final Path theDir)
+        throws Exception {
+        final ScriptedHttpTransport store = new ScriptedHttpTransport();
+        final ScriptedHttpTransport embed = new ScriptedHttpTransport();
+        final SemanticIndex index =
+            SemanticIndex.forTesting("colleague_crash", store, embed);
+        probeFourDimensions(embed);
+        storeCollectionOk(store, 4);
+        store.answer(200, "{\"result\":{\"points\":[],\"next_page_offset\":null}}");
+        index.prepare();
+        assertTrue(index.isReady(), index.getStatus());
+
+        final Path file = theDir.resolve("x.bsl");
+        Files.writeString(file, "line1\nline2\nline3");
+        // the source walk crashes with an unchecked defect mid-refresh: the
+        // layer must not stay "ready" after such a crash either
+        final SemanticIndex.FileSource sources = acceptor -> {
+            acceptor.accept(file, "x.bsl");
+            throw new IllegalStateException("simulated walk crash");
+        };
+        assertThrows(IllegalStateException.class, () -> index.refreshFrom(sources));
+        assertFalse(index.isReady(), index.getStatus());
+        assertNull(index.readyIndex(), index.getStatus());
     }
 
     private static String sha256Hex(final byte[] theContent) throws Exception {

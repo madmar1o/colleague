@@ -197,6 +197,20 @@ public final class SemanticIndex {
     }
 
     /**
+     * Takes the layer out of the ready state after any failed pass: the flag
+     * and the reason travel together, so no failure path can leave a "live"
+     * flag over a half-written collection (the next hybrid question then falls
+     * back to keyword text only, and {@link #prepare()} re-probes the
+     * endpoints on the next scheduled pass).
+     *
+     * @param theNote failure text kept visible in {@link #getStatus()}
+     */
+    private void markNotReady(final String theNote) {
+        ready = false;
+        lastError = theNote;
+    }
+
+    /**
      * Adopts the fingerprints carried in the stored chunk payloads. A broken
      * walk only costs the shortcut: the layer still becomes ready, the note
      * stays visible in {@link #getStatus()} and the next pass re-embeds the
@@ -227,16 +241,19 @@ public final class SemanticIndex {
         if(!ready) {
             throw new SemanticFailure("semantic layer unavailable: " + lastError, null);
         }
-        final List<SourceFile> files = new ArrayList<>();
-        theSources.forEach((location, displayPath) -> files.add(new SourceFile(location,
-            displayPath)));
         try {
+            final List<SourceFile> files = new ArrayList<>();
+            theSources.forEach((location, displayPath) -> files.add(new SourceFile(location,
+                displayPath)));
             final UpdateReport report = index.update(files);
             lastError = "";
             return report;
         } catch (final IndexFailure ex) {
-            lastError = ex.getMessage();
+            markNotReady(ex.getMessage());
             throw new SemanticFailure(ex.getMessage(), ex);
+        } catch (final RuntimeException ex) {
+            markNotReady("semantic pass crashed: " + ex.getMessage());
+            throw ex;
         }
     }
 
