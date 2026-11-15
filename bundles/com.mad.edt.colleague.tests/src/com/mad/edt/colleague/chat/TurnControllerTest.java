@@ -53,6 +53,7 @@ class TurnControllerTest {
                 Thread.sleep(30_000L);
             } catch (final InterruptedException ex) {
                 seen.cancel();
+                Thread.currentThread().interrupt();
             }
         });
         worker.start();

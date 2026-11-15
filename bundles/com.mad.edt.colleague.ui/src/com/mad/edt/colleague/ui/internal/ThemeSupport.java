@@ -69,6 +69,7 @@ final class ThemeSupport {
                 try {
                     Thread.sleep(2000L);
                 } catch (final InterruptedException ex) {
+                    Thread.currentThread().interrupt();
                     return;
                 }
                 if(theAnchor.isDisposed() || display.isDisposed()) {

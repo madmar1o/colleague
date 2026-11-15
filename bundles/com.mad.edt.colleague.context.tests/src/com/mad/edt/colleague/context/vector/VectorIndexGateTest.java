@@ -88,6 +88,7 @@ class VectorIndexGateTest {
             try {
                 Thread.sleep(120L);
             } catch (final InterruptedException ignored) {
+                Thread.currentThread().interrupt();
                 // releasing early is fine either way
             }
             gate.leave();
