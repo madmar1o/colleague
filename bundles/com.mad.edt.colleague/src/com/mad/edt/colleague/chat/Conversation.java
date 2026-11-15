@@ -176,7 +176,7 @@ public final class Conversation {
             request.addMessage(contextMessage);
         }
         request.addMessage(ChatMessage.user(theQuestion));
-        request.think(Boolean.valueOf(wantsVisibleReasoning(theModel)));
+        request.think(wantsVisibleReasoning(theModel));
         if(theCancellation != null) {
             request.cancellation(theCancellation);
         }

@@ -1,6 +1,7 @@
 package com.mad.edt.colleague.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -32,7 +33,7 @@ class ConversationCompactionTest {
 
         assertTrue(history.size() <= Conversation.MAX_HISTORY_MESSAGES,
             "history must stay capped, was " + history.size());
-        assertTrue(history.size() > 0);
+        assertFalse(history.isEmpty());
         assertTrue(history.get(0).getContent().startsWith(Conversation.DIGEST_MARKER));
         assertEquals(ChatMessage.ROLE_SYSTEM, history.get(0).getRole());
         // the very first exchange is remembered in the digest, not deleted

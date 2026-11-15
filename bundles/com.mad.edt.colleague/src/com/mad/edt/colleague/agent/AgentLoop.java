@@ -159,7 +159,7 @@ public final class AgentLoop {
             // them. a model without the capability rejects the whole round,
             // so the provider - the side that learns from that rejection -
             // answers whether the pass may be requested at all
-            request.think(Boolean.valueOf(provider.supportsThinking(roundModel)));
+            request.think(provider.supportsThinking(roundModel));
             request.maxTokens(ROUND_TRIP_OUTPUT_TOKENS);
             request.cancellation(cancellation);
 
@@ -209,7 +209,7 @@ public final class AgentLoop {
                 for(final ChatMessage message : messages) {
                     wrap.addMessage(message);
                 }
-                wrap.think(Boolean.FALSE);
+                wrap.think(false);
                 wrap.maxTokens(Integer.valueOf(REPAIR_ROUND_OUTPUT_TOKENS));
                 wrap.cancellation(cancellation);
                 final ChatResult wrapResult = streamedRound(wrap.build());
