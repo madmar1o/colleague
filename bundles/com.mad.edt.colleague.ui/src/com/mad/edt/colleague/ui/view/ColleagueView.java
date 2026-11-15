@@ -109,7 +109,12 @@ public class ColleagueView extends ViewPart {
     /** Agent profile name the staged question should run on. */
     private static volatile String ourPendingProfile;
 
-    /** The single visible instance (the view is not multiplicable). */
+    /**
+     * The single visible instance (the view is not multiplicable). Published
+     * whole at part creation and cleared on destroy; the workbench serializes
+     * both writes. Replacing this singleton is spec 0015 territory.
+     */
+    @SuppressWarnings("java:S3077")
     private static volatile ColleagueView ourInstance;
 
     /** Conversations keyed by contact; rebuilt when a saved endpoint moves. */
