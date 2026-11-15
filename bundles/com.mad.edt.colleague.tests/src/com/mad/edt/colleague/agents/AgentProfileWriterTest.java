@@ -132,8 +132,10 @@ class AgentProfileWriterTest {
     void readyTextRefusesUnsafeIds(@TempDir final Path theRoot) throws IOException {
         Assertions.assertThrows(IllegalArgumentException.class,
             () -> AgentProfileWriter.saveText(theRoot.toFile(), "../escape", "x"));
-        Assertions.assertTrue(Files.list(theRoot).findAny().isEmpty(),
-            "nothing may reach the directory through an unsafe id");
+        try (java.util.stream.Stream<Path> listing = Files.list(theRoot)) {
+            Assertions.assertTrue(listing.findAny().isEmpty(),
+                "nothing may reach the directory through an unsafe id");
+        }
     }
 
     @Test
