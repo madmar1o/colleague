@@ -15,6 +15,12 @@ public final class TurnController {
     public static final class Turn {
 
         private final CancellationFlag myCancellation = new CancellationFlag();
+        /**
+         * Worker thread of this turn. The thread object is attached whole once
+         * and only used to interrupt and join, never mutated through this
+         * reference, so the volatile field is a safe one-shot publication.
+         */
+        @SuppressWarnings("java:S3077")
         private volatile Thread myWorkerThread;
 
         /** the latch providers poll between streamed frames */

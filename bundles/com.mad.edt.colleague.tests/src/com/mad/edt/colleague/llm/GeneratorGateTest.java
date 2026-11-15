@@ -53,6 +53,7 @@ class GeneratorGateTest {
             try {
                 Thread.sleep(100L);
             } catch (final InterruptedException ignored) {
+                Thread.currentThread().interrupt();
                 // ending the burst early is fine either way
             }
             gate.leave();

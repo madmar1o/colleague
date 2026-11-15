@@ -64,7 +64,7 @@ public final class HybridContextSource implements ContextSource {
         }
         final List<ModuleHit> hits;
         try {
-            hits = index.searchModules(theQuestion, Integer.valueOf(SEMANTIC_LIMIT),
+            hits = index.searchModules(theQuestion, SEMANTIC_LIMIT,
                 Double.valueOf(MIN_SIMILARITY));
         } catch (final IndexFailure | RuntimeException ex) {
             lastSemanticError = describe(ex);

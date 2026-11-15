@@ -129,8 +129,7 @@ class McpAgentIntegrationTest {
     @DisplayName("a spawned stdio server feeds its tools through the real agent loop")
     void liveServerFeedsTheAgent(@TempDir final Path theDir) throws Exception {
         final McpServerConfig config = spawnFake(theDir);
-        final McpClient client = new McpClient(config);
-        try {
+        try (McpClient client = new McpClient(config)) {
             final McpCatalog catalog = new McpCatalog(
                 unusedConfig -> client.discover().toArray(new McpToolInfo[0]),
                 unusedConfig -> client,
@@ -158,8 +157,6 @@ class McpAgentIntegrationTest {
             Assertions.assertTrue(toolResult.contains("stdio echo ok"),
                 "the server's answer must reach the next model round: "
                     + provider.requests.get(1).getMessages());
-        } finally {
-            client.close();
         }
     }
 
@@ -167,8 +164,7 @@ class McpAgentIntegrationTest {
     @DisplayName("a built-in name blocks the live remote tool of the same name")
     void builtInWinsEvenAgainstALiveServer(@TempDir final Path theDir) throws Exception {
         final McpServerConfig config = spawnFake(theDir);
-        final McpClient client = new McpClient(config);
-        try {
+        try (McpClient client = new McpClient(config)) {
             final McpCatalog catalog = new McpCatalog(
                 unusedConfig -> client.discover().toArray(new McpToolInfo[0]),
                 unusedConfig -> client,
@@ -183,8 +179,6 @@ class McpAgentIntegrationTest {
                 tools.stream().map(IToolExecutor::getName).toList();
             Assertions.assertEquals(List.of("echo"), advertised,
                 "the live server's echo loses to the built-in reader");
-        } finally {
-            client.close();
         }
     }
 }

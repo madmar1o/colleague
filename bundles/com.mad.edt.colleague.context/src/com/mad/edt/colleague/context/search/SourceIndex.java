@@ -79,6 +79,12 @@ public final class SourceIndex {
         }
     }
 
+    /**
+     * Copy-on-write snapshot of the index: every rebuild swaps the reference
+     * for a fresh immutable list ({@code List.copyOf}), the published list is
+     * never mutated, so the volatile swap is the whole publication contract.
+     */
+    @SuppressWarnings("java:S3077")
     private volatile List<Entry> ourEntries = List.of();
     private volatile boolean ourIndexing;
 

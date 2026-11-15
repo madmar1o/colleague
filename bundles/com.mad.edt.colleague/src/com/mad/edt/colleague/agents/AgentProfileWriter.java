@@ -101,6 +101,11 @@ public final class AgentProfileWriter {
      * @throws IOException when the directory cannot be created or is not a
      *             directory
      */
+    @SuppressWarnings("java:S1764")
+    // The repeated isDirectory() is not dead code but a guard against a race:
+    // a second creator may have made the directory between our check and our
+    // mkdirs(), whose failure then means nothing to undo. Removing the second
+    // check would break idempotency of concurrent saves.
     private static void ensureDirectory(final File theAgentsDir) throws IOException {
         if(theAgentsDir == null) {
             throw new IOException("no agents directory given");

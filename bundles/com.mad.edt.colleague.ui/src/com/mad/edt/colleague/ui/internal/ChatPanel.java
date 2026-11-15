@@ -122,7 +122,12 @@ public final class ChatPanel {
     private Composite ourRoot;
     private BridgeBrowser ourBridge;
 
-    /** Second transport watching this conversation, set only by the debug bridge. */
+    /**
+     * Second transport watching this conversation, set only by the debug
+     * bridge: the configured transport is published whole in a single volatile
+     * write and never mutated through this field afterwards.
+     */
+    @SuppressWarnings("java:S3077")
     private volatile PageTransport ourMirrorTransport;
     private Control ourThemeAnchor;
     private Color ourPageBackground;
@@ -145,7 +150,10 @@ public final class ChatPanel {
      * page offers a continuation over exactly this history: the loop resumes
      * where it stopped instead of starting the task blind. Written by the
      * question worker, read by the bridge handler on the UI thread.
+     * Copy-on-write: the field only ever holds an immutable list, the volatile
+     * swap publishes whole snapshots and never mutates a visible one.
      */
+    @SuppressWarnings("java:S3077")
     private volatile List<ChatMessage> ourInterruptedConversation = List.of();
     private String ourCachedQuestion = "";
     /** question staged for a chat page that has not announced itself yet. */
@@ -1803,7 +1811,7 @@ public final class ChatPanel {
         // history; a completed run or a user stop leaves nothing to resume
         ourInterruptedConversation = !answer.isCompleted() && !answer.getConversation().isEmpty()
             && !theCancellation.isCancelled()
-            ? answer.getConversation() : List.of();
+            ? List.copyOf(answer.getConversation()) : List.of();
         if(!theQuestion.isEmpty() && !answer.getText().isEmpty()) {
             ourSession.noteExchange(theQuestion, answer.getText());
         }

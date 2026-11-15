@@ -243,16 +243,15 @@ class McpClientHandshakeTest {
             + java.io.File.separatorChar + "bin" + java.io.File.separatorChar + "java";
         final McpServerConfig config = new McpServerConfig("stdio",
             List.of(javaBin, source.toAbsolutePath().toString()), null, true);
-        final McpClient client = new McpClient(config);
+        try (McpClient client = new McpClient(config)) {
+            final List<McpToolInfo> tools = client.discover();
+            Assertions.assertEquals(1, tools.size());
+            Assertions.assertEquals(TOOL_NAME, tools.get(0).name());
+            Assertions.assertFalse(tools.get(0).readOnly(),
+                "a tool without annotations is write-like by default");
 
-        final List<McpToolInfo> tools = client.discover();
-        Assertions.assertEquals(1, tools.size());
-        Assertions.assertEquals(TOOL_NAME, tools.get(0).name());
-        Assertions.assertFalse(tools.get(0).readOnly(),
-            "a tool without annotations is write-like by default");
-
-        Assertions.assertEquals("stdio echo ok", client.call(TOOL_NAME, null));
-        client.close();
+            Assertions.assertEquals("stdio echo ok", client.call(TOOL_NAME, null));
+        }
     }
 
     @Test

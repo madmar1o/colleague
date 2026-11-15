@@ -87,7 +87,7 @@ class AgentLoopEndToEndTest {
         public void onToolCall(final int theStep, final String theName, final String theArgumentsJson,
             final String theResult, final long theElapsedMs) {
             events.add("step " + theStep + " " + TOOL_EVENT + theName
-                + " result=" + String.valueOf(theResult));
+                + " result=" + theResult);
             logs.onToolCall(theStep, theName, theArgumentsJson, theResult, theElapsedMs);
         }
 
@@ -283,8 +283,9 @@ class AgentLoopEndToEndTest {
         final ByteArrayOutputStream console = new ByteArrayOutputStream();
         final AgentAnswer answer;
         final long startedAtNanos = System.nanoTime();
-        try {
-            System.setOut(new PrintStream(console, true, StandardCharsets.UTF_8));
+        try (PrintStream redirectedOut =
+            new PrintStream(console, true, StandardCharsets.UTF_8)) {
+            System.setOut(redirectedOut);
             answer = loop.run(
                 "You fix code in a workspace using tools. Always call the tools,"
                     + " never describe changes in prose.",
@@ -383,8 +384,9 @@ class AgentLoopEndToEndTest {
         final ByteArrayOutputStream console = new ByteArrayOutputStream();
         final AgentAnswer answer;
         final long startedAtNanos = System.nanoTime();
-        try {
-            System.setOut(new PrintStream(console, true, StandardCharsets.UTF_8));
+        try (PrintStream redirectedOut =
+            new PrintStream(console, true, StandardCharsets.UTF_8)) {
+            System.setOut(redirectedOut);
             answer = loop.run(
                 "You answer questions using tools. Always call the tools,"
                     + " never describe actions in prose.",
