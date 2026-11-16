@@ -34,6 +34,15 @@ class VectorIndexTest {
 
     private static final String COLLECTION = "ws_test";
 
+    // fixture names and canned store answers shared across the update tests
+    private static final String A_BSL = "a.bsl";
+    private static final String KEEP_BSL = "keep.bsl";
+    private static final String GONE_BSL = "gone.bsl";
+    private static final String OK_BODY = "{\"result\":true,\"status\":\"ok\"}";
+    private static final String DELETE_URL = "/points/delete?wait=true";
+    private static final String LOCATION_FIELD = "\"location\":\"";
+    private static final String HASH_FIELD = "\",\"hash\":\"";
+
     private final ScriptedHttpTransport storeTransport = new ScriptedHttpTransport();
     private final ScriptedHttpTransport embedTransport = new ScriptedHttpTransport();
 
@@ -44,7 +53,7 @@ class VectorIndexTest {
     }
 
     private void storeOk() {
-        storeTransport.answer(200, "{\"result\":true,\"status\":\"ok\"}");
+        storeTransport.answer(200, OK_BODY);
     }
 
     /** one vector per text, each vector two components */
@@ -86,20 +95,20 @@ class VectorIndexTest {
         // the session may have restarted while the collection still holds an
         // older generation of the same file, so the clear always precedes
         // the write
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(A_BSL);
         Files.writeString(file, numberedFile(60), StandardCharsets.UTF_8);
         storeOk();
         embedVectors(2);
         storeOk();
         final UpdateReport report =
-            index().update(List.of(sourceOf(file, "a.bsl")));
+            index().update(List.of(sourceOf(file, A_BSL)));
         assertEquals(1, report.reembedded());
         assertEquals(0, report.skipped());
         assertEquals(2, storeTransport.getCallCount());
         assertEquals("POST", storeTransport.callAt(0).getMethod());
-        assertTrue(storeTransport.callAt(0).getUrl().endsWith("/points/delete?wait=true"),
+        assertTrue(storeTransport.callAt(0).getUrl().endsWith(DELETE_URL),
             storeTransport.callAt(0).getUrl());
-        assertTrue(storeTransport.callAt(0).getJsonBody().contains("a.bsl"),
+        assertTrue(storeTransport.callAt(0).getJsonBody().contains(A_BSL),
             storeTransport.callAt(0).getJsonBody());
         assertEquals("PUT", storeTransport.callAt(1).getMethod());
         assertTrue(storeTransport.callAt(1).getUrl().endsWith("/points?wait=true"),
@@ -110,17 +119,17 @@ class VectorIndexTest {
     @Test
     void unchangedFileIsSkippedWithoutASingleCall(@TempDir final Path theDir)
         throws IOException, IndexFailure {
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(A_BSL);
         Files.writeString(file, numberedFile(30), StandardCharsets.UTF_8);
         final VectorIndex ourIndex = index();
         storeOk();
         embedVectors(1);
         storeOk();
-        ourIndex.update(List.of(sourceOf(file, "a.bsl")));
+        ourIndex.update(List.of(sourceOf(file, A_BSL)));
         final int storeCalls = storeTransport.getCallCount();
         final int embedCalls = embedTransport.getCallCount();
         final UpdateReport second =
-            ourIndex.update(List.of(sourceOf(file, "a.bsl")));
+            ourIndex.update(List.of(sourceOf(file, A_BSL)));
         assertEquals(0, second.reembedded());
         assertEquals(1, second.skipped());
         assertEquals(storeCalls, storeTransport.getCallCount());
@@ -130,23 +139,23 @@ class VectorIndexTest {
     @Test
     void rewrittenFileIsClearedBeforeTheFreshWindowsAreWritten(@TempDir final Path theDir)
         throws IOException, IndexFailure {
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(A_BSL);
         Files.writeString(file, numberedFile(30), StandardCharsets.UTF_8);
         final VectorIndex ourIndex = index();
         storeOk();
         embedVectors(1);
         storeOk();
-        ourIndex.update(List.of(sourceOf(file, "a.bsl")));
+        ourIndex.update(List.of(sourceOf(file, A_BSL)));
         // 56 content lines: two windows, so the second pass needs two vectors
         Files.writeString(file, numberedFile(55) + "\nextra", StandardCharsets.UTF_8);
         storeOk();
         embedVectors(2);
         storeOk();
-        final UpdateReport second = ourIndex.update(List.of(sourceOf(file, "a.bsl")));
+        final UpdateReport second = ourIndex.update(List.of(sourceOf(file, A_BSL)));
         assertEquals(1, second.reembedded());
         // this pass: call 0 clears, call 1 writes - never the other way round
         assertEquals("POST", storeTransport.callAt(2).getMethod());
-        assertTrue(storeTransport.callAt(2).getUrl().endsWith("/points/delete?wait=true"));
+        assertTrue(storeTransport.callAt(2).getUrl().endsWith(DELETE_URL));
         assertEquals("PUT", storeTransport.callAt(3).getMethod());
         assertTrue(storeTransport.callAt(3).getUrl().endsWith("/points?wait=true"));
         assertTrue(storeTransport.callAt(3).getJsonBody().contains("line55"));
@@ -155,8 +164,8 @@ class VectorIndexTest {
     @Test
     void fileThatVanishedFromTheListIsPurged(@TempDir final Path theDir)
         throws IOException, IndexFailure {
-        final Path keep = theDir.resolve("keep.bsl");
-        final Path gone = theDir.resolve("gone.bsl");
+        final Path keep = theDir.resolve(KEEP_BSL);
+        final Path gone = theDir.resolve(GONE_BSL);
         Files.writeString(keep, numberedFile(10), StandardCharsets.UTF_8);
         Files.writeString(gone, numberedFile(10), StandardCharsets.UTF_8);
         final VectorIndex ourIndex = index();
@@ -166,52 +175,52 @@ class VectorIndexTest {
         storeOk();
         embedVectors(1);
         storeOk();
-        ourIndex.update(List.of(sourceOf(keep, "keep.bsl"), sourceOf(gone, "gone.bsl")));
+        ourIndex.update(List.of(sourceOf(keep, KEEP_BSL), sourceOf(gone, GONE_BSL)));
         assertEquals(2, ourIndex.trackedFileCount());
         // only keep is listed now, and its content did not move: the single
         // store call of this pass must purge the vanished file
         storeOk();
-        final UpdateReport second = ourIndex.update(List.of(sourceOf(keep, "keep.bsl")));
+        final UpdateReport second = ourIndex.update(List.of(sourceOf(keep, KEEP_BSL)));
         assertEquals(0, second.reembedded());
         assertEquals(1, second.skipped());
         assertEquals(1, second.purged());
         final String purgeBody = storeTransport.callAt(4).getJsonBody();
-        assertTrue(purgeBody.contains("gone.bsl"), purgeBody);
-        assertTrue(storeTransport.callAt(4).getUrl().endsWith("/points/delete?wait=true"));
+        assertTrue(purgeBody.contains(GONE_BSL), purgeBody);
+        assertTrue(storeTransport.callAt(4).getUrl().endsWith(DELETE_URL));
         assertEquals(1, ourIndex.trackedFileCount());
     }
 
     @Test
     void fileThatWentBlankKeepsOnlyTheClearingDelete(@TempDir final Path theDir)
         throws IOException, IndexFailure {
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(A_BSL);
         Files.writeString(file, numberedFile(10), StandardCharsets.UTF_8);
         final VectorIndex ourIndex = index();
         storeOk();
         embedVectors(1);
         storeOk();
-        ourIndex.update(List.of(sourceOf(file, "a.bsl")));
+        ourIndex.update(List.of(sourceOf(file, A_BSL)));
         Files.writeString(file, "", StandardCharsets.UTF_8);
         storeOk();
-        final UpdateReport second = ourIndex.update(List.of(sourceOf(file, "a.bsl")));
+        final UpdateReport second = ourIndex.update(List.of(sourceOf(file, A_BSL)));
         assertEquals(1, second.reembedded());
         // only one further store call: the stale-points delete; the blank
         // file produces no windows, so no embedding batch and no write
         assertEquals(3, storeTransport.getCallCount());
         assertEquals(1, embedTransport.getCallCount());
-        assertTrue(storeTransport.callAt(2).getUrl().endsWith("/points/delete?wait=true"));
+        assertTrue(storeTransport.callAt(2).getUrl().endsWith(DELETE_URL));
     }
 
     @Test
     void mismatchedEmbeddingVectorCountSkipsTheFileAndKeepsItUntracked(@TempDir final Path theDir)
         throws IOException, IndexFailure {
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(A_BSL);
         Files.writeString(file, numberedFile(60), StandardCharsets.UTF_8);
         final VectorIndex ourIndex = index();
         storeOk();
         // the runtime answers one vector for the two expected chunks
         embedTransport.answer(200, "{\"embeddings\":[[1.0,2.0]]}");
-        final UpdateReport report = ourIndex.update(List.of(sourceOf(file, "a.bsl")));
+        final UpdateReport report = ourIndex.update(List.of(sourceOf(file, A_BSL)));
         assertEquals(0, report.reembedded());
         assertEquals(1, report.failed());
         // no write happened, the file stays untracked so a retry re-embeds it
@@ -283,11 +292,11 @@ class VectorIndexTest {
         // the store already remembers every chunk of a file including its
         // content hash: a fresh session adopts those fingerprints instead of
         // re-embedding the whole workspace from scratch
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(A_BSL);
         Files.writeString(file, numberedFile(30), StandardCharsets.UTF_8);
         final String hash = sha256Hex(numberedFile(30).getBytes(StandardCharsets.UTF_8));
         storeTransport.answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"a.bsl\","
-            + "\"location\":\"" + jsonEscape(file.toString()) + "\",\"hash\":\"" + hash
+            + LOCATION_FIELD + jsonEscape(file.toString()) + HASH_FIELD + hash
             + "\"}}],\"next_page_offset\":null}}");
         final VectorIndex ourIndex = index();
         ourIndex.restoreFingerprints();
@@ -295,7 +304,7 @@ class VectorIndexTest {
 
         final int storeCalls = storeTransport.getCallCount();
         final UpdateReport report = ourIndex.update(
-            List.of(sourceOf(file, "a.bsl")));
+            List.of(sourceOf(file, A_BSL)));
         assertEquals(0, report.reembedded());
         assertEquals(1, report.skipped());
         assertEquals(0, report.failed());
@@ -311,7 +320,7 @@ class VectorIndexTest {
         // fingerprint cannot be trusted, because two projects may share that
         // path; the walk deletes those points instead of adopting them, and
         // the file is embedded afresh with a location-tagged payload
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(A_BSL);
         Files.writeString(file, numberedFile(30), StandardCharsets.UTF_8);
         final String hash = sha256Hex(numberedFile(30).getBytes(StandardCharsets.UTF_8));
         storeTransport.answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"a.bsl\","
@@ -326,17 +335,17 @@ class VectorIndexTest {
         assertTrue(deleteBody.contains("\"key\":\"path\""), deleteBody);
         assertTrue(deleteBody.contains("\"value\":\"a.bsl\""), deleteBody);
         assertTrue(deleteBody.contains("\"is_empty\":{\"key\":\"location\"}"), deleteBody);
-        assertTrue(storeTransport.callAt(1).getUrl().endsWith("/points/delete?wait=true"),
+        assertTrue(storeTransport.callAt(1).getUrl().endsWith(DELETE_URL),
             storeTransport.callAt(1).getUrl());
         // the file is re-embedded from scratch, now carrying its location
         storeOk();
         embedVectors(1);
         storeOk();
-        final UpdateReport report = ourIndex.update(List.of(sourceOf(file, "a.bsl")));
+        final UpdateReport report = ourIndex.update(List.of(sourceOf(file, A_BSL)));
         assertEquals(1, report.reembedded());
         assertEquals(0, report.purged());
         assertTrue(storeTransport.callAt(3).getJsonBody().contains(
-            "\"location\":\"" + jsonEscape(file.toString()) + '"'),
+            LOCATION_FIELD + jsonEscape(file.toString()) + '"'),
             storeTransport.callAt(3).getJsonBody());
     }
 
@@ -373,10 +382,10 @@ class VectorIndexTest {
         assertTrue(clearAlpha.contains("\"" + jsonEscape(alpha.toString()) + '"'),
             clearAlpha);
         final String writeAlpha = storeTransport.callAt(1).getJsonBody();
-        assertTrue(writeAlpha.contains("\"location\":\"" + jsonEscape(alpha.toString())
+        assertTrue(writeAlpha.contains(LOCATION_FIELD + jsonEscape(alpha.toString())
             + '"'), writeAlpha);
         final String writeBeta = storeTransport.callAt(3).getJsonBody();
-        assertTrue(writeBeta.contains("\"location\":\"" + jsonEscape(beta.toString())
+        assertTrue(writeBeta.contains(LOCATION_FIELD + jsonEscape(beta.toString())
             + '"'), writeBeta);
         // the two files of one display path get distinct point keys, so they
         // cannot overwrite each other's chunks
@@ -422,18 +431,18 @@ class VectorIndexTest {
     @Test
     void forgetFingerprintsForcesAFullReembed(@TempDir final Path theDir)
         throws IOException, IndexFailure {
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(A_BSL);
         Files.writeString(file, numberedFile(30), StandardCharsets.UTF_8);
         final VectorIndex ourIndex = index();
         storeOk();
         embedVectors(1);
         storeOk();
-        ourIndex.update(List.of(sourceOf(file, "a.bsl")));
+        ourIndex.update(List.of(sourceOf(file, A_BSL)));
         ourIndex.forgetFingerprints();
         storeOk();
         embedVectors(1);
         storeOk();
-        final UpdateReport second = ourIndex.update(List.of(sourceOf(file, "a.bsl")));
+        final UpdateReport second = ourIndex.update(List.of(sourceOf(file, A_BSL)));
         assertEquals(1, second.reembedded());
         assertEquals(0, second.skipped());
         assertEquals(4, storeTransport.getCallCount());
@@ -464,7 +473,7 @@ class VectorIndexTest {
     @Test
     void ensureReadyProbesTheModelBeforeTouchingTheCollection() throws IndexFailure {
         embedVectors(1);
-        storeTransport.answer(200, "{\"result\":true,\"status\":\"ok\"}");
+        storeTransport.answer(200, OK_BODY);
         storeTransport.answer(200, "{\"result\":{\"config\":{\"params\":{\"vectors\":"
             + "{\"size\":2,\"distance\":\"Cosine\"}}}}}");
         index().ensureReady();
@@ -476,7 +485,7 @@ class VectorIndexTest {
     @Test
     void ensureReadyRefusesWhenTheStoredVectorsHaveAnotherSize() {
         embedVectors(1);
-        storeTransport.answer(200, "{\"result\":true,\"status\":\"ok\"}");
+        storeTransport.answer(200, OK_BODY);
         storeTransport.answer(200, "{\"result\":{\"config\":{\"params\":{\"vectors\":"
             + "{\"size\":768,\"distance\":\"Cosine\"}}}}}");
         final IndexFailure failure = assertThrows(IndexFailure.class,
