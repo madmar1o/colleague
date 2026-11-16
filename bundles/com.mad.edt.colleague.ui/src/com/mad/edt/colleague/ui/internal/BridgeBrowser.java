@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui.internal;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URLDecoder;
@@ -158,7 +159,7 @@ final class BridgeBrowser implements PageTransport {
         }
         final String script = ourDelivery.schedule(toBatches(entries));
         if(!script.isEmpty()) {
-            System.out.println("[colleague] push delivered: " + entries.size()
+            ColleagueLog.info("[colleague] push delivered: " + entries.size()
                 + " event(s) queued for the page without a poll");
             return true;
         }
@@ -219,7 +220,7 @@ final class BridgeBrowser implements PageTransport {
         }
         if(!ourFuncSeen) {
             ourFuncSeen = true;
-            System.out.println("[colleague] bridge: first page call via function: "
+            ColleagueLog.info("[colleague] bridge: first page call via function: "
                 + method);
         }
         final int seq = traceCall("function", method, arguments);
@@ -243,10 +244,10 @@ final class BridgeBrowser implements PageTransport {
         if(!"[]".equals(batch)) {
             if(!ourDeliverySeen) {
                 ourDeliverySeen = true;
-                System.out.println("[colleague] bridge: first event batch delivered "
+                ColleagueLog.info("[colleague] bridge: first event batch delivered "
                     + "to the page");
             }
-            System.out.println("[colleague] bridge: " + entries.size()
+            ColleagueLog.info("[colleague] bridge: " + entries.size()
                 + " event(s) delivered in reply to call #" + theCallSeq);
         }
         return batch;
@@ -258,7 +259,7 @@ final class BridgeBrowser implements PageTransport {
                 ? null : org.eclipse.core.runtime.Platform
                     .getBundle(ColleagueUIPlugin.PLUGIN_ID).getEntry(theResource);
             if(entry == null) {
-                System.err.println("colleague: " + theResource
+                ColleagueLog.info("colleague: " + theResource
                     + " missing from the bundle");
                 return false;
             }
@@ -273,12 +274,12 @@ final class BridgeBrowser implements PageTransport {
                 }
             }
             if(!ourBrowser.setText(text.toString())) {
-                System.err.println("colleague: setText on the browser was refused");
+                ColleagueLog.warn("colleague: setText on the browser was refused");
                 return false;
             }
             return true;
         } catch (final Exception ex) {
-            System.err.println("colleague: page load failed: " + ex.getMessage());
+            ColleagueLog.error("colleague: page load failed: " + ex.getMessage());
             return false;
         }
     }
@@ -302,7 +303,7 @@ final class BridgeBrowser implements PageTransport {
         }
         if(!ourLocationSeen) {
             ourLocationSeen = true;
-            System.out.println("[colleague] bridge: first page call via navigation: "
+            ColleagueLog.info("[colleague] bridge: first page call via navigation: "
                 + method);
         }
         if("sync".equals(method)) {
@@ -331,7 +332,7 @@ final class BridgeBrowser implements PageTransport {
         final int seq = ourCallSeq++;
         if(seq < 8 || !"sync".equals(theMethod)) {
             final String args = theArguments.toString();
-            System.out.println("[colleague] bridge call #" + seq + " via " + theChannel
+            ColleagueLog.info("[colleague] bridge call #" + seq + " via " + theChannel
                 + ": " + theMethod + (args.length() > 1 && ! "{}".equals(args)
                     ? " " + (args.length() > 160 ? args.substring(0, 160) : args) : ""));
         }

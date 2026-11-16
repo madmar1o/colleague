@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.context;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -220,11 +221,11 @@ public final class SemanticIndex {
         fingerprintNote = "";
         try {
             final int adopted = index.restoreFingerprints();
-            System.err.println("[colleague] semantic fingerprints adopted for "
+            ColleagueLog.warn("[colleague] semantic fingerprints adopted for "
                 + adopted + " stored files");
         } catch (final IndexFailure ex) {
             fingerprintNote = "fingerprints not restored: " + ex.getMessage();
-            System.err.println("[colleague] semantic " + fingerprintNote);
+            ColleagueLog.error("[colleague] semantic " + fingerprintNote);
         }
     }
 

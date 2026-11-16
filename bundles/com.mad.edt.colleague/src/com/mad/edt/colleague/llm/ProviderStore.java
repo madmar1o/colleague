@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.llm;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -223,10 +224,10 @@ public final class ProviderStore {
         final String override = sessionOverrideId(
             System.getProperty(PROVIDER_OVERRIDE_PROPERTY, ""), LLMSettings.getProviderIds());
         if(!override.isEmpty() && !override.equals(storedDefault)) {
-            System.out.println("[colleague] provider this session: " + override
+            ColleagueLog.info("[colleague] provider this session: " + override
                 + " (flag " + PROVIDER_OVERRIDE_PROPERTY + ", stored choice kept)");
         } else if(!System.getProperty(PROVIDER_OVERRIDE_PROPERTY, "").trim().isEmpty()) {
-            System.out.println("[colleague] flag " + PROVIDER_OVERRIDE_PROPERTY + " names no"
+            ColleagueLog.info("[colleague] flag " + PROVIDER_OVERRIDE_PROPERTY + " names no"
                 + " registered provider, keeping " + storedDefault);
         }
         ourDefaults = new SessionDefaults(storedDefault, override);

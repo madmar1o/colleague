@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.llm;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.util.function.Consumer;
 
 import com.google.gson.JsonElement;
@@ -134,7 +135,7 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
         try {
             final long startedAt = System.currentTimeMillis();
             response = transport.send(call);
-            System.err.println("[colleague] stream headers after "
+            ColleagueLog.info("[colleague] stream headers after "
                 + (System.currentTimeMillis() - startedAt) + " ms from "
                 + config.getBaseUrl() + thePath);
         } catch (final TransportFailure ex) {

@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui.internal;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -240,7 +241,7 @@ public final class ContactsPanel {
             watchTheme();
             return;
         } catch (final RuntimeException | LinkageError | org.eclipse.swt.SWTError ex) {
-            System.err.println("colleague: contacts browser unavailable, plain fallback: "
+            ColleagueLog.error("colleague: contacts browser unavailable, plain fallback: "
                 + ex.getMessage());
             ourBridge = null;
         }

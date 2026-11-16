@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui.view;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -305,7 +306,7 @@ public class ColleagueView extends ViewPart {
         }
         ourSemantic = SemanticIndex.tryCreate();
         if(ourSemantic != null) {
-            System.err.println("[colleague] semantic layer on: store "
+            ColleagueLog.info("[colleague] semantic layer on: store "
                 + SemanticSettings.getStoreUrl() + ", model "
                 + SemanticSettings.getModel());
         }
@@ -314,18 +315,18 @@ public class ColleagueView extends ViewPart {
         // out the first minutes of the session (see StartupDeferral)
         StartupDeferral.scheduleIndexJob((monitor) -> {
             final int files = ourCodeSearch.reindex(monitor);
-            System.err.println("[colleague] context index ready: " + files + " files");
+            ColleagueLog.info("[colleague] context index ready: " + files + " files");
             if(ourSemantic != null) {
                 refreshSemanticUntilQuiet(monitor);
             }
             ourOverview.rebuild();
-            System.err.println("[colleague] configuration overview ready: "
+            ColleagueLog.info("[colleague] configuration overview ready: "
                 + ourOverview.get().length() + " chars");
             if(Boolean.getBoolean("colleague.search.selftest")) {
                 final long startedAt = System.nanoTime();
                 final String found = ourCodeSearch.search("модуль объекта справочник проводка");
                 final long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
-                System.err.println("[colleague] search selftest: " + found.length()
+                ColleagueLog.info("[colleague] search selftest: " + found.length()
                     + " chars in " + elapsedMs + " ms, first line: "
                     + found.lines().findFirst().orElse("<none>"));
                 if(ourSemantic != null) {
@@ -333,7 +334,7 @@ public class ColleagueView extends ViewPart {
                         ourSemantic.withKeyword(new KeywordContextSource(ourCodeSearch));
                     final long hybridStartedAt = System.nanoTime();
                     final String merged = hybrid.gather("модуль объекта справочник проводка");
-                    System.err.println("[colleague] semantic selftest: " + merged.length()
+                    ColleagueLog.info("[colleague] semantic selftest: " + merged.length()
                         + " chars in " + (System.nanoTime() - hybridStartedAt) / 1_000_000L
                         + " ms, " + ourSemantic.getStatus());
                 }
@@ -369,21 +370,21 @@ public class ColleagueView extends ViewPart {
         if(delayMs <= 0L) {
             return;
         }
-        System.err.println("[colleague] agent probe scheduled in " + delayMs + " ms");
+        ColleagueLog.info("[colleague] agent probe scheduled in " + delayMs + " ms");
         Display.getDefault().timerExec((int)delayMs, () -> {
             if(ourProbeDone || ourTabFolder.isDisposed()) {
                 return;
             }
             final ChatPanel panel = targetPanelForStaged(null);
             if(panel == null) {
-                System.err.println("[colleague] agent probe skipped: no chat panel yet");
+                ColleagueLog.warn("[colleague] agent probe skipped: no chat panel yet");
                 return;
             }
             ourProbeDone = true;
             AgentMode.setOn(true);
             panel.setToolSupplier(() -> WorkspaceTools.readOnly(ourCodeSearch, ourOverview,
                 ourMetadataTools));
-            System.err.println("[colleague] agent probe: edit mode on, read-only tools,"
+            ColleagueLog.info("[colleague] agent probe: edit mode on, read-only tools,"
                 + " sending the probe question");
             panel.fillQuestion("Сколько всего объектов метаданных в конфигурации этого"
                 + " проекта и сколько из них справочников? Сначала обязательно вызови"
@@ -408,7 +409,7 @@ public class ColleagueView extends ViewPart {
         for(int pass = 1; pass <= SEMANTIC_MAX_PASSES && !theMonitor.isCanceled(); pass++) {
             awaitQuietChat(theMonitor);
             final String outcome = ourSemantic.refreshAndLog(cappedSourceFiles());
-            System.err.println("[colleague] semantic " + outcome
+            ColleagueLog.info("[colleague] semantic " + outcome
                 + " | " + ourSemantic.getStatus());
             if(!passHasTrouble(outcome) || theMonitor.isCanceled()) {
                 return;
@@ -467,7 +468,7 @@ public class ColleagueView extends ViewPart {
             ourRoot.layout(true);
             final int tabs = ourTabFolder == null || ourTabFolder.isDisposed()
                 ? -1 : ourTabFolder.getItemCount();
-            System.err.println("[colleague] mobile page -> " + PageSwitchNote.describe(
+            ColleagueLog.info("[colleague] mobile page -> " + PageSwitchNote.describe(
                 thePage == ourTabsArea ? "chat tabs"
                     : thePage == ourAgentsArea ? "agents" : "contacts",
                 theCause, tabs, theDetail)
@@ -727,7 +728,7 @@ public class ColleagueView extends ViewPart {
                         registry.register(skill);
                     }
                 } catch (final java.io.IOException ex) {
-                    System.err.println("[colleague] skills directory unreadable: "
+                    ColleagueLog.error("[colleague] skills directory unreadable: "
                         + ex.getMessage());
                 }
             }
@@ -752,7 +753,7 @@ public class ColleagueView extends ViewPart {
                 try {
                     commands.addAll(new CommandLoader().loadAll(commandsDir));
                 } catch (final java.io.IOException ex) {
-                    System.err.println("[colleague] commands directory unreadable: "
+                    ColleagueLog.error("[colleague] commands directory unreadable: "
                         + ex.getMessage());
                 }
             }
@@ -777,7 +778,7 @@ public class ColleagueView extends ViewPart {
                 merged = AgentCatalog.load(personalAgentsDirectory(),
                     colleagueDirectory("agents"));
             } catch (final java.io.IOException ex) {
-                System.err.println("[colleague] agents directories unreadable: "
+                ColleagueLog.error("[colleague] agents directories unreadable: "
                     + ex.getMessage());
                 ourProfileCatalog = List.of();
                 return ourProfileCatalog;
@@ -871,7 +872,7 @@ public class ColleagueView extends ViewPart {
             AgentProfileWriter.saveText(dir, SEED_AGENT_ID, text);
             refreshAgentCatalog();
         } catch (final java.io.IOException ex) {
-            System.err.println("[colleague] seed agent not written: " + ex.getMessage());
+            ColleagueLog.error("[colleague] seed agent not written: " + ex.getMessage());
         }
     }
 
@@ -889,13 +890,13 @@ public class ColleagueView extends ViewPart {
         }
         final java.net.URL entry = bundle.getEntry(thePath);
         if(entry == null) {
-            System.err.println("[colleague] missing bundle resource: " + thePath);
+            ColleagueLog.warn("[colleague] missing bundle resource: " + thePath);
             return "";
         }
         try (java.io.InputStream stream = entry.openStream()) {
             return new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
         } catch (final java.io.IOException ex) {
-            System.err.println("[colleague] resource unreadable: " + thePath + ": "
+            ColleagueLog.error("[colleague] resource unreadable: " + thePath + ": "
                 + ex.getMessage());
             return "";
         }
@@ -1196,17 +1197,17 @@ public class ColleagueView extends ViewPart {
             }
             if(ourDefaultContactCache == null) {
                 if(theAttempt >= 20) {
-                    System.err.println("[colleague] auto chat gave up: no provider answered"
+                    ColleagueLog.info("[colleague] auto chat gave up: no provider answered"
                         + " the probe, nothing to open");
                     return;
                 }
-                System.err.println("[colleague] auto chat waiting for a provider probe ("
+                ColleagueLog.info("[colleague] auto chat waiting for a provider probe ("
                     + (theAttempt + 1) + ")");
                 scheduleAutoChat(theAttempt + 1);
                 return;
             }
             openAgent("");
-            System.err.println("[colleague] auto chat opened (debug), provider "
+            ColleagueLog.info("[colleague] auto chat opened (debug), provider "
                 + ourDefaultContactCache.getProviderId());
         });
     }
@@ -1224,10 +1225,10 @@ public class ColleagueView extends ViewPart {
         }
         try {
             ourWebBridge = com.mad.edt.colleague.ui.internal.WebBridge.start(port);
-            System.out.println("[colleague] web bridge (debug): http://"
+            ColleagueLog.info("[colleague] web bridge (debug): http://"
                 + ourWebBridge.host() + ":" + ourWebBridge.port() + "/");
         } catch (final java.io.IOException ex) {
-            System.err.println("[colleague] web bridge not started: " + ex.getMessage());
+            ColleagueLog.error("[colleague] web bridge not started: " + ex.getMessage());
         }
     }
 
@@ -1304,12 +1305,12 @@ public class ColleagueView extends ViewPart {
             ourLastAnsweredPanel = panel;
             if(ourSelfTestPending) {
                 ourSelfTestPending = false;
-                System.err.println("[colleague] UI selftest answer: ["
+                ColleagueLog.info("[colleague] UI selftest answer: ["
                     + answer.replace('\n', ' ') + "]");
             }
             if(ourBrowserTestPending) {
                 ourBrowserTestPending = false;
-                System.err.println("[colleague] browser selftest answer: ["
+                ColleagueLog.info("[colleague] browser selftest answer: ["
                     + answer.replace('\n', ' ').substring(0,
                         Math.min(120, answer.replace('\n', ' ').length())) + "]");
             }
@@ -1331,7 +1332,7 @@ public class ColleagueView extends ViewPart {
         final IPath path = new org.eclipse.core.runtime.Path(thePath);
         final IFile file = ResourcesPlugin.getWorkspace().getRoot().getFile(path);
         if(!file.exists() || file.getLocation() == null) {
-            System.err.println("[colleague] answer link skipped, no such file: " + thePath);
+            ColleagueLog.warn("[colleague] answer link skipped, no such file: " + thePath);
             return;
         }
         try {
@@ -1341,7 +1342,7 @@ public class ColleagueView extends ViewPart {
                 editor.setHighlightRange(theLine, 1, true);
             }
         } catch(final PartInitException ex) {
-            System.err.println("[colleague] answer link could not open " + thePath + ": "
+            ColleagueLog.error("[colleague] answer link could not open " + thePath + ": "
                 + ex.getMessage());
         }
     }
@@ -1451,7 +1452,7 @@ public class ColleagueView extends ViewPart {
         panel.attachContext("File: demo/Demo.bsl\nContent:\n&НаКлиенте\n"
             + "Процедура ДемонстрацияКонтекста() КонецПроцедуры");
         panel.fillQuestion("Какая процедура описана в приложенном контексте? Ответь одним словом.");
-        System.err.println("[colleague] UI selftest: sending question with context");
+        ColleagueLog.info("[colleague] UI selftest: sending question with context");
         panel.send();
         scheduleBrowserTest(panel);
     }
@@ -1477,15 +1478,15 @@ public class ColleagueView extends ViewPart {
             final String secondModel =
                 local == null ? null : local.getDefaultModel();
             if(secondModel == null || secondModel.isEmpty()) {
-                System.err.println("[colleague] browser selftest phase2: skipped, the "
+                ColleagueLog.warn("[colleague] browser selftest phase2: skipped, the "
                     + "provider has no saved default model to open a second tab with");
                 return;
             }
-            System.err.println("[colleague] browser selftest phase2: opening a second "
+            ColleagueLog.info("[colleague] browser selftest phase2: opening a second "
                 + "model tab (the switch-model path that used to hang)");
             openContact(new ContactsPanel.Contact(
                 LLMSettings.LOCAL_PROVIDER_ID, secondModel));
-            System.err.println("[colleague] browser selftest phase2: second tab open, "
+            ColleagueLog.info("[colleague] browser selftest phase2: second tab open, "
                 + "UI thread alive");
         });
         Display.getDefault().timerExec(25000, () -> {
@@ -1493,7 +1494,7 @@ public class ColleagueView extends ViewPart {
                 return;
             }
             ourBrowserTestPending = true;
-            System.err.println("[colleague] browser selftest: sending while the page "
+            ColleagueLog.info("[colleague] browser selftest: sending while the page "
                 + "is attached: bridgeReady=" + thePanel.isBridgeReady());
             thePanel.fillQuestion("Повтори одним словом: какая процедура была в контексте "
                 + "выше?");

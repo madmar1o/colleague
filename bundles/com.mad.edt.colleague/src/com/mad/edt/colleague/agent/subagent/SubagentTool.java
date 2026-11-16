@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.agent.subagent;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -242,7 +243,7 @@ public final class SubagentTool implements IToolExecutor {
             listener.onDelegateFinished(theAgent, theDescription == null ? "" : theDescription,
                 theResult);
         } catch (final RuntimeException ex) {
-            System.err.println("[colleague] subagent card listener failed: " + ex);
+            ColleagueLog.warn("[colleague] subagent card listener failed: " + ex);
         }
     }
 

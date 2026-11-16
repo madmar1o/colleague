@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.mcp;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -112,7 +113,7 @@ public final class McpCatalog {
             } catch (final Exception ex) {
                 // one silent server must not cost the chat its other tools;
                 // the settings page test button gives the loud error instead
-                System.err.println("[colleague] mcp server " + config.getName()
+                ColleagueLog.error("[colleague] mcp server " + config.getName()
                     + " is not answering: " + (ex.getMessage() == null
                         ? ex.getClass().getSimpleName() : ex.getMessage()));
                 continue;

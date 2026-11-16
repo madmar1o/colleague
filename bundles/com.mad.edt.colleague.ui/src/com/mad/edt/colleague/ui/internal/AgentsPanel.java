@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui.internal;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.io.File;
 import java.io.IOException;
 import java.util.LinkedHashSet;
@@ -122,7 +123,7 @@ public final class AgentsPanel {
             watchTheme();
             return;
         } catch (final RuntimeException | LinkageError | org.eclipse.swt.SWTError ex) {
-            System.err.println("colleague: agents browser unavailable, plain fallback: "
+            ColleagueLog.error("colleague: agents browser unavailable, plain fallback: "
                 + ex.getMessage());
             ourBridge = null;
         }

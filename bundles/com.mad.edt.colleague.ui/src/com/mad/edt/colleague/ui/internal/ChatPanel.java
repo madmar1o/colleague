@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui.internal;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -567,7 +568,7 @@ public final class ChatPanel {
             try {
                 theProvider.warmModel(ourModel);
             } catch (final Exception ex) {
-                System.err.println("[colleague] model warm-up failed: " + ex.getMessage());
+                ColleagueLog.error("[colleague] model warm-up failed: " + ex.getMessage());
             }
             if(!ourRoot.isDisposed()) {
                 scheduleWarmth(theProvider, theRenewalMs, theRenewalMs);
@@ -624,7 +625,7 @@ public final class ChatPanel {
             installEscapeFilter();
             return true;
         } catch (final RuntimeException | LinkageError | org.eclipse.swt.SWTError ex) {
-            System.err.println("colleague: embedded browser unavailable, plain fallback: "
+            ColleagueLog.error("colleague: embedded browser unavailable, plain fallback: "
                 + ex.getMessage());
             ourBridge = null;
         }
@@ -643,12 +644,12 @@ public final class ChatPanel {
             return;
         }
         final Control control = ourBridge.getControl();
-        control.addListener(SWT.MouseDown, event -> System.out.println(
+        control.addListener(SWT.MouseDown, event -> ColleagueLog.info(
             "[colleague] browser SWT mousedown x=" + event.x + " y=" + event.y));
         control.addListener(SWT.FocusIn,
-            event -> System.out.println("[colleague] browser SWT focusin"));
+            event -> ColleagueLog.info("[colleague] browser SWT focusin"));
         control.addListener(SWT.FocusOut,
-            event -> System.out.println("[colleague] browser SWT focusout"));
+            event -> ColleagueLog.info("[colleague] browser SWT focusout"));
         Display.getDefault().timerExec(8000, () -> {
             if(ourRoot.isDisposed() || control.isDisposed()) {
                 return;
@@ -665,13 +666,13 @@ public final class ChatPanel {
                         + walk.getLayoutData().getClass().getSimpleName())
                     .append(" <- ");
             }
-            System.out.println("[colleague] browser chain: " + chain);
+            ColleagueLog.info("[colleague] browser chain: " + chain);
             final org.eclipse.swt.graphics.Point topLeft = control.toDisplay(0, 0);
             final org.eclipse.swt.graphics.Point bottom =
                 control.toDisplay(control.getSize().x, control.getSize().y);
             final org.eclipse.swt.graphics.Point abs =
                 control.toDisplay(control.getLocation());
-            System.out.println("[colleague] browser screen rect x=" + topLeft.x
+            ColleagueLog.info("[colleague] browser screen rect x=" + topLeft.x
                 + " y=" + topLeft.y + " .. " + bottom.x + "," + bottom.y
                 + " locInParent=" + abs.x + "," + abs.y
                 + " size=" + control.getSize().x + "x" + control.getSize().y
@@ -748,14 +749,14 @@ public final class ChatPanel {
         public void pageStateChanged(final String theState) {
             if(!theState.equals(ourLastPageState)) {
                 ourLastPageState = theState;
-                System.out.println("[colleague] page focus state: " + theState);
+                ColleagueLog.info("[colleague] page focus state: " + theState);
             }
         }
 
         @Override
         public void send(final String theText) {
             if(Boolean.getBoolean("colleague.browser.selftest")) {
-                System.out.println("[colleague] bridge: page reached the panel's "
+                ColleagueLog.info("[colleague] bridge: page reached the panel's "
                     + "input handler");
             }
             sendQuestion(theText);
@@ -837,7 +838,7 @@ public final class ChatPanel {
             if(Boolean.getBoolean("colleague.browser.selftest")
                 || theText.startsWith("js-") || theText.startsWith("census:")
                 || theText.startsWith("order:")) {
-                System.out.println("[colleague] page diag: " + theText);
+                ColleagueLog.info("[colleague] page diag: " + theText);
             }
         }
 
@@ -886,7 +887,7 @@ public final class ChatPanel {
                 + "if(f.requestSubmit){f.requestSubmit();}else{"
                 + "f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}}";
             ourBridge.executeScript(script);
-            System.out.println("[colleague] bridge: page-side gesture injected");
+            ColleagueLog.info("[colleague] bridge: page-side gesture injected");
             if(!abortProof) {
                 // layout regression probe: the question above produces a one-word
                 // answer, i.e. exactly the narrow bubble where the absolutely
@@ -897,7 +898,7 @@ public final class ChatPanel {
                     if(ourRoot.isDisposed() || ourBridge == null) {
                         return;
                     }
-                    System.out.println("[colleague] layout probe: measuring bubbles");
+                    ColleagueLog.info("[colleague] layout probe: measuring bubbles");
                     ourBridge.executeScript(
                         "var out=[];"
                         + "document.querySelectorAll('.row.in .bubble')"
@@ -926,7 +927,7 @@ public final class ChatPanel {
                     if(ourRoot.isDisposed()) {
                         return;
                     }
-                    System.out.println("[colleague] abort proof: dispatching stop");
+                    ColleagueLog.info("[colleague] abort proof: dispatching stop");
                     handleBridge("abort", new JsonObject());
                 });
                 Display.getDefault().timerExec(8000, () -> {
@@ -935,7 +936,7 @@ public final class ChatPanel {
                     }
                     // ESC twice while the turn is still wrapping up: the page
                     // must route both presses and the panel must flip mode
-                    System.out.println("[colleague] abort proof: injecting ESC pair");
+                    ColleagueLog.info("[colleague] abort proof: injecting ESC pair");
                     ourBridge.executeScript(
                         "document.dispatchEvent(new KeyboardEvent('keydown',"
                         + "{key:'Escape',bubbles:true}));");
@@ -954,7 +955,7 @@ public final class ChatPanel {
                     }
                     // second question through the page composer while the workbench
                     // is still busy: proves the input is not locked after a stop
-                    System.out.println("[colleague] abort proof: injecting second question");
+                    ColleagueLog.info("[colleague] abort proof: injecting second question");
                     ourBridge.executeScript(
                         "var q=document.getElementById('q');"
                         + "q.value='proof2: answer with one word';"
@@ -970,7 +971,7 @@ public final class ChatPanel {
                     }
                     // stop the second turn too: it runs through the agent loop,
                     // so this exercises cancellation between agent steps
-                    System.out.println("[colleague] abort proof: stopping second turn");
+                    ColleagueLog.info("[colleague] abort proof: stopping second turn");
                     handleBridge("abort", new JsonObject());
                 });
             }
@@ -1382,7 +1383,7 @@ public final class ChatPanel {
                 ourTurns.attachWorker(turn, Thread.currentThread());
                 final String effectiveContext = context.isEmpty() && ourAutoContextSupplier != null
                     ? applyOrEmpty(ourAutoContextSupplier, prompt) : context;
-                System.err.println("[colleague] autocontext: " + effectiveContext.length()
+                ColleagueLog.info("[colleague] autocontext: " + effectiveContext.length()
                     + " chars for question [" + question.replace('\n', ' ') + "]");
                 final String answer;
                 if(editMode) {
@@ -1419,7 +1420,7 @@ public final class ChatPanel {
                     : baseStats;
                 ourLastAnswer = body;
                 if(turn.cancellation().isCancelled()) {
-                    System.out.println("[colleague] cancelled turn observed: partial "
+                    ColleagueLog.info("[colleague] cancelled turn observed: partial "
                         + body.length() + " chars, stop->unwind latency "
                         + ourTurns.stopLatencyMs() + " ms");
                 }
@@ -1455,7 +1456,7 @@ public final class ChatPanel {
             } catch (final Exception ex) {
                 final boolean aborted = ourTurns.isAborted();
                 if(aborted) {
-                    System.out.println("[colleague] cancelled turn unwound with error: "
+                    ColleagueLog.info("[colleague] cancelled turn unwound with error: "
                         + ex.getMessage() + ", stop->unwind latency "
                         + ourTurns.stopLatencyMs() + " ms");
                 }
@@ -1887,7 +1888,7 @@ public final class ChatPanel {
             // mid-generation ESC means "stop the answer", never the edit
             // pair: arming write tools under a user who is trying to halt
             // generation is the one thing this gesture must not do
-            System.out.println("[colleague] escape during generation: stopping"
+            ColleagueLog.info("[colleague] escape during generation: stopping"
                 + " turn, edit mode untouched");
             stopGeneration();
             return;
@@ -1898,7 +1899,7 @@ public final class ChatPanel {
                 // key filter and once as a bridge call forwarded by the page
                 return;
             case TOGGLED:
-                System.out.println("[colleague] escape pair observed within window:"
+                ColleagueLog.info("[colleague] escape pair observed within window:"
                     + " toggling edit mode");
                 toggleEdit();
                 return;
