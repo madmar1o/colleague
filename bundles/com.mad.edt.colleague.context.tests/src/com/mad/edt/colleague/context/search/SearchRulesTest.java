@@ -20,6 +20,15 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class SearchRulesTest {
 
+    // shared fixture names and the query that drives every budget test below
+    private static final String QUERY = "target";
+    private static final String IGNORED_DIR = "ignored";
+    private static final String STRONG_MD = "strong.md";
+    private static final String WEAK_MD = "weak.md";
+    private static final String SMALL_MD = "small.md";
+    private static final String HUGE_MD = "huge.md";
+    private static final String ALL_BLOCKS = "AAAA\n\nBBBB\n\nCCCC\n\n";
+
     @Test
     void tokensAreLowercasedDistinctRunsOfLettersDigitsAndUnderscore() {
         assertEquals(List.of("hello", "world", "ab_9"),
@@ -49,7 +58,7 @@ class SearchRulesTest {
     void lineScoreCountsEveryTokenPresentOnTheBestLine() {
         final String[] lines = {"first line", "the target token here", "second target"};
         final ContentScorer.LineMatch match =
-            ContentScorer.bestLine(lines, List.of("target", "token"));
+            ContentScorer.bestLine(lines, List.of(QUERY, "token"));
         // only the middle line carries both tokens
         assertEquals(1, match.lineIndex());
         assertEquals(ContentScorer.LINE_TOKEN_POINTS * 2, match.score());
@@ -66,13 +75,13 @@ class SearchRulesTest {
     @Test
     void topHitsKeepOnlyTheStrongestOnesSortedDown() {
         final SearchEngine.Hit[] hits = {
-            new SearchEngine.Hit(new SourceIndex.Entry(Path.of("ignored"), "weak.md"), 3, 0, ""),
-            new SearchEngine.Hit(new SourceIndex.Entry(Path.of("ignored"), "strong.md"), 9, 0, ""),
-            new SearchEngine.Hit(new SourceIndex.Entry(Path.of("ignored"), "mid.md"), 6, 0, ""),
+            new SearchEngine.Hit(new SourceIndex.Entry(Path.of(IGNORED_DIR), WEAK_MD), 3, 0, ""),
+            new SearchEngine.Hit(new SourceIndex.Entry(Path.of(IGNORED_DIR), STRONG_MD), 9, 0, ""),
+            new SearchEngine.Hit(new SourceIndex.Entry(Path.of(IGNORED_DIR), "mid.md"), 6, 0, ""),
         };
         final List<SearchEngine.Hit> top = SearchEngine.keepTop(
             java.util.Arrays.asList(hits), 2);
-        assertEquals(List.of("strong.md", "mid.md"),
+        assertEquals(List.of(STRONG_MD, "mid.md"),
             top.stream().map(hit -> hit.file().displayPath())
                 .collect(java.util.stream.Collectors.toList()));
     }
@@ -112,7 +121,7 @@ class SearchRulesTest {
         // blocks are added whole: the first that would not fit drops the rest
         assertEquals("AAAA\n\nBBBB\n\n", SnippetRenderer.render(blocks, 12));
         // a budget that fits all blocks keeps all of them, equal length still fits
-        assertEquals("AAAA\n\nBBBB\n\nCCCC\n\n", SnippetRenderer.render(blocks, 24));
+        assertEquals(ALL_BLOCKS, SnippetRenderer.render(blocks, 24));
     }
 
     @Test
@@ -126,12 +135,12 @@ class SearchRulesTest {
             + "Refine the query or the file filter.\n", out.toString());
         out.setLength(0);
         SnippetRenderer.render(blocks, 60, out, 2, 3, false, true);
-        assertEquals("AAAA\n\nBBBB\n\nCCCC\n\n"
+        assertEquals(ALL_BLOCKS
             + "Scanned 2 of 3 indexed files (scan cut by 120MB read budget). "
             + "Refine the query or the file filter.\n", out.toString());
         out.setLength(0);
         SnippetRenderer.render(blocks, 60, out, 3, 3, false, false);
-        assertEquals("AAAA\n\nBBBB\n\nCCCC\n\n", out.toString());
+        assertEquals(ALL_BLOCKS, out.toString());
     }
 
     @Test
@@ -161,7 +170,7 @@ class SearchRulesTest {
         final SearchEngine cutEngine = new SearchEngine(jumping, 1_000_000_000L,
             SearchEngine.DEFAULT_READ_BUDGET_BYTES, SearchEngine.DEFAULT_MAX_FILE_BYTES,
             SearchEngine.DEFAULT_MAX_RESULTS, SearchEngine.DEFAULT_RESULT_CHAR_BUDGET);
-        final String result = cutEngine.search("target", index.snapshot());
+        final String result = cutEngine.search(QUERY, index.snapshot());
         assertTrue(result.contains("Scanned 1 of 2 indexed files"), result);
         assertTrue(result.contains("(scan cut by 8s time budget)"), result);
         assertTrue(result.contains("File: doc1.md (line 1)"), result);
@@ -170,18 +179,18 @@ class SearchRulesTest {
     @Test
     void readBudgetCutsTheScanAfterBytesWereConsumed(@TempDir final Path theDir)
         throws IOException {
-        Files.writeString(theDir.resolve("small.md"), "target small", StandardCharsets.UTF_8);
-        Files.write(theDir.resolve("huge.md"), new byte[500]);
+        Files.writeString(theDir.resolve(SMALL_MD), "target small", StandardCharsets.UTF_8);
+        Files.write(theDir.resolve(HUGE_MD), new byte[500]);
         final SourceIndex index = new SourceIndex();
         // small first, so its 12 bytes exhaust the one-byte budget before the
         // next file's head check cuts the scan
         index.replace(List.of(
-            new SourceIndex.Entry(theDir.resolve("small.md"), "small.md"),
-            new SourceIndex.Entry(theDir.resolve("huge.md"), "huge.md")));
+            new SourceIndex.Entry(theDir.resolve(SMALL_MD), SMALL_MD),
+            new SourceIndex.Entry(theDir.resolve(HUGE_MD), HUGE_MD)));
         final SearchEngine engine = new SearchEngine(SearchEngine.SYSTEM_CLOCK,
             SearchEngine.DEFAULT_SCAN_BUDGET_NS, 1L, 100L,
             SearchEngine.DEFAULT_MAX_RESULTS, SearchEngine.DEFAULT_RESULT_CHAR_BUDGET);
-        final String result = engine.search("target", index.snapshot());
+        final String result = engine.search(QUERY, index.snapshot());
         assertTrue(result.contains("(scan cut by 120MB read budget)"), result);
         // the small file was scanned and its hit survived the budget cut
         assertTrue(result.contains("File: small.md (line 1)"), result);
@@ -191,18 +200,18 @@ class SearchRulesTest {
     @Test
     void oversizedFilesAreSkippedWithoutConsumingTheBudget(@TempDir final Path theDir)
         throws IOException {
-        Files.writeString(theDir.resolve("small.md"), "target small", StandardCharsets.UTF_8);
-        Files.write(theDir.resolve("huge.md"), new byte[500]);
+        Files.writeString(theDir.resolve(SMALL_MD), "target small", StandardCharsets.UTF_8);
+        Files.write(theDir.resolve(HUGE_MD), new byte[500]);
         final SourceIndex index = new SourceIndex();
         // the huge file is listed first and must not consume the budget: the
         // one-byte budget still leaves enough for the small file to be read
         index.replace(List.of(
-            new SourceIndex.Entry(theDir.resolve("huge.md"), "huge.md"),
-            new SourceIndex.Entry(theDir.resolve("small.md"), "small.md")));
+            new SourceIndex.Entry(theDir.resolve(HUGE_MD), HUGE_MD),
+            new SourceIndex.Entry(theDir.resolve(SMALL_MD), SMALL_MD)));
         final SearchEngine engine = new SearchEngine(SearchEngine.SYSTEM_CLOCK,
             SearchEngine.DEFAULT_SCAN_BUDGET_NS, 1L, 100L,
             SearchEngine.DEFAULT_MAX_RESULTS, SearchEngine.DEFAULT_RESULT_CHAR_BUDGET);
-        final String result = engine.search("target", index.snapshot());
+        final String result = engine.search(QUERY, index.snapshot());
         // huge is skipped by the size cap, small is still read: its hit is
         // there and no coverage note appears
         assertTrue(result.contains("File: small.md (line 1)"), result);
@@ -214,13 +223,13 @@ class SearchRulesTest {
         throws IOException {
         // two query tokens: the strong line carries both, the weak one only
         // one, so their scores differ and the cap decision is deterministic
-        Files.writeString(theDir.resolve("strong.md"), "target alpha here",
+        Files.writeString(theDir.resolve(STRONG_MD), "target alpha here",
             StandardCharsets.UTF_8);
-        Files.writeString(theDir.resolve("weak.md"), "a target", StandardCharsets.UTF_8);
+        Files.writeString(theDir.resolve(WEAK_MD), "a target", StandardCharsets.UTF_8);
         final SourceIndex index = new SourceIndex();
         index.replace(List.of(
-            new SourceIndex.Entry(theDir.resolve("strong.md"), "strong.md"),
-            new SourceIndex.Entry(theDir.resolve("weak.md"), "weak.md")));
+            new SourceIndex.Entry(theDir.resolve(STRONG_MD), STRONG_MD),
+            new SourceIndex.Entry(theDir.resolve(WEAK_MD), WEAK_MD)));
         final SearchEngine engine = new SearchEngine(SearchEngine.SYSTEM_CLOCK,
             SearchEngine.DEFAULT_SCAN_BUDGET_NS, SearchEngine.DEFAULT_READ_BUDGET_BYTES,
             SearchEngine.DEFAULT_MAX_FILE_BYTES, 1, SearchEngine.DEFAULT_RESULT_CHAR_BUDGET);
@@ -232,7 +241,7 @@ class SearchRulesTest {
     @Test
     void emptyIndexOrEmptyQueryProduceNoText(@TempDir final Path theDir) {
         final SearchEngine engine = new SearchEngine();
-        assertTrue(engine.search("target", List.of()).isEmpty());
+        assertTrue(engine.search(QUERY, List.of()).isEmpty());
         final SourceIndex index = new SourceIndex();
         index.replace(List.of(new SourceIndex.Entry(theDir.resolve("x.md"), "x.md")));
         assertTrue(engine.search("ab", index.snapshot()).isEmpty());
