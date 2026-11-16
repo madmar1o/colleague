@@ -25,6 +25,17 @@ import com.mad.edt.colleague.context.vector.VectorIndex.UpdateReport;
  */
 class SemanticIndexTest {
 
+    // canned endpoint answers and fixture names shared across the scripted sessions
+    private static final String OK_BODY = "{\"result\":true,\"status\":\"ok\"}";
+    private static final String EMPTY_POINTS =
+        "{\"result\":{\"points\":[],\"next_page_offset\":null}}";
+    private static final String HICCUP = "{\"error\":\"runtime hiccup\"}";
+    private static final String EMBED_FLAT = "{\"embeddings\":[[0.5,0.5,0.5,0.5]]}";
+    private static final String X_BSL = "x.bsl";
+    private static final String THREE_LINES = "line1\nline2\nline3";
+    private static final String KEYWORD_ONLY = "keyword only\n";
+    private static final String KEYWORD_HIT = "File: m/y.bsl (line 1)\nkeyword hit\n\n";
+
     /** keyword-only stand-in so hybrid merging is observable */
     private static final class KeywordStub implements ContextSource {
 
@@ -46,7 +57,7 @@ class SemanticIndexTest {
 
     private static void storeCollectionOk(final ScriptedHttpTransport theStore,
         final int theSize) {
-        theStore.answer(200, "{\"result\":true,\"status\":\"ok\"}");
+        theStore.answer(200, OK_BODY);
         theStore.answer(200, "{\"result\":{\"config\":{\"params\":{\"vectors\":"
             + "{\"size\":" + theSize + ",\"distance\":\"Cosine\"}}}}}");
     }
@@ -88,7 +99,7 @@ class SemanticIndexTest {
         assertFalse(index.isReady());
         assertNull(index.readyIndex());
         final HybridContextSource hybrid = new HybridContextSource(
-            new KeywordStub("File: m/y.bsl (line 1)\nkeyword hit\n\n"), index::readyIndex);
+            new KeywordStub(KEYWORD_HIT), index::readyIndex);
         assertEquals("File: m/y.bsl (line 1)\nkeyword hit\n\n", hybrid.gather("q"));
         // the failed attempt touched no endpoint: the supplier said null
         assertEquals(0, embed.getCallCount());
@@ -98,7 +109,7 @@ class SemanticIndexTest {
         // then the fingerprint walk over the stored points
         probeFourDimensions(embed);
         storeCollectionOk(store, 4);
-        store.answer(200, "{\"result\":{\"points\":[],\"next_page_offset\":null}}");
+        store.answer(200, EMPTY_POINTS);
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());
         assertTrue(readyFlag(index));
@@ -127,7 +138,7 @@ class SemanticIndexTest {
         // retrying after a failure is allowed and re-probes the endpoints
         embed.answer(200, "{\"embeddings\":[[0.1,0.2,0.3,0.4]]}");
         storeCollectionOk(store, 4);
-        store.answer(200, "{\"result\":{\"points\":[],\"next_page_offset\":null}}");
+        store.answer(200, EMPTY_POINTS);
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());
         // the hybrid layer then sees an index
@@ -142,8 +153,8 @@ class SemanticIndexTest {
         embed.answer(500, "{\"error\":\"model not found\"}");
         index.prepare();
         final HybridContextSource hybrid =
-            new HybridContextSource(new KeywordStub("keyword only\n"), index::readyIndex);
-        assertEquals("keyword only\n", hybrid.gather("q"));
+            new HybridContextSource(new KeywordStub(KEYWORD_ONLY), index::readyIndex);
+        assertEquals(KEYWORD_ONLY, hybrid.gather("q"));
         assertEquals(0, store.getCallCount());
     }
 
@@ -194,18 +205,18 @@ class SemanticIndexTest {
             SemanticIndex.forTesting("colleague_cycle", store, embed);
         probeFourDimensions(embed);
         storeCollectionOk(store, 4);
-        store.answer(200, "{\"result\":{\"points\":[],\"next_page_offset\":null}}");
+        store.answer(200, EMPTY_POINTS);
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());
 
-        final Path file = theDir.resolve("x.bsl");
-        Files.writeString(file, "line1\nline2\nline3");
+        final Path file = theDir.resolve(X_BSL);
+        Files.writeString(file, THREE_LINES);
         final SemanticIndex.FileSource sources = acceptor -> acceptor.accept(file, "src/x.bsl");
 
         // first pass: clear the stale points, embed the one window, write it
-        store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
-        embed.answer(200, "{\"embeddings\":[[0.5,0.5,0.5,0.5]]}");
-        store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
+        store.answer(200, OK_BODY);
+        embed.answer(200, EMBED_FLAT);
+        store.answer(200, OK_BODY);
         UpdateReport report = index.refreshFrom(sources);
         assertEquals(1, report.reembedded());
         assertEquals(0, report.skipped());
@@ -217,11 +228,11 @@ class SemanticIndexTest {
         // search through the hybrid layer quotes the stored chunk after the
         // keyword section and skips files the keyword part already showed;
         // withKeyword is exactly the seam the UI wires into a question
-        embed.answer(200, "{\"embeddings\":[[0.5,0.5,0.5,0.5]]}");
+        embed.answer(200, EMBED_FLAT);
         store.answer(200, "{\"result\":[{\"score\":0.66,\"payload\":{\"path\":\"src/x.bsl\","
             + "\"startLine\":1,\"endLine\":3,\"text\":\"chunk from the store\"}}]}");
         final ContextSource hybrid = index.withKeyword(
-            new KeywordStub("File: m/y.bsl (line 1)\nkeyword hit\n\n"));
+            new KeywordStub(KEYWORD_HIT));
         assertTrue(hybrid instanceof HybridContextSource);
         final String merged = hybrid.gather("how does the total add up");
         assertTrue(merged.contains("keyword hit"), merged);
@@ -238,11 +249,11 @@ class SemanticIndexTest {
         final ScriptedHttpTransport embed = new ScriptedHttpTransport();
         final SemanticIndex index =
             SemanticIndex.forTesting("colleague_reboot", store, embed);
-        final Path file = theDir.resolve("x.bsl");
-        Files.writeString(file, "line1\nline2\nline3");
+        final Path file = theDir.resolve(X_BSL);
+        Files.writeString(file, THREE_LINES);
         // the store payload of yesterday's session carries the file hash and
         // the absolute location the chunk belongs to
-        store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
+        store.answer(200, OK_BODY);
         store.answer(200, "{\"result\":{\"config\":{\"params\":{\"vectors\":"
             + "{\"size\":4,\"distance\":\"Cosine\"}}}}}");
         store.answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"src/x.bsl\","
@@ -287,30 +298,30 @@ class SemanticIndexTest {
             SemanticIndex.forTesting("colleague_badfile", store, embed);
         probeFourDimensions(embed);
         storeCollectionOk(store, 4);
-        store.answer(200, "{\"result\":{\"points\":[],\"next_page_offset\":null}}");
+        store.answer(200, EMPTY_POINTS);
         index.prepare();
 
         final Path good = theDir.resolve("g.bsl");
         final Path bad = theDir.resolve("b.bsl");
-        Files.writeString(good, "line1\nline2\nline3");
-        Files.writeString(bad, "line1\nline2\nline3");
+        Files.writeString(good, THREE_LINES);
+        Files.writeString(bad, THREE_LINES);
         final SemanticIndex.FileSource sources = acceptor -> {
             acceptor.accept(good, "g.bsl");
             acceptor.accept(bad, "b.bsl");
         };
         // good: clear, embed, write; bad: clear, then the embed refuses
-        store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
-        embed.answer(200, "{\"embeddings\":[[0.5,0.5,0.5,0.5]]}");
-        store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
-        store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
-        embed.answer(500, "{\"error\":\"runtime hiccup\"}");
+        store.answer(200, OK_BODY);
+        embed.answer(200, EMBED_FLAT);
+        store.answer(200, OK_BODY);
+        store.answer(200, OK_BODY);
+        embed.answer(500, HICCUP);
         final UpdateReport report = index.refreshFrom(sources);
         assertEquals(1, report.reembedded());
         assertEquals(1, report.failed());
         // the retry pass: the tracked good file is silent, the bad one trips
         // once more, and the log line tells about the failure
-        store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
-        embed.answer(500, "{\"error\":\"runtime hiccup\"}");
+        store.answer(200, OK_BODY);
+        embed.answer(500, HICCUP);
         final String logLine = index.refreshAndLog(sources);
         assertTrue(logLine.contains("failed 1"), logLine);
     }
@@ -324,7 +335,7 @@ class SemanticIndexTest {
             SemanticIndex.forTesting("colleague_giveup", store, embed);
         probeFourDimensions(embed);
         storeCollectionOk(store, 4);
-        store.answer(200, "{\"result\":{\"points\":[],\"next_page_offset\":null}}");
+        store.answer(200, EMPTY_POINTS);
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());
 
@@ -334,7 +345,7 @@ class SemanticIndexTest {
             for(int i = 0; i < VectorIndex.MAX_CONSECUTIVE_FILE_FAILURES; i++) {
                 try {
                     final Path file = theDir.resolve("f" + i + ".bsl");
-                    Files.writeString(file, "line1\nline2\nline3");
+                    Files.writeString(file, THREE_LINES);
                     acceptor.accept(file, "f" + i + ".bsl");
                 } catch (final java.io.IOException ex) {
                     throw new IllegalStateException(ex);
@@ -342,8 +353,8 @@ class SemanticIndexTest {
             }
         };
         for(int i = 0; i < VectorIndex.MAX_CONSECUTIVE_FILE_FAILURES; i++) {
-            store.answer(200, "{\"result\":true,\"status\":\"ok\"}");
-            embed.answer(500, "{\"error\":\"runtime hiccup\"}");
+            store.answer(200, OK_BODY);
+            embed.answer(500, HICCUP);
         }
         assertThrows(SemanticIndex.SemanticFailure.class, () -> index.refreshFrom(sources));
         // the failed pass must not leave a "live" flag behind: the next hybrid
@@ -352,8 +363,8 @@ class SemanticIndexTest {
         assertFalse(index.isReady(), index.getStatus());
         assertNull(index.readyIndex(), index.getStatus());
         final HybridContextSource hybrid =
-            new HybridContextSource(new KeywordStub("keyword only\n"), index::readyIndex);
-        assertEquals("keyword only\n", hybrid.gather("q"));
+            new HybridContextSource(new KeywordStub(KEYWORD_ONLY), index::readyIndex);
+        assertEquals(KEYWORD_ONLY, hybrid.gather("q"));
     }
 
     @Test
@@ -365,16 +376,16 @@ class SemanticIndexTest {
             SemanticIndex.forTesting("colleague_crash", store, embed);
         probeFourDimensions(embed);
         storeCollectionOk(store, 4);
-        store.answer(200, "{\"result\":{\"points\":[],\"next_page_offset\":null}}");
+        store.answer(200, EMPTY_POINTS);
         index.prepare();
         assertTrue(index.isReady(), index.getStatus());
 
-        final Path file = theDir.resolve("x.bsl");
-        Files.writeString(file, "line1\nline2\nline3");
+        final Path file = theDir.resolve(X_BSL);
+        Files.writeString(file, THREE_LINES);
         // the source walk crashes with an unchecked defect mid-refresh: the
         // layer must not stay "ready" after such a crash either
         final SemanticIndex.FileSource sources = acceptor -> {
-            acceptor.accept(file, "x.bsl");
+            acceptor.accept(file, X_BSL);
             throw new IllegalStateException("simulated walk crash");
         };
         assertThrows(IllegalStateException.class, () -> index.refreshFrom(sources));
