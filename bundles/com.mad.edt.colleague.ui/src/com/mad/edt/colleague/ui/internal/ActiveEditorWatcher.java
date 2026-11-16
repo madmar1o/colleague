@@ -20,7 +20,6 @@ import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchPart;
 import org.eclipse.ui.IWorkbenchPartReference;
 import org.eclipse.ui.PartInitException;
-import org.eclipse.ui.IPartListener2;
 import org.eclipse.ui.texteditor.ITextEditor;
 import org.eclipse.ui.texteditor.IDocumentProvider;
 import org.eclipse.xtext.ui.editor.XtextEditor;
@@ -301,9 +300,11 @@ public final class ActiveEditorWatcher {
     }
 
     /**
-     * Tracks part activation, focusing on text editors.
+     * Tracks part activation, focusing on text editors. Events it does not
+     * consume (brought to top, deactivation, opening, hiding, visibility) are
+     * inherited empty from the adapter skeleton.
      */
-    private final class PartTracker implements IPartListener2 {
+    private final class PartTracker extends PartListenerAdapter {
 
         @Override
         public void partActivated(final IWorkbenchPartReference theRef) {
@@ -338,10 +339,6 @@ public final class ActiveEditorWatcher {
         }
 
         @Override
-        public void partBroughtToTop(final IWorkbenchPartReference theRef) {
-        }
-
-        @Override
         public void partClosed(final IWorkbenchPartReference theRef) {
             if(!(theRef instanceof IEditorReference)) {
                 return;
@@ -350,22 +347,6 @@ public final class ActiveEditorWatcher {
             if(editor instanceof ITextEditor || editor.getAdapter(XtextEditor.class) != null) {
                 ourContext.clear();
             }
-        }
-
-        @Override
-        public void partDeactivated(final IWorkbenchPartReference theRef) {
-        }
-
-        @Override
-        public void partOpened(final IWorkbenchPartReference theRef) {
-        }
-
-        @Override
-        public void partHidden(final IWorkbenchPartReference theRef) {
-        }
-
-        @Override
-        public void partVisible(final IWorkbenchPartReference theRef) {
         }
 
         @Override
