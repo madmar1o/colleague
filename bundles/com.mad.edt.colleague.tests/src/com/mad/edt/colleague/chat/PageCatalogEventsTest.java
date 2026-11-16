@@ -23,6 +23,20 @@ import com.mad.edt.colleague.skills.SkillRegistry;
  */
 class PageCatalogEventsTest {
 
+    /** payload sections the catalog event fills */
+    private static final String COMMANDS = "commands";
+    private static final String SKILLS = "skills";
+    private static final String PROFILES = "profiles";
+    /** entry fields the page reads out of the payload */
+    private static final String DESCRIPTION = "description";
+    private static final String LABEL = "label";
+    /** fixture profile names and values reused across tests */
+    private static final String REVIEWER = "reviewer";
+    private static final String REVIEW_ONLY = "review only";
+    private static final String SYSTEM = "system";
+    private static final String ANALYST = "analyst";
+    private static final String ANALYST_TITLE = "Аналитик 1С";
+
     @Test
     @DisplayName("the catalog event lists commands and skills with descriptions")
     void catalogCarriesCommandsAndSkills() {
@@ -36,18 +50,18 @@ class PageCatalogEventsTest {
                 new CommandDefinition("standup", "", "t", null, false)),
             skills);
 
-        Assertions.assertEquals(2, payload.getAsJsonArray("commands").size());
-        final JsonObject first = payload.getAsJsonArray("commands").get(0).getAsJsonObject();
+        Assertions.assertEquals(2, payload.getAsJsonArray(COMMANDS).size());
+        final JsonObject first = payload.getAsJsonArray(COMMANDS).get(0).getAsJsonObject();
         Assertions.assertEquals("review", first.get("name").getAsString());
-        Assertions.assertEquals("review a change", first.get("description").getAsString());
+        Assertions.assertEquals("review a change", first.get(DESCRIPTION).getAsString());
 
-        Assertions.assertEquals(2, payload.getAsJsonArray("skills").size());
+        Assertions.assertEquals(2, payload.getAsJsonArray(SKILLS).size());
         Assertions.assertEquals("reporter",
-            payload.getAsJsonArray("skills").get(0).getAsJsonObject().get("name").getAsString());
+            payload.getAsJsonArray(SKILLS).get(0).getAsJsonObject().get("name").getAsString());
 
         // profiles arrive with a later milestone: the page must be able to
         // read the field today, as an empty array rather than a gap
-        Assertions.assertTrue(payload.getAsJsonArray("profiles").isEmpty());
+        Assertions.assertTrue(payload.getAsJsonArray(PROFILES).isEmpty());
     }
 
     @Test
@@ -55,40 +69,40 @@ class PageCatalogEventsTest {
     void emptySectionsAreEmptyArrays() {
         final JsonObject payload = PageCatalogEvents.build(List.of(), new SkillRegistry());
 
-        Assertions.assertTrue(payload.getAsJsonArray("commands").isEmpty());
-        Assertions.assertTrue(payload.getAsJsonArray("skills").isEmpty());
-        Assertions.assertTrue(payload.getAsJsonArray("profiles").isEmpty());
+        Assertions.assertTrue(payload.getAsJsonArray(COMMANDS).isEmpty());
+        Assertions.assertTrue(payload.getAsJsonArray(SKILLS).isEmpty());
+        Assertions.assertTrue(payload.getAsJsonArray(PROFILES).isEmpty());
     }
 
     @Test
     @DisplayName("profiles join the catalog as soon as the workspace has them")
     void profilesAreListedAndHiddenOnesStayOut() {
         final JsonObject payload = PageCatalogEvents.build(List.of(), new SkillRegistry(),
-            List.of(AgentProfile.builder("reviewer").description("review only").system("system")
+            List.of(AgentProfile.builder(REVIEWER).description(REVIEW_ONLY).system(SYSTEM)
                     .maxSteps(4).mode(AgentProfile.Mode.PRIMARY)
                     .tools(Set.of("read_file")).build(),
-                AgentProfile.builder("internal").description("not for the chip").system("system")
+                AgentProfile.builder("internal").description("not for the chip").system(SYSTEM)
                     .tools(Set.of()).hidden(true).build()));
 
-        final JsonArray profiles = payload.getAsJsonArray("profiles");
+        final JsonArray profiles = payload.getAsJsonArray(PROFILES);
         Assertions.assertEquals(1, profiles.size(),
             "a hidden profile is not something the user picks from a chip");
         final JsonObject profile = profiles.get(0).getAsJsonObject();
-        Assertions.assertEquals("reviewer", profile.get("name").getAsString());
-        Assertions.assertEquals("review only", profile.get("description").getAsString());
+        Assertions.assertEquals(REVIEWER, profile.get("name").getAsString());
+        Assertions.assertEquals(REVIEW_ONLY, profile.get(DESCRIPTION).getAsString());
     }
 
     @Test
     @DisplayName("the contacts rail leads with the default colleague and keeps chat profiles")
     void contactsLeadWithDefaultAndKeepChatProfiles() {
         final JsonObject payload = PageCatalogEvents.build(List.of(), new SkillRegistry(),
-            List.of(AgentProfile.builder("reviewer").description("review only").system("system")
+            List.of(AgentProfile.builder(REVIEWER).description(REVIEW_ONLY).system(SYSTEM)
                     .maxSteps(4).mode(AgentProfile.Mode.PRIMARY).tools(Set.of()).build(),
-                AgentProfile.builder("helper").description("delegate worker").system("system")
+                AgentProfile.builder("helper").description("delegate worker").system(SYSTEM)
                     .tools(Set.of()).build(),
-                AgentProfile.builder("delegated").description("sub-agent only").system("system")
+                AgentProfile.builder("delegated").description("sub-agent only").system(SYSTEM)
                     .mode(AgentProfile.Mode.SUBAGENT).tools(Set.of()).build(),
-                AgentProfile.builder("invisible").description("not for the rail").system("system")
+                AgentProfile.builder("invisible").description("not for the rail").system(SYSTEM)
                     .tools(Set.of()).hidden(true).build()));
 
         final JsonArray contacts = payload.getAsJsonArray("contacts");
@@ -97,11 +111,11 @@ class PageCatalogEventsTest {
         final JsonObject builtIn = contacts.get(0).getAsJsonObject();
         Assertions.assertEquals("", builtIn.get("name").getAsString(),
             "the built-in colleague is picked by the empty profile name");
-        Assertions.assertEquals("Колега по умолчанию", builtIn.get("label").getAsString());
+        Assertions.assertEquals("Колега по умолчанию", builtIn.get(LABEL).getAsString());
         Assertions.assertEquals("default", builtIn.get("mode").getAsString());
         final JsonObject reviewer = contacts.get(1).getAsJsonObject();
-        Assertions.assertEquals("reviewer", reviewer.get("name").getAsString());
-        Assertions.assertEquals("review only", reviewer.get("description").getAsString());
+        Assertions.assertEquals(REVIEWER, reviewer.get("name").getAsString());
+        Assertions.assertEquals(REVIEW_ONLY, reviewer.get(DESCRIPTION).getAsString());
         Assertions.assertEquals("primary", reviewer.get("mode").getAsString());
         Assertions.assertEquals("helper", contacts.get(2).getAsJsonObject().get("name").getAsString());
     }
@@ -119,27 +133,27 @@ class PageCatalogEventsTest {
     @DisplayName("the agents page cards lead with the built-in and carry the model")
     void agentCardsLeadWithBuiltInAndCarryModel() {
         final JsonArray cards = PageCatalogEvents.agents(
-            List.of(AgentProfile.builder("analyst").description("аналитик типовых решений")
-                    .system("system").model("qwen3:8b").mode(AgentProfile.Mode.PRIMARY)
+            List.of(AgentProfile.builder(ANALYST).description("аналитик типовых решений")
+                    .system(SYSTEM).model("qwen3:8b").mode(AgentProfile.Mode.PRIMARY)
                     .tools(Set.of()).build(),
-                AgentProfile.builder("delegated").description("sub-agent only").system("system")
+                AgentProfile.builder("delegated").description("sub-agent only").system(SYSTEM)
                     .mode(AgentProfile.Mode.SUBAGENT).tools(Set.of()).build(),
-                AgentProfile.builder("invisible").description("not for the page").system("system")
+                AgentProfile.builder("invisible").description("not for the page").system(SYSTEM)
                     .tools(Set.of()).hidden(true).build()));
 
         Assertions.assertEquals(2, cards.size(),
             "built-in plus only the profiles allowed to run as the chat itself");
         final JsonObject builtIn = cards.get(0).getAsJsonObject();
         Assertions.assertEquals("", builtIn.get("name").getAsString());
-        Assertions.assertEquals("Колега по умолчанию", builtIn.get("label").getAsString());
+        Assertions.assertEquals("Колега по умолчанию", builtIn.get(LABEL).getAsString());
         Assertions.assertTrue(builtIn.get("builtin").getAsBoolean());
         Assertions.assertEquals("", builtIn.get("model").getAsString(),
             "the built-in colleague follows whatever provider model is default");
         final JsonObject analyst = cards.get(1).getAsJsonObject();
-        Assertions.assertEquals("analyst", analyst.get("name").getAsString());
-        Assertions.assertEquals("analyst", analyst.get("label").getAsString());
+        Assertions.assertEquals(ANALYST, analyst.get("name").getAsString());
+        Assertions.assertEquals(ANALYST, analyst.get(LABEL).getAsString());
         Assertions.assertEquals("аналитик типовых решений",
-            analyst.get("description").getAsString());
+            analyst.get(DESCRIPTION).getAsString());
         Assertions.assertEquals("qwen3:8b", analyst.get("model").getAsString());
         Assertions.assertFalse(analyst.has("builtin"),
             "only the built-in card marks itself as built-in");
@@ -158,13 +172,13 @@ class PageCatalogEventsTest {
         final JsonArray cards = PageCatalogEvents.agents(
             List.of(AgentProfile.builder("analyst-1c").description("разбор типовых")
                 .system("Ты — аналитик 1С.").maxSteps(6).mode(AgentProfile.Mode.PRIMARY)
-                .tools(Set.of("read_file", "search_code")).title("Аналитик 1С").build()));
+                .tools(Set.of("read_file", "search_code")).title(ANALYST_TITLE).build()));
 
         final JsonObject card = cards.get(1).getAsJsonObject();
         Assertions.assertEquals("analyst-1c", card.get("name").getAsString(),
             "picking still travels by the file-name id");
-        Assertions.assertEquals("Аналитик 1С", card.get("label").getAsString());
-        Assertions.assertEquals("Аналитик 1С", card.get("title").getAsString());
+        Assertions.assertEquals(ANALYST_TITLE, card.get(LABEL).getAsString());
+        Assertions.assertEquals(ANALYST_TITLE, card.get("title").getAsString());
         Assertions.assertEquals(6, card.get("maxSteps").getAsInt());
         Assertions.assertEquals("read_file, search_code", card.get("tools").getAsString());
         Assertions.assertEquals("Ты — аналитик 1С.", card.get("system").getAsString(),
