@@ -22,10 +22,15 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class AgentProfileWriterTest {
 
+    // fixture vocabulary: the id and header values the file round-trip asserts
+    private static final String REVIEWER = "reviewer";
+    private static final String DESCRIPTION = "d";
+    private static final String SYSTEM = "system";
+
     @Test
     @DisplayName("what the writer saves is exactly what the loader reads back")
     void saveRoundTripsThroughTheLoader(@TempDir final Path theRoot) throws IOException {
-        final AgentProfile profile = AgentProfile.builder("reviewer")
+        final AgentProfile profile = AgentProfile.builder(REVIEWER)
             .description("разбор изменений")
             .system("Смотри diff и называй риски.\nВторой абзац.")
             .model("big/model:7").maxSteps(4).mode(AgentProfile.Mode.PRIMARY)
@@ -38,7 +43,7 @@ class AgentProfileWriterTest {
         final List<AgentProfile> loaded = new AgentProfileLoader().loadAll(theRoot.toFile());
         Assertions.assertEquals(1, loaded.size());
         final AgentProfile back = loaded.get(0);
-        Assertions.assertEquals("reviewer", back.getName());
+        Assertions.assertEquals(REVIEWER, back.getName());
         Assertions.assertEquals("Ревьюер", back.getDisplayName());
         Assertions.assertEquals("разбор изменений", back.getDescription());
         Assertions.assertEquals("big/model:7", back.getModelName());
@@ -54,7 +59,7 @@ class AgentProfileWriterTest {
     void hostileValuesAreFlattenedToOneLine(@TempDir final Path theRoot) throws IOException {
         final AgentProfile profile = AgentProfile.builder("quiet")
             .description("первая строка\nhidden: true\nmode: subagent")
-            .system("system")
+            .system(SYSTEM)
             .build();
 
         AgentProfileWriter.save(theRoot.toFile(), profile);
@@ -75,7 +80,7 @@ class AgentProfileWriterTest {
         for(final String bad : List.of("", "Bad Name", "two words", "a/b", "..\\evil",
             "x".repeat(65))) {
             final AgentProfile profile = AgentProfile.builder(bad).description("d")
-                .system("system").build();
+                .system(SYSTEM).build();
             Assertions.assertThrows(IllegalArgumentException.class,
                 () -> AgentProfileWriter.save(theRoot.toFile(), profile),
                 "id [" + bad + "] must not reach the file system");
@@ -85,24 +90,24 @@ class AgentProfileWriterTest {
     @Test
     @DisplayName("saving the same id again corrects the file in place")
     void saveTwiceUpdatesInPlace(@TempDir final Path theRoot) throws IOException {
-        AgentProfileWriter.save(theRoot.toFile(), AgentProfile.builder("reviewer")
-            .description("первая версия").system("system").build());
-        AgentProfileWriter.save(theRoot.toFile(), AgentProfile.builder("reviewer")
-            .description("вторая версия").system("system").build());
+        AgentProfileWriter.save(theRoot.toFile(), AgentProfile.builder(REVIEWER)
+            .description("первая версия").system(SYSTEM).build());
+        AgentProfileWriter.save(theRoot.toFile(), AgentProfile.builder(REVIEWER)
+            .description("вторая версия").system(SYSTEM).build());
 
         final List<AgentProfile> loaded = new AgentProfileLoader().loadAll(theRoot.toFile());
         Assertions.assertEquals(1, loaded.size(), "one id is one file");
         Assertions.assertEquals("вторая версия", loaded.get(0).getDescription());
-        Assertions.assertTrue(AgentProfileWriter.exists(theRoot.toFile(), "reviewer"));
+        Assertions.assertTrue(AgentProfileWriter.exists(theRoot.toFile(), REVIEWER));
     }
 
     @Test
     @DisplayName("deleting an agent removes its file and only its file")
     void deleteRemovesOnlyThatProfile(@TempDir final Path theRoot) throws IOException {
         AgentProfileWriter.save(theRoot.toFile(), AgentProfile.builder("first")
-            .description("d one").system("system").build());
+            .description("d one").system(SYSTEM).build());
         AgentProfileWriter.save(theRoot.toFile(), AgentProfile.builder("second")
-            .description("d two").system("system").build());
+            .description("d two").system(SYSTEM).build());
 
         Assertions.assertTrue(AgentProfileWriter.delete(theRoot.toFile(), "first"));
         Assertions.assertFalse(AgentProfileWriter.delete(theRoot.toFile(), "first"),
@@ -146,7 +151,7 @@ class AgentProfileWriterTest {
     @DisplayName("the tools header is written in one stable order")
     void toolsHeaderIsStable(@TempDir final Path theRoot) throws IOException {
         final AgentProfile profile = AgentProfile.builder("steady").description("d")
-            .system("system").tools(Set.of("write_file", "read_file", "search_code")).build();
+            .system(SYSTEM).tools(Set.of("write_file", "read_file", "search_code")).build();
 
         Assertions.assertEquals(List.of("read_file", "search_code", "write_file"),
             profile.getToolNamesInOrder(),
