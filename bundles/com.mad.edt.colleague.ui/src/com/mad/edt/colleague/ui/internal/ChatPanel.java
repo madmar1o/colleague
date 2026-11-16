@@ -49,6 +49,7 @@ import com.mad.edt.colleague.agent.PlanBoard;
 import com.mad.edt.colleague.agent.PlanTool;
 import com.mad.edt.colleague.agent.ToolUsageStats;
 import com.mad.edt.colleague.agent.subagent.SubagentRegistry;
+import com.mad.edt.colleague.agent.subagent.SubagentSettings;
 import com.mad.edt.colleague.agent.subagent.SubagentTool;
 import com.mad.edt.colleague.agents.AgentProfile;
 import com.mad.edt.colleague.agents.ToolPolicy;
@@ -1720,9 +1721,10 @@ public final class ChatPanel {
             // delivery to the page goes through asyncExec as everywhere else
             // the delegate resolves its own profile model inside the tool, so
             // the parent hands over just the chat's model as the fallback
-            tools.add(new SubagentTool(ourSession.getProvider(), ourModel, tools,
-                profileCatalog(), 0, theCancellation, ourSubagents,
-                (agent, description, result) -> Display.getDefault().asyncExec(() -> {
+            tools.add(new SubagentTool(SubagentSettings
+                .of(ourSession.getProvider(), ourModel, tools, profileCatalog(), 0)
+                .withCancellation(theCancellation).withRegistry(ourSubagents)
+                .withListener((agent, description, result) -> Display.getDefault().asyncExec(() -> {
                     if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
                         final JsonObject card = new JsonObject();
                         card.addProperty("agent", agent);
@@ -1730,7 +1732,7 @@ public final class ChatPanel {
                         card.addProperty("result", result);
                         pushNow("subagent", card);
                     }
-                })));
+                }))));
         }
         final String model = profile != null && profile.getModelName() != null
             && !profile.getModelName().isEmpty() ? profile.getModelName() : ourModel;

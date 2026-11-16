@@ -52,8 +52,8 @@ class ToolPolicyModeTest {
     void modeGateAddsToTheProfileGateWithoutReplacingIt() {
         // a profile that lists write_file still cannot get it through the
         // plan mode: the narrower boundary wins
-        final AgentProfile writer = new AgentProfile("writer", "d", "s", null, 0, null,
-            java.util.Set.of("write_file", "search_code"), false);
+        final AgentProfile writer = AgentProfile.builder("writer").description("d").system("s")
+            .maxSteps(0).tools(java.util.Set.of("write_file", "search_code")).build();
         Assertions.assertTrue(policy.allows(writer, "write_file"),
             "the profile alone would offer the writer");
         Assertions.assertFalse(policy.allowsIn(ChatMode.PLAN, "write_file"),

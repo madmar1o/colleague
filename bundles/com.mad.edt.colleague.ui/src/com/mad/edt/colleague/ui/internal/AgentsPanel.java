@@ -240,12 +240,16 @@ public final class AgentsPanel {
         } catch (final NumberFormatException ignored) {
             steps = 0;
         }
-        return new AgentProfile(theId,
-            BridgeBrowser.optString(theArguments, "description"),
-            BridgeBrowser.optString(theArguments, "system"),
-            model.isEmpty() ? null : model,
-            steps, modeOf(BridgeBrowser.optString(theArguments, "mode")),
-            tools, false, BridgeBrowser.optString(theArguments, "title"));
+        return AgentProfile.builder(theId)
+            .description(BridgeBrowser.optString(theArguments, "description"))
+            .system(BridgeBrowser.optString(theArguments, "system"))
+            .model(model.isEmpty() ? null : model)
+            .maxSteps(steps)
+            .mode(modeOf(BridgeBrowser.optString(theArguments, "mode")))
+            .tools(tools)
+            .hidden(false)
+            .title(BridgeBrowser.optString(theArguments, "title"))
+            .build();
     }
 
     /**

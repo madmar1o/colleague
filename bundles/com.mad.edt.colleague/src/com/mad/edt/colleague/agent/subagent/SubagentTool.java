@@ -73,8 +73,8 @@ public final class SubagentTool implements IToolExecutor {
     public SubagentTool(final ILLMProvider theProvider, final String theModel,
         final List<IToolExecutor> theParentTools, final List<AgentProfile> theProfiles,
         final int theHowDeep, final CancellationFlag theCancellation) {
-        this(theProvider, theModel, theParentTools, theProfiles, theHowDeep, theCancellation,
-            new SubagentRegistry());
+        this(SubagentSettings.of(theProvider, theModel, theParentTools, theProfiles, theHowDeep)
+            .withCancellation(theCancellation));
     }
 
     /**
@@ -91,33 +91,27 @@ public final class SubagentTool implements IToolExecutor {
         final List<IToolExecutor> theParentTools, final List<AgentProfile> theProfiles,
         final int theHowDeep, final CancellationFlag theCancellation,
         final SubagentRegistry theRegistry) {
-        this(theProvider, theModel, theParentTools, theProfiles, theHowDeep, theCancellation,
-            theRegistry, null);
+        this(SubagentSettings.of(theProvider, theModel, theParentTools, theProfiles, theHowDeep)
+            .withCancellation(theCancellation).withRegistry(theRegistry));
     }
 
     /**
-     * @param theProvider model endpoint shared with the parent
-     * @param theModel model of the parent
-     * @param theParentTools tools offered to the parent
-     * @param theProfiles agent profiles the delegate may be named after
-     * @param theHowDeep nesting level of this tool
-     * @param theCancellation stop flag shared with the parent turn
-     * @param theRegistry live delegates shared with the parent chat
-     * @param theListener hears every finished delegate turn to show it on the
-     *            page, {@code null} for silence
+     * @param theSettings everything this tool runs on: endpoint, model, parent
+     *            tools, profiles, nesting level and the optional stop flag,
+     *            shared registry and finished-turn listener
      */
-    public SubagentTool(final ILLMProvider theProvider, final String theModel,
-        final List<IToolExecutor> theParentTools, final List<AgentProfile> theProfiles,
-        final int theHowDeep, final CancellationFlag theCancellation,
-        final SubagentRegistry theRegistry, final DelegateListener theListener) {
-        provider = theProvider;
-        model = theModel;
-        parentTools = List.copyOf(theParentTools);
-        profiles = theProfiles == null ? List.of() : List.copyOf(theProfiles);
-        depth = theHowDeep;
-        cancellation = theCancellation == null ? new CancellationFlag() : theCancellation;
-        registry = theRegistry == null ? new SubagentRegistry() : theRegistry;
-        listener = theListener;
+    public SubagentTool(final SubagentSettings theSettings) {
+        provider = theSettings.provider();
+        model = theSettings.model();
+        parentTools = List.copyOf(theSettings.parentTools());
+        profiles = theSettings.profiles() == null ? List.of()
+            : List.copyOf(theSettings.profiles());
+        depth = theSettings.depth();
+        cancellation = theSettings.cancellation() == null
+            ? new CancellationFlag() : theSettings.cancellation();
+        registry = theSettings.registry() == null ? new SubagentRegistry()
+            : theSettings.registry();
+        listener = theSettings.listener();
     }
 
     @Override
