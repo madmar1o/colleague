@@ -21,9 +21,9 @@ public final class SubagentSettings {
     private final List<IToolExecutor> parentTools;
     private final List<AgentProfile> profiles;
     private final int depth;
-    private final CancellationFlag cancellation;
-    private final SubagentRegistry registry;
-    private final SubagentTool.DelegateListener listener;
+    private CancellationFlag cancellation;
+    private SubagentRegistry registry;
+    private SubagentTool.DelegateListener listener;
 
     /**
      * @param theProvider model endpoint shared with the parent
@@ -42,21 +42,17 @@ public final class SubagentSettings {
         final List<IToolExecutor> theParentTools, final List<AgentProfile> theProfiles,
         final int theDepth) {
         return new SubagentSettings(theProvider, theModel, theParentTools, theProfiles,
-            theDepth, null, null, null);
+            theDepth);
     }
 
     private SubagentSettings(final ILLMProvider theProvider, final String theModel,
         final List<IToolExecutor> theParentTools, final List<AgentProfile> theProfiles,
-        final int theDepth, final CancellationFlag theCancellation,
-        final SubagentRegistry theRegistry, final SubagentTool.DelegateListener theListener) {
+        final int theDepth) {
         provider = theProvider;
         model = theModel;
         parentTools = theParentTools;
         profiles = theProfiles;
         depth = theDepth;
-        cancellation = theCancellation;
-        registry = theRegistry;
-        listener = theListener;
     }
 
     /**
@@ -87,8 +83,12 @@ public final class SubagentSettings {
 
     private SubagentSettings copy(final CancellationFlag theCancellation,
         final SubagentRegistry theRegistry, final SubagentTool.DelegateListener theListener) {
-        return new SubagentSettings(provider, model, parentTools, profiles, depth,
-            theCancellation, theRegistry, theListener);
+        final SubagentSettings copy = new SubagentSettings(provider, model, parentTools,
+            profiles, depth);
+        copy.cancellation = theCancellation;
+        copy.registry = theRegistry;
+        copy.listener = theListener;
+        return copy;
     }
 
     /** @return model endpoint shared with the parent */
