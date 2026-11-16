@@ -42,7 +42,6 @@ public final class AgentsPanel {
 
     private Composite ourRoot;
     private BridgeBrowser ourBridge;
-    private String ourLastPalette = "";
     private Color ourPageBackground;
 
     /**
@@ -117,7 +116,6 @@ public final class AgentsPanel {
             ViewBridge.ensureUserDataDir();
             ourBridge = new BridgeBrowser(ourRoot, "web/agents.html", this::handleBridge);
             final JsonObject ready = ThemeSupport.pagePalette(ourRoot);
-            ourLastPalette = ready.toString();
             applyNativePalette(ready);
             ourBridge.push("ready", ready);
             watchTheme();
@@ -327,7 +325,6 @@ public final class AgentsPanel {
     private void watchTheme() {
         ThemeSupport.watchPalette(ourRoot, palette -> {
             if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
-                ourLastPalette = palette.toString();
                 applyNativePalette(palette);
                 ourBridge.push("readyPalette", palette);
             }

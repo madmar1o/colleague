@@ -118,7 +118,6 @@ public final class ContactsPanel {
 
     private Composite ourRoot;
     private BridgeBrowser ourBridge;
-    private String ourLastPalette = "";
     private Color ourPageBackground;
 
     private Tree ourTree;
@@ -235,7 +234,6 @@ public final class ContactsPanel {
             ViewBridge.ensureUserDataDir();
             ourBridge = new BridgeBrowser(ourRoot, "web/contacts.html", this::handleBridge);
             final JsonObject ready = ThemeSupport.pagePalette(ourRoot);
-            ourLastPalette = ready.toString();
             applyNativePalette(ready);
             ourBridge.push("ready", ready);
             watchTheme();
@@ -633,7 +631,6 @@ public final class ContactsPanel {
     private void watchTheme() {
         ThemeSupport.watchPalette(ourRoot, palette -> {
             if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
-                ourLastPalette = palette.toString();
                 applyNativePalette(palette);
                 ourBridge.push("readyPalette", palette);
             }

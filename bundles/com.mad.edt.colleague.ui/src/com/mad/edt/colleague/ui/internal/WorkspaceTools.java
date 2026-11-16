@@ -250,6 +250,25 @@ public final class WorkspaceTools {
             }
             return content.toString();
         }
+
+        /**
+         * @param theArgumentsJson raw JSON object of the tool call
+         * @param theName property to read
+         * @param theDefault value when the property is absent or malformed
+         * @return the integer argument, {@code theDefault} when not a number
+         */
+        private static int intArg(final String theArgumentsJson, final String theName,
+            final int theDefault) {
+            final JsonObject json = parse(theArgumentsJson);
+            if(json == null || !json.has(theName) || json.get(theName).isJsonNull()) {
+                return theDefault;
+            }
+            try {
+                return json.get(theName).getAsInt();
+            } catch (final NumberFormatException ex) {
+                return theDefault;
+            }
+        }
     }
 
     /** Creates a new workspace file after a modal confirmation; edit mode only. */
@@ -542,19 +561,6 @@ public final class WorkspaceTools {
             return null;
         }
         return json.get(theName).getAsString();
-    }
-
-    private static int intArg(final String theArgumentsJson, final String theName,
-        final int theDefault) {
-        final JsonObject json = parse(theArgumentsJson);
-        if(json == null || !json.has(theName) || json.get(theName).isJsonNull()) {
-            return theDefault;
-        }
-        try {
-            return json.get(theName).getAsInt();
-        } catch (final NumberFormatException ex) {
-            return theDefault;
-        }
     }
 
     private static JsonObject parse(final String theArgumentsJson) {

@@ -218,65 +218,6 @@ public final class MetadataTools {
     }
 
     /**
-     * @param theOut answer being built
-     * @param theLabel heading of the block
-     * @param theFields fields to list, skipped entirely when the block does
-     *            not fit
-     */
-    private void fields(final Budget theOut, final String theLabel,
-        final List<Field> theFields) {
-        if(theFields.isEmpty()) {
-            return;
-        }
-        if(!theOut.line(theLabel + " (" + theFields.size() + "):")) {
-            theOut.skip(theFields.size());
-            return;
-        }
-        for(int index = 0; index < theFields.size(); index++) {
-            if(!theOut.line("  " + theFields.get(index).render())) {
-                theOut.skip(theFields.size() - index);
-                return;
-            }
-        }
-    }
-
-    /**
-     * @param theOut answer being built
-     * @param theSections tabular sections to list with the first attribute
-     *            names of each
-     */
-    private void sections(final Budget theOut, final List<Section> theSections) {
-        if(theSections.isEmpty()) {
-            return;
-        }
-        if(!theOut.line("Tabular sections (" + theSections.size() + "):")) {
-            theOut.skip(theSections.size());
-            return;
-        }
-        for(int index = 0; index < theSections.size(); index++) {
-            final Section section = theSections.get(index);
-            final StringBuilder line = new StringBuilder("  ").append(section.name);
-            if(!section.fields.isEmpty()) {
-                line.append(" (").append(section.fields.size()).append("): ");
-                for(int field = 0; field < section.fields.size() && field < FIELDS_PER_SECTION;
-                    field++) {
-                    if(field > 0) {
-                        line.append(", ");
-                    }
-                    line.append(section.fields.get(field).render());
-                }
-                if(section.fields.size() > FIELDS_PER_SECTION) {
-                    line.append(", ...");
-                }
-            }
-            if(!theOut.line(line.toString())) {
-                theOut.skip(theSections.size() - index);
-                return;
-            }
-        }
-    }
-
-    /**
      * Parses one metadata file into the picture the model asks for: kind,
      * name, presentation, attributes, tabular sections with their own
      * attributes, register dimensions and resources. The scan tracks element
@@ -819,6 +760,65 @@ public final class MetadataTools {
             }
             throw new IOException("unknown project \"" + project
                 + "\" in the path, pass the path find_metadata returned");
+        }
+
+        /**
+         * @param theOut answer being built
+         * @param theLabel heading of the block
+         * @param theFields fields to list, skipped entirely when the block does
+         *            not fit
+         */
+        private static void fields(final Budget theOut, final String theLabel,
+            final List<Field> theFields) {
+            if(theFields.isEmpty()) {
+                return;
+            }
+            if(!theOut.line(theLabel + " (" + theFields.size() + "):")) {
+                theOut.skip(theFields.size());
+                return;
+            }
+            for(int index = 0; index < theFields.size(); index++) {
+                if(!theOut.line("  " + theFields.get(index).render())) {
+                    theOut.skip(theFields.size() - index);
+                    return;
+                }
+            }
+        }
+
+        /**
+         * @param theOut answer being built
+         * @param theSections tabular sections to list with the first attribute
+         *            names of each
+         */
+        private static void sections(final Budget theOut, final List<Section> theSections) {
+            if(theSections.isEmpty()) {
+                return;
+            }
+            if(!theOut.line("Tabular sections (" + theSections.size() + "):")) {
+                theOut.skip(theSections.size());
+                return;
+            }
+            for(int index = 0; index < theSections.size(); index++) {
+                final Section section = theSections.get(index);
+                final StringBuilder line = new StringBuilder("  ").append(section.name);
+                if(!section.fields.isEmpty()) {
+                    line.append(" (").append(section.fields.size()).append("): ");
+                    for(int field = 0; field < section.fields.size() && field < FIELDS_PER_SECTION;
+                        field++) {
+                        if(field > 0) {
+                            line.append(", ");
+                        }
+                        line.append(section.fields.get(field).render());
+                    }
+                    if(section.fields.size() > FIELDS_PER_SECTION) {
+                        line.append(", ...");
+                    }
+                }
+                if(!theOut.line(line.toString())) {
+                    theOut.skip(theSections.size() - index);
+                    return;
+                }
+            }
         }
     }
 

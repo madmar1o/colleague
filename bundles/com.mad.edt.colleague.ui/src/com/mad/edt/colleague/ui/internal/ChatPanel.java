@@ -163,9 +163,12 @@ public final class ChatPanel {
     private boolean ourPageProofDone;
     private final TurnController ourTurns = new TurnController();
     private Job ourQuestionJob;
-    /** one-shot warm-up cycle runner, rescheduled while the panel lives */
-    private volatile Job ourWarmthJob;
-    private Listener ourEscFilter;
+    /**
+     * Page observer wired once by the view that builds the panel. It is real
+     * class information, not a method-local hand-off, so S1450's localization
+     * advice does not fit here; the annotation is the documented exception.
+     */
+    @SuppressWarnings("java:S1450")
     private Consumer<String> ourAnswerListener;
     private Runnable ourOnBack;
     /**
@@ -248,6 +251,12 @@ public final class ChatPanel {
      * the agent instructions.
      */
     private AgentMemory ourLessonMemory;
+    /**
+     * Auto-context hook supplied once by the view that builds the panel; the
+     * supplier is class information, not a method-local hand-off, so S1450's
+     * localization advice does not fit and the annotation is its exception.
+     */
+    @SuppressWarnings("java:S1450")
     private UnaryOperator<String> ourAutoContextSupplier;
     private final EscapeSequence ourEscGesture =
         new EscapeSequence(ESC_WINDOW_MS, ESC_DEDUP_MS);
@@ -558,7 +567,6 @@ public final class ChatPanel {
         };
         final Job warmth = Job.create("Colleague: model warm-up", warmthBody);
         warmth.setSystem(true);
-        ourWarmthJob = warmth;
         warmth.schedule(theDelayMs);
     }
 
@@ -568,10 +576,8 @@ public final class ChatPanel {
         ourRoot.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
         ourRoot.addListener(SWT.Dispose, event -> {
             OUR_PANELS.remove(ChatPanel.this);
-            final Job warmth = ourWarmthJob;
-            if(warmth != null) {
-                warmth.cancel();
-            }
+            // the warm-up chain notices the disposed root in its own body and
+            // stops rescheduling, so no stored job reference is needed here
         });
         // the parent may already have its final size when this panel is built
         // (the deferred open adds the panel after the tab body was laid out):
@@ -664,7 +670,7 @@ public final class ChatPanel {
      */
     private void installEscapeFilter() {
         final Display display = ourRoot.getDisplay();
-        ourEscFilter = (theEvent) -> {
+        final Listener escFilter = (theEvent) -> {
             if(theEvent.keyCode != SWT.ESC || ourRoot.isDisposed()) {
                 return;
             }
@@ -676,13 +682,8 @@ public final class ChatPanel {
                 registerEscape();
             }
         };
-        display.addFilter(SWT.KeyDown, ourEscFilter);
-        ourRoot.addListener(SWT.Dispose, event -> {
-            if(ourEscFilter != null) {
-                display.removeFilter(SWT.KeyDown, ourEscFilter);
-                ourEscFilter = null;
-            }
-        });
+        display.addFilter(SWT.KeyDown, escFilter);
+        ourRoot.addListener(SWT.Dispose, event -> display.removeFilter(SWT.KeyDown, escFilter));
     }
 
     private void handleBridge(final String theMethod, final JsonObject theArguments) {

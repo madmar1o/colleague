@@ -187,7 +187,6 @@ public class ColleagueView extends ViewPart {
     private final ActiveEditorWatcher ourActiveEditorWatcher = new ActiveEditorWatcher();
 
     private String ourLastAnswer = "";
-    private ChatPanel ourLastAnsweredPanel;
     private boolean ourSelfTestDone;
     private boolean ourSelfTestPending;
     private boolean ourBrowserTestDone;
@@ -1343,7 +1342,6 @@ public class ColleagueView extends ViewPart {
         theTab.setData(panel);
         panel.setAnswerListener(answer -> {
             ourLastAnswer = answer;
-            ourLastAnsweredPanel = panel;
             if(ourSelfTestPending) {
                 ourSelfTestPending = false;
                 ColleagueLog.info("[colleague] UI selftest answer: ["
