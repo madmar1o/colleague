@@ -1,6 +1,6 @@
 package com.mad.edt.colleague.chat;
 
-import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 /**
  * Dispatch table for the chat page's bridge calls: turns the method name and
@@ -125,7 +125,7 @@ public final class PageCommandHandler {
      * @param theArgument reads one named page argument, empty string when the
      *            page sent none
      */
-    public void handle(final String theMethod, final Function<String, String> theArgument) {
+    public void handle(final String theMethod, final UnaryOperator<String> theArgument) {
         if(theMethod == null) {
             return;
         }
@@ -191,7 +191,7 @@ public final class PageCommandHandler {
      * @param theArgument page argument reader
      * @return one state line
      */
-    private static String focusState(final Function<String, String> theArgument) {
+    private static String focusState(final UnaryOperator<String> theArgument) {
         final StringBuilder state = new StringBuilder();
         for(final String field : FOCUS_STATE_FIELDS) {
             if(state.length() > 0) {
@@ -219,7 +219,7 @@ public final class PageCommandHandler {
         }
     }
 
-    private static String argument(final Function<String, String> theArgument,
+    private static String argument(final UnaryOperator<String> theArgument,
         final String theName) {
         final String value = theArgument == null ? null : theArgument.apply(theName);
         return value == null ? "" : value;

@@ -35,53 +35,99 @@ public final class AgentProfile {
     private final boolean hidden;
 
     /**
-     * @param theName profile name, the file name without the extension
-     * @param theDescription one-line summary shown in the profile chip
-     * @param theSystem system prompt of the agent, the body of its file
-     * @param theModelName model this profile asks for, {@code null} to keep
-     *            whatever the chat uses
-     * @param theMaxSteps model round-trips allowed for one task, {@code 0}
-     *            when the header set no budget
-     * @param theMode where the profile may run
-     * @param theToolNames tools the profile may see, empty when it narrows
-     *            nothing
-     * @param theHidden whether the profile stays out of the profile chip
+     * @return a builder for a profile with the given id
      */
-    public AgentProfile(final String theName, final String theDescription, final String theSystem,
-        final String theModelName, final int theMaxSteps, final Mode theMode,
-        final Set<String> theToolNames, final boolean theHidden) {
-        this(theName, theDescription, theSystem, theModelName, theMaxSteps, theMode,
-            theToolNames, theHidden, "");
+    public static Builder builder(final String theName) {
+        return new Builder(theName);
     }
 
     /**
-     * @param theName profile id, the file name without the extension
-     * @param theDescription one-line summary shown under the display name
-     * @param theSystem system prompt of the agent, the body of its file
-     * @param theModelName model this profile asks for, {@code null} to keep
-     *            whatever the chat uses
-     * @param theMaxSteps model round-trips allowed for one task, {@code 0}
-     *            when the header set no budget
-     * @param theMode where the profile may run
-     * @param theToolNames tools the profile may see, empty when it narrows
-     *            nothing
-     * @param theHidden whether the profile stays out of the profile chip
-     * @param theTitle display name for pages and tabs, empty to show the
-     *            file-name id instead
+     * Builds an {@link AgentProfile} piece by piece, so the eight optional
+     * facets of a profile stay named at their call sites instead of turning
+     * into a positional argument wall.
      */
-    public AgentProfile(final String theName, final String theDescription, final String theSystem,
-        final String theModelName, final int theMaxSteps, final Mode theMode,
-        final Set<String> theToolNames, final boolean theHidden, final String theTitle) {
-        name = theName;
-        title = theTitle == null ? "" : theTitle;
-        description = theDescription == null ? "" : theDescription;
-        system = theSystem == null ? "" : theSystem;
-        modelName = theModelName;
-        maxSteps = theMaxSteps;
-        mode = theMode == null ? Mode.ALL : theMode;
+    public static final class Builder {
+
+        private final String name;
+        private String title = "";
+        private String description = "";
+        private String system = "";
+        private String modelName;
+        private int maxSteps;
+        private Mode mode;
+        private Set<String> toolNames;
+        private boolean hidden;
+
+        private Builder(final String theName) {
+            name = theName;
+        }
+
+        /** @param theValue display name for pages and tabs, null for none */
+        public Builder title(final String theValue) {
+            title = theValue;
+            return this;
+        }
+
+        /** @param theValue one-line summary shown in the profile chip */
+        public Builder description(final String theValue) {
+            description = theValue;
+            return this;
+        }
+
+        /** @param theValue system prompt of the agent */
+        public Builder system(final String theValue) {
+            system = theValue;
+            return this;
+        }
+
+        /** @param theValue model to use, null to keep the chat's own */
+        public Builder model(final String theValue) {
+            modelName = theValue;
+            return this;
+        }
+
+        /** @param theValue step budget, 0 for no budget */
+        public Builder maxSteps(final int theValue) {
+            maxSteps = theValue;
+            return this;
+        }
+
+        /** @param theValue where the profile may run, null means ALL */
+        public Builder mode(final Mode theValue) {
+            mode = theValue;
+            return this;
+        }
+
+        /** @param theValue tools the profile may see, null for no narrowing */
+        public Builder tools(final Set<String> theValue) {
+            toolNames = theValue;
+            return this;
+        }
+
+        /** @param theValue whether the profile stays out of the profile chip */
+        public Builder hidden(final boolean theValue) {
+            hidden = theValue;
+            return this;
+        }
+
+        /** @return the built profile */
+        public AgentProfile build() {
+            return new AgentProfile(this);
+        }
+    }
+
+    private AgentProfile(final Builder theBuilder) {
+        name = theBuilder.name;
+        title = theBuilder.title == null ? "" : theBuilder.title;
+        description = theBuilder.description == null ? "" : theBuilder.description;
+        system = theBuilder.system == null ? "" : theBuilder.system;
+        modelName = theBuilder.modelName;
+        maxSteps = theBuilder.maxSteps;
+        mode = theBuilder.mode == null ? Mode.ALL : theBuilder.mode;
         toolNames = Collections.unmodifiableSet(
-            new LinkedHashSet<>(theToolNames == null ? Set.<String>of() : theToolNames));
-        hidden = theHidden;
+            new LinkedHashSet<>(theBuilder.toolNames == null ? Set.<String>of()
+                : theBuilder.toolNames));
+        hidden = theBuilder.hidden;
     }
 
     /** @return profile id as its file names it */

@@ -117,6 +117,23 @@ class McpClientHandshakeTest {
             out.flush();
         }
 
+        /**
+         * @param theText full request line
+         * @param theStart opening marker of the wanted value
+         * @param theEnd closing marker of the wanted value
+         * @return the text between the markers, empty when either is missing
+         */
+        private static String between(final String theText, final String theStart,
+            final String theEnd) {
+            final int from = theText.indexOf(theStart);
+            if(from < 0) {
+                return "";
+            }
+            final int start = from + theStart.length();
+            final int end = theText.indexOf(theEnd, start);
+            return end < 0 ? "" : theText.substring(start, end);
+        }
+
         @Override
         public void close() {
             running.set(false);
@@ -198,17 +215,6 @@ class McpClientHandshakeTest {
             }
         }
         """;
-
-    private static String between(final String theText, final String theStart,
-        final String theEnd) {
-        final int from = theText.indexOf(theStart);
-        if(from < 0) {
-            return "";
-        }
-        final int start = from + theStart.length();
-        final int end = theText.indexOf(theEnd, start);
-        return end < 0 ? "" : theText.substring(start, end);
-    }
 
     @Test
     @DisplayName("the HTTP handshake initializes the server and lists its tools")

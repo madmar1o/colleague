@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui.internal;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -8,8 +9,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
@@ -48,6 +49,7 @@ import com.mad.edt.colleague.agent.PlanBoard;
 import com.mad.edt.colleague.agent.PlanTool;
 import com.mad.edt.colleague.agent.ToolUsageStats;
 import com.mad.edt.colleague.agent.subagent.SubagentRegistry;
+import com.mad.edt.colleague.agent.subagent.SubagentSettings;
 import com.mad.edt.colleague.agent.subagent.SubagentTool;
 import com.mad.edt.colleague.agents.AgentProfile;
 import com.mad.edt.colleague.agents.ToolPolicy;
@@ -162,9 +164,12 @@ public final class ChatPanel {
     private boolean ourPageProofDone;
     private final TurnController ourTurns = new TurnController();
     private Job ourQuestionJob;
-    /** one-shot warm-up cycle runner, rescheduled while the panel lives */
-    private volatile Job ourWarmthJob;
-    private Listener ourEscFilter;
+    /**
+     * Page observer wired once by the view that builds the panel. It is real
+     * class information, not a method-local hand-off, so S1450's localization
+     * advice does not fit here; the annotation is the documented exception.
+     */
+    @SuppressWarnings("java:S1450")
     private Consumer<String> ourAnswerListener;
     private Runnable ourOnBack;
     /**
@@ -247,13 +252,22 @@ public final class ChatPanel {
      * the agent instructions.
      */
     private AgentMemory ourLessonMemory;
-    private Function<String, String> ourAutoContextSupplier;
+    /**
+     * Auto-context hook supplied once by the view that builds the panel; the
+     * supplier is class information, not a method-local hand-off, so S1450's
+     * localization advice does not fit and the annotation is its exception.
+     */
+    @SuppressWarnings("java:S1450")
+    private UnaryOperator<String> ourAutoContextSupplier;
     private final EscapeSequence ourEscGesture =
         new EscapeSequence(ESC_WINDOW_MS, ESC_DEDUP_MS);
     private String ourLastPalette = "";
     private String ourLastPageState = "";
+    // one shared actions object: the fallback header buttons route through
+    // the same bridge actions the page commands use
+    private final BridgeActions ourActions = new BridgeActions();
     private final PageCommandHandler ourPageCommands =
-        new PageCommandHandler(new BridgeActions());
+        new PageCommandHandler(ourActions);
 
     /**
      * @param theParent the tab body composite, laid out by the caller
@@ -460,7 +474,7 @@ public final class ChatPanel {
      *            for it when no context was attached manually; runs on a
      *            background thread
      */
-    public void setAutoContextSupplier(final Function<String, String> theSupplier) {
+    public void setAutoContextSupplier(final UnaryOperator<String> theSupplier) {
         ourAutoContextSupplier = theSupplier;
     }
 
@@ -471,28 +485,6 @@ public final class ChatPanel {
      */
     public ChatSession getSession() {
         return ourSession;
-    }
-
-    /** Clears the conversation and the stored session history. */
-    private void reset() {
-        ourSession.reset();
-        if(ourTranscriptStore != null && !ourTranscriptKey.isEmpty()) {
-            // a dialog the user cleared from the screen must not come back
-            // on the next start: the durable copy goes with the live one
-            ourTranscriptStore.forget(ourTranscriptKey);
-        }
-        ourLastAnswer = "";
-        ourInterruptedConversation = List.of();
-        if(ourBridge != null) {
-            pushHistory();
-            setStatus("Диалог сброшен");
-            return;
-        }
-        if(ourConversation != null && !ourConversation.isDisposed()) {
-            ourConversation.setText("");
-        }
-        ourStyleRanges.clear();
-        setStatus("Диалог сброшен");
     }
 
     /**
@@ -567,7 +559,7 @@ public final class ChatPanel {
             try {
                 theProvider.warmModel(ourModel);
             } catch (final Exception ex) {
-                System.err.println("[colleague] model warm-up failed: " + ex.getMessage());
+                ColleagueLog.error("[colleague] model warm-up failed: " + ex.getMessage());
             }
             if(!ourRoot.isDisposed()) {
                 scheduleWarmth(theProvider, theRenewalMs, theRenewalMs);
@@ -576,7 +568,6 @@ public final class ChatPanel {
         };
         final Job warmth = Job.create("Colleague: model warm-up", warmthBody);
         warmth.setSystem(true);
-        ourWarmthJob = warmth;
         warmth.schedule(theDelayMs);
     }
 
@@ -586,10 +577,8 @@ public final class ChatPanel {
         ourRoot.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
         ourRoot.addListener(SWT.Dispose, event -> {
             OUR_PANELS.remove(ChatPanel.this);
-            final Job warmth = ourWarmthJob;
-            if(warmth != null) {
-                warmth.cancel();
-            }
+            // the warm-up chain notices the disposed root in its own body and
+            // stops rescheduling, so no stored job reference is needed here
         });
         // the parent may already have its final size when this panel is built
         // (the deferred open adds the panel after the tab body was laid out):
@@ -598,7 +587,8 @@ public final class ChatPanel {
         // the chat tab shows a blank page while the webview runs fine. The
         // pass runs after the children exist: one layout cascade then sizes
         // body -> ourRoot -> browser in a single pass
-        if(createBrowser()) {
+        createBrowser();
+        if(ourBridge != null) {
             theParent.layout(true);
             return;
         }
@@ -607,14 +597,12 @@ public final class ChatPanel {
     }
 
     /**
-     * Tries the embedded browser with the bundled chat page.
-     *
-     * @return {@code true} when the browser path is active
+     * Tries the embedded browser with the bundled chat page. On success the
+     * live bridge stays in {@code ourBridge}; on failure the field is cleared
+     * and the root is emptied of half-built widgets so the caller can lay a
+     * plain fallback over it.
      */
-    @SuppressWarnings("java:S3516")
-    private boolean createBrowser() {
-        // Return value deliberately reflects success (true) vs. failure (false);
-        // Sonar's dataflow collapses the tail, see specs/0014.
+    private void createBrowser() {
         try {
             ViewBridge.ensureUserDataDir();
             ourBridge = new BridgeBrowser(ourRoot, "web/chat.html", this::handleBridge);
@@ -622,19 +610,15 @@ public final class ChatPanel {
             watchTheme();
             traceGeometry();
             installEscapeFilter();
-            return true;
+            return;
         } catch (final RuntimeException | LinkageError | org.eclipse.swt.SWTError ex) {
-            System.err.println("colleague: embedded browser unavailable, plain fallback: "
+            ColleagueLog.error("colleague: embedded browser unavailable, plain fallback: "
                 + ex.getMessage());
             ourBridge = null;
         }
-        if(ourRoot.getChildren().length != 1) {
-            for(final Control child : ourRoot.getChildren()) {
-                child.dispose();
-            }
-            return false;
+        for(final Control child : ourRoot.getChildren()) {
+            child.dispose();
         }
-        return false;
     }
 
     /** Logs where the chat browser sits on screen and who receives SWT input. */
@@ -643,12 +627,12 @@ public final class ChatPanel {
             return;
         }
         final Control control = ourBridge.getControl();
-        control.addListener(SWT.MouseDown, event -> System.out.println(
+        control.addListener(SWT.MouseDown, event -> ColleagueLog.info(
             "[colleague] browser SWT mousedown x=" + event.x + " y=" + event.y));
         control.addListener(SWT.FocusIn,
-            event -> System.out.println("[colleague] browser SWT focusin"));
+            event -> ColleagueLog.info("[colleague] browser SWT focusin"));
         control.addListener(SWT.FocusOut,
-            event -> System.out.println("[colleague] browser SWT focusout"));
+            event -> ColleagueLog.info("[colleague] browser SWT focusout"));
         Display.getDefault().timerExec(8000, () -> {
             if(ourRoot.isDisposed() || control.isDisposed()) {
                 return;
@@ -665,13 +649,13 @@ public final class ChatPanel {
                         + walk.getLayoutData().getClass().getSimpleName())
                     .append(" <- ");
             }
-            System.out.println("[colleague] browser chain: " + chain);
+            ColleagueLog.info("[colleague] browser chain: " + chain);
             final org.eclipse.swt.graphics.Point topLeft = control.toDisplay(0, 0);
             final org.eclipse.swt.graphics.Point bottom =
                 control.toDisplay(control.getSize().x, control.getSize().y);
             final org.eclipse.swt.graphics.Point abs =
                 control.toDisplay(control.getLocation());
-            System.out.println("[colleague] browser screen rect x=" + topLeft.x
+            ColleagueLog.info("[colleague] browser screen rect x=" + topLeft.x
                 + " y=" + topLeft.y + " .. " + bottom.x + "," + bottom.y
                 + " locInParent=" + abs.x + "," + abs.y
                 + " size=" + control.getSize().x + "x" + control.getSize().y
@@ -687,7 +671,7 @@ public final class ChatPanel {
      */
     private void installEscapeFilter() {
         final Display display = ourRoot.getDisplay();
-        ourEscFilter = (theEvent) -> {
+        final Listener escFilter = (theEvent) -> {
             if(theEvent.keyCode != SWT.ESC || ourRoot.isDisposed()) {
                 return;
             }
@@ -699,13 +683,8 @@ public final class ChatPanel {
                 registerEscape();
             }
         };
-        display.addFilter(SWT.KeyDown, ourEscFilter);
-        ourRoot.addListener(SWT.Dispose, event -> {
-            if(ourEscFilter != null) {
-                display.removeFilter(SWT.KeyDown, ourEscFilter);
-                ourEscFilter = null;
-            }
-        });
+        display.addFilter(SWT.KeyDown, escFilter);
+        ourRoot.addListener(SWT.Dispose, event -> display.removeFilter(SWT.KeyDown, escFilter));
     }
 
     private void handleBridge(final String theMethod, final JsonObject theArguments) {
@@ -748,14 +727,14 @@ public final class ChatPanel {
         public void pageStateChanged(final String theState) {
             if(!theState.equals(ourLastPageState)) {
                 ourLastPageState = theState;
-                System.out.println("[colleague] page focus state: " + theState);
+                ColleagueLog.info("[colleague] page focus state: " + theState);
             }
         }
 
         @Override
         public void send(final String theText) {
             if(Boolean.getBoolean("colleague.browser.selftest")) {
-                System.out.println("[colleague] bridge: page reached the panel's "
+                ColleagueLog.info("[colleague] bridge: page reached the panel's "
                     + "input handler");
             }
             sendQuestion(theText);
@@ -771,9 +750,46 @@ public final class ChatPanel {
             ChatPanel.this.toggleEdit();
         }
 
+        /**
+         * New-dialog action: clears the conversation, the stored session history
+         * and the durable transcript copy. Reached both from the fallback header
+         * button and from the page bridge, so it lives with the bridge actions.
+         */
+        public void reset() {
+            ourSession.reset();
+            if(ourTranscriptStore != null && !ourTranscriptKey.isEmpty()) {
+                // a dialog the user cleared from the screen must not come back
+                // on the next start: the durable copy goes with the live one
+                ourTranscriptStore.forget(ourTranscriptKey);
+            }
+            ourLastAnswer = "";
+            ourInterruptedConversation = List.of();
+            if(ourBridge != null) {
+                pushHistory();
+                setStatus("Диалог сброшен");
+                return;
+            }
+            if(ourConversation != null && !ourConversation.isDisposed()) {
+                ourConversation.setText("");
+            }
+            ourStyleRanges.clear();
+            setStatus("Диалог сброшен");
+        }
+
+        /**
+         * Applies one of the three chat modes picked on the page: plain
+         * conversation without tools, a read-only planning pass or full
+         * execution. Unparseable names settle on the safest mode, and every
+         * live panel redraws its indicator because the mode is shared state.
+         *
+         * @param theWireName mode name as the page sent it
+         */
         @Override
-        public void setMode(final String theName) {
-            ChatPanel.this.setMode(theName);
+        public void setMode(final String theWireName) {
+            final ChatMode mode = ChatMode.of(theWireName);
+            AgentMode.set(mode);
+            refreshModeIndicators();
+            setStatus(modeStatus(mode));
         }
 
         @Override
@@ -837,7 +853,7 @@ public final class ChatPanel {
             if(Boolean.getBoolean("colleague.browser.selftest")
                 || theText.startsWith("js-") || theText.startsWith("census:")
                 || theText.startsWith("order:")) {
-                System.out.println("[colleague] page diag: " + theText);
+                ColleagueLog.info("[colleague] page diag: " + theText);
             }
         }
 
@@ -850,131 +866,226 @@ public final class ChatPanel {
         public void continueTurn() {
             continueAgent();
         }
+
+        /**
+         * Debug-only proof that the round trip works with a real user gesture:
+         * once the page is attached, the page itself fills its input and submits
+         * its own form, exactly as clicking the send button would. The question
+         * then arrives back in Java through the page's call channel.
+         */
+        private void schedulePageSendProof() {
+            if(!Boolean.getBoolean("colleague.browser.selftest") || ourBridge == null
+                || ourPageProofDone) {
+                return;
+            }
+            ourPageProofDone = true;
+            final boolean abortProof = Boolean.getBoolean("colleague.browser.abortproof");
+            Display.getDefault().timerExec(12000, () -> {
+                if(ourRoot.isDisposed()) {
+                    return;
+                }
+                final String question = abortProof
+                    ? "proof: write a very long detailed essay about typical configuration"
+                        + " architecture problems, at least two thousand words"
+                    : "proof: please answer with one word";
+                final String script =
+                    "var q=document.getElementById('q');"
+                    + "if(q && !q.value){q.value='" + question + "';"
+                    + "q.dispatchEvent(new Event('input'));"
+                    + "var f=document.getElementById('composer');"
+                    + "if(f.requestSubmit){f.requestSubmit();}else{"
+                    + "f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}}";
+                ourBridge.executeScript(script);
+                ColleagueLog.info("[colleague] bridge: page-side gesture injected");
+                if(!abortProof) {
+                    // layout regression probe: the question above produces a one-word
+                    // answer, i.e. exactly the narrow bubble where the absolutely
+                    // positioned time line used to hang out of the bubble and cover
+                    // the avatar; measure every incoming bubble and report through
+                    // the bridge so the log shows the geometry numbers
+                    Display.getDefault().timerExec(35000, () -> {
+                        if(ourRoot.isDisposed() || ourBridge == null) {
+                            return;
+                        }
+                        ColleagueLog.info("[colleague] layout probe: measuring bubbles");
+                        ourBridge.executeScript(
+                            "var out=[];"
+                            + "document.querySelectorAll('.row.in .bubble')"
+                            + ".forEach(function(b){"
+                            + "var m=b.querySelector('.meta');"
+                            + "var av=b.parentNode.querySelector('.smallavatar');"
+                            + "if(!m||!av){return;}"
+                            + "var mr=m.getBoundingClientRect(),"
+                            + "br=b.getBoundingClientRect(),"
+                            + "ar=av.getBoundingClientRect();"
+                            + "out.push('bw='+Math.round(br.width)"
+                            + "+' metaLeft='+Math.round(mr.left)"
+                            + "+' bubbleLeft='+Math.round(br.left)"
+                            + "+' avatarRight='+Math.round(ar.right)"
+                            + "+' avatarOverlapsMeta='"
+                            + "+String(ar.right>mr.left));});"
+                            + "apiCall('diag',{txt:out.join(' | ')});");
+                    });
+                }
+                if(abortProof) {
+                    // autonomous proof of the stop path: six seconds into a long
+                    // generation the panel dispatches the very stop request the
+                    // page button would send, then measures how quickly the
+                    // provider loop notices it
+                    Display.getDefault().timerExec(6000, () -> {
+                        if(ourRoot.isDisposed()) {
+                            return;
+                        }
+                        ColleagueLog.info("[colleague] abort proof: dispatching stop");
+                        handleBridge("abort", new JsonObject());
+                    });
+                    Display.getDefault().timerExec(8000, () -> {
+                        if(ourRoot.isDisposed()) {
+                            return;
+                        }
+                        // ESC twice while the turn is still wrapping up: the page
+                        // must route both presses and the panel must flip mode
+                        ColleagueLog.info("[colleague] abort proof: injecting ESC pair");
+                        ourBridge.executeScript(
+                            "document.dispatchEvent(new KeyboardEvent('keydown',"
+                            + "{key:'Escape',bubbles:true}));");
+                    });
+                    Display.getDefault().timerExec(8600, () -> {
+                        if(ourRoot.isDisposed()) {
+                            return;
+                        }
+                        ourBridge.executeScript(
+                            "document.dispatchEvent(new KeyboardEvent('keydown',"
+                            + "{key:'Escape',bubbles:true}));");
+                    });
+                    Display.getDefault().timerExec(9500, () -> {
+                        if(ourRoot.isDisposed()) {
+                            return;
+                        }
+                        // second question through the page composer while the workbench
+                        // is still busy: proves the input is not locked after a stop
+                        ColleagueLog.info("[colleague] abort proof: injecting second question");
+                        ourBridge.executeScript(
+                            "var q=document.getElementById('q');"
+                            + "q.value='proof2: answer with one word';"
+                            + "q.dispatchEvent(new Event('input'));"
+                            + "var f=document.getElementById('composer');"
+                            + "if(f.requestSubmit){f.requestSubmit();}else{"
+                            + "f.dispatchEvent(new Event('submit',{cancelable:true,"
+                            + "bubbles:true}));}");
+                    });
+                    Display.getDefault().timerExec(15000, () -> {
+                        if(ourRoot.isDisposed()) {
+                            return;
+                        }
+                        // stop the second turn too: it runs through the agent loop,
+                        // so this exercises cancellation between agent steps
+                        ColleagueLog.info("[colleague] abort proof: stopping second turn");
+                        handleBridge("abort", new JsonObject());
+                    });
+                }
+            });
+        }
+
+        /**
+         * Advertises the workspace catalog to the page when the tab opens: slash
+         * commands, project skills and (once they exist) agent profiles, so the
+         * composer can hint command names and the page can list what is installed
+         * without asking the user to guess. An empty catalog still pushes the
+         * event, the page then simply shows nothing extra.
+         */
+        private void pushCatalogEvent() {
+            if(ourBridge == null || !ourBridge.isReady()) {
+                return;
+            }
+            final SlashCommands commands =
+                ourCommandSupplier == null ? null : ourCommandSupplier.get();
+            final SkillRegistry skills =
+                ourSkillSupplier == null ? null : ourSkillSupplier.get();
+            pushNow("catalog", PageCatalogEvents.build(
+                commands == null ? List.of() : commands.catalog(), skills, profileCatalog()));
+        }
+
+        /**
+         * Picks an agent turn whose step budget ran out back up: the carried
+         * conversation goes through the same edit-mode wiring, so the model sees
+         * its own executed tool results and finishes the work where the budget
+         * interrupted it instead of starting the task blind. Only the browser
+         * page offers this gesture; the plain fallback never carries a history.
+         */
+        private void continueAgent() {
+            final List<ChatMessage> conversation = ourInterruptedConversation;
+            if(ourBusy || conversation.isEmpty() || ourBridge == null || !ourBridge.isReady()) {
+                return;
+            }
+            // the continuation owns the exchange from here: a fresh interruption
+            // re-arms the offer, a completed answer clears it in runAgent
+            ourInterruptedConversation = List.of();
+            ourBusy = true;
+            final TurnController.Turn turn = ourTurns.startTurn();
+            final JsonObject busyOn = new JsonObject();
+            busyOn.addProperty("busy", Boolean.TRUE);
+            pushNow("busy", busyOn);
+            setStatus("Агент: продолжает прерванный ход...");
+            final IJobFunction continueBody = (final IProgressMonitor monitor) -> {
+                GeneratorGate.GLOBAL.enter();
+                try {
+                    ourTurns.attachWorker(turn, Thread.currentThread());
+                    final String answer = runAgent("", "", turn.cancellation(), conversation);
+                    final int split = answer.lastIndexOf("\n--- ");
+                    final String body = split > 0 ? answer.substring(0, split).strip() : answer;
+                    final String stats = split > 0 ? answer.substring(split + 1).strip() : "";
+                    ourLastAnswer = body;
+                    if(!body.isEmpty() && ourTurns.isCurrent(turn)) {
+                        final JsonObject payload = new JsonObject();
+                        payload.addProperty("text", body);
+                        payload.addProperty("time", timeLabel());
+                        // the continuation may spend the new budget too: the page
+                        // gets another offer over the newly open history
+                        payload.addProperty("resumable",
+                            Boolean.valueOf(!ourInterruptedConversation.isEmpty()));
+                        pushNow("answer", payload);
+                    }
+                    setStatus(stats);
+                    // the exchange is complete and already in the session's
+                    // memory: hand it to the durable store before the turn ends,
+                    // so a crash or restart right after an answer loses nothing
+                    persistTranscript();
+                    return Status.OK_STATUS;
+                } catch (final Exception ex) {
+                    if(!ourTurns.isAborted() && ourTurns.isCurrent(turn)) {
+                        final JsonObject payload = new JsonObject();
+                        payload.addProperty("text", String.valueOf(ex.getMessage()));
+                        payload.addProperty("time", timeLabel());
+                        pushNow("error", payload);
+                    }
+                    return Status.OK_STATUS;
+                } finally {
+                    GeneratorGate.GLOBAL.leave();
+                    if(Thread.currentThread().isInterrupted()) {
+                        // the stop interrupt belongs to this turn only: clear its
+                        // status so it cannot leak into the next pooled worker run
+                        Thread.interrupted();
+                    }
+                    ourBusy = false;
+                    Display.getDefault().asyncExec(() -> {
+                        if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
+                            final JsonObject busyOff = new JsonObject();
+                            busyOff.addProperty("busy", Boolean.FALSE);
+                            pushNow("busy", busyOff);
+                        }
+                    });
+                }
+            };
+            ourQuestionJob = Job.create("Colleague: continue turn", continueBody);
+            ourQuestionJob.schedule();
+        }
+
     }
 
     /** @return {@code true} when the chat page announced itself on the bridge */
     public boolean isBridgeReady() {
         return ourBridge != null && ourBridge.isReady();
-    }
-
-    /**
-     * Debug-only proof that the round trip works with a real user gesture:
-     * once the page is attached, the page itself fills its input and submits
-     * its own form, exactly as clicking the send button would. The question
-     * then arrives back in Java through the page's call channel.
-     */
-    private void schedulePageSendProof() {
-        if(!Boolean.getBoolean("colleague.browser.selftest") || ourBridge == null
-            || ourPageProofDone) {
-            return;
-        }
-        ourPageProofDone = true;
-        final boolean abortProof = Boolean.getBoolean("colleague.browser.abortproof");
-        Display.getDefault().timerExec(12000, () -> {
-            if(ourRoot.isDisposed()) {
-                return;
-            }
-            final String question = abortProof
-                ? "proof: write a very long detailed essay about typical configuration"
-                    + " architecture problems, at least two thousand words"
-                : "proof: please answer with one word";
-            final String script =
-                "var q=document.getElementById('q');"
-                + "if(q && !q.value){q.value='" + question + "';"
-                + "q.dispatchEvent(new Event('input'));"
-                + "var f=document.getElementById('composer');"
-                + "if(f.requestSubmit){f.requestSubmit();}else{"
-                + "f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}}";
-            ourBridge.executeScript(script);
-            System.out.println("[colleague] bridge: page-side gesture injected");
-            if(!abortProof) {
-                // layout regression probe: the question above produces a one-word
-                // answer, i.e. exactly the narrow bubble where the absolutely
-                // positioned time line used to hang out of the bubble and cover
-                // the avatar; measure every incoming bubble and report through
-                // the bridge so the log shows the geometry numbers
-                Display.getDefault().timerExec(35000, () -> {
-                    if(ourRoot.isDisposed() || ourBridge == null) {
-                        return;
-                    }
-                    System.out.println("[colleague] layout probe: measuring bubbles");
-                    ourBridge.executeScript(
-                        "var out=[];"
-                        + "document.querySelectorAll('.row.in .bubble')"
-                        + ".forEach(function(b){"
-                        + "var m=b.querySelector('.meta');"
-                        + "var av=b.parentNode.querySelector('.smallavatar');"
-                        + "if(!m||!av){return;}"
-                        + "var mr=m.getBoundingClientRect(),"
-                        + "br=b.getBoundingClientRect(),"
-                        + "ar=av.getBoundingClientRect();"
-                        + "out.push('bw='+Math.round(br.width)"
-                        + "+' metaLeft='+Math.round(mr.left)"
-                        + "+' bubbleLeft='+Math.round(br.left)"
-                        + "+' avatarRight='+Math.round(ar.right)"
-                        + "+' avatarOverlapsMeta='"
-                        + "+String(ar.right>mr.left));});"
-                        + "apiCall('diag',{txt:out.join(' | ')});");
-                });
-            }
-            if(abortProof) {
-                // autonomous proof of the stop path: six seconds into a long
-                // generation the panel dispatches the very stop request the
-                // page button would send, then measures how quickly the
-                // provider loop notices it
-                Display.getDefault().timerExec(6000, () -> {
-                    if(ourRoot.isDisposed()) {
-                        return;
-                    }
-                    System.out.println("[colleague] abort proof: dispatching stop");
-                    handleBridge("abort", new JsonObject());
-                });
-                Display.getDefault().timerExec(8000, () -> {
-                    if(ourRoot.isDisposed()) {
-                        return;
-                    }
-                    // ESC twice while the turn is still wrapping up: the page
-                    // must route both presses and the panel must flip mode
-                    System.out.println("[colleague] abort proof: injecting ESC pair");
-                    ourBridge.executeScript(
-                        "document.dispatchEvent(new KeyboardEvent('keydown',"
-                        + "{key:'Escape',bubbles:true}));");
-                });
-                Display.getDefault().timerExec(8600, () -> {
-                    if(ourRoot.isDisposed()) {
-                        return;
-                    }
-                    ourBridge.executeScript(
-                        "document.dispatchEvent(new KeyboardEvent('keydown',"
-                        + "{key:'Escape',bubbles:true}));");
-                });
-                Display.getDefault().timerExec(9500, () -> {
-                    if(ourRoot.isDisposed()) {
-                        return;
-                    }
-                    // second question through the page composer while the workbench
-                    // is still busy: proves the input is not locked after a stop
-                    System.out.println("[colleague] abort proof: injecting second question");
-                    ourBridge.executeScript(
-                        "var q=document.getElementById('q');"
-                        + "q.value='proof2: answer with one word';"
-                        + "q.dispatchEvent(new Event('input'));"
-                        + "var f=document.getElementById('composer');"
-                        + "if(f.requestSubmit){f.requestSubmit();}else{"
-                        + "f.dispatchEvent(new Event('submit',{cancelable:true,"
-                        + "bubbles:true}));}");
-                });
-                Display.getDefault().timerExec(15000, () -> {
-                    if(ourRoot.isDisposed()) {
-                        return;
-                    }
-                    // stop the second turn too: it runs through the agent loop,
-                    // so this exercises cancellation between agent steps
-                    System.out.println("[colleague] abort proof: stopping second turn");
-                    handleBridge("abort", new JsonObject());
-                });
-            }
-        });
     }
 
     /**
@@ -988,21 +1099,6 @@ public final class ChatPanel {
         setStatus(on
             ? "Режим «Исполнение» — агент меняет файлы только по вашему подтверждению"
             : "Режим «Спросить» — обычный разговор без инструментов");
-    }
-
-    /**
-     * Applies one of the three chat modes picked on the page: plain
-     * conversation without tools, a read-only planning pass or full
-     * execution. Unparseable names settle on the safest mode, and every
-     * live panel redraws its indicator because the mode is shared state.
-     *
-     * @param theWireName mode name as the page sent it
-     */
-    private void setMode(final String theWireName) {
-        final ChatMode mode = ChatMode.of(theWireName);
-        AgentMode.set(mode);
-        refreshModeIndicators();
-        setStatus(modeStatus(mode));
     }
 
     /**
@@ -1189,25 +1285,6 @@ public final class ChatPanel {
     }
 
     /**
-     * Advertises the workspace catalog to the page when the tab opens: slash
-     * commands, project skills and (once they exist) agent profiles, so the
-     * composer can hint command names and the page can list what is installed
-     * without asking the user to guess. An empty catalog still pushes the
-     * event, the page then simply shows nothing extra.
-     */
-    private void pushCatalogEvent() {
-        if(ourBridge == null || !ourBridge.isReady()) {
-            return;
-        }
-        final SlashCommands commands =
-            ourCommandSupplier == null ? null : ourCommandSupplier.get();
-        final SkillRegistry skills =
-            ourSkillSupplier == null ? null : ourSkillSupplier.get();
-        pushNow("catalog", PageCatalogEvents.build(
-            commands == null ? List.of() : commands.catalog(), skills, profileCatalog()));
-    }
-
-    /**
      * @return agent profiles of the workspace, empty when none are loaded
      */
     private List<AgentProfile> profileCatalog() {
@@ -1275,10 +1352,10 @@ public final class ChatPanel {
         header.setLayout(headerLayout);
         final Button resetButton = new Button(header, SWT.PUSH);
         resetButton.setText("Новый диалог");
-        resetButton.addListener(SWT.Selection, event -> reset());
+        resetButton.addListener(SWT.Selection, event -> ourActions.reset());
         ourModeButton = new Button(header, SWT.PUSH);
         ourModeButton.addListener(SWT.Selection, event ->
-            setMode(AgentMode.current().next().wireName()));
+            ourActions.setMode(AgentMode.current().next().wireName()));
         updateModeIndicator();
 
         final Composite input = new Composite(theParent, SWT.NONE);
@@ -1382,7 +1459,7 @@ public final class ChatPanel {
                 ourTurns.attachWorker(turn, Thread.currentThread());
                 final String effectiveContext = context.isEmpty() && ourAutoContextSupplier != null
                     ? applyOrEmpty(ourAutoContextSupplier, prompt) : context;
-                System.err.println("[colleague] autocontext: " + effectiveContext.length()
+                ColleagueLog.info("[colleague] autocontext: " + effectiveContext.length()
                     + " chars for question [" + question.replace('\n', ' ') + "]");
                 final String answer;
                 if(editMode) {
@@ -1419,7 +1496,7 @@ public final class ChatPanel {
                     : baseStats;
                 ourLastAnswer = body;
                 if(turn.cancellation().isCancelled()) {
-                    System.out.println("[colleague] cancelled turn observed: partial "
+                    ColleagueLog.info("[colleague] cancelled turn observed: partial "
                         + body.length() + " chars, stop->unwind latency "
                         + ourTurns.stopLatencyMs() + " ms");
                 }
@@ -1455,7 +1532,7 @@ public final class ChatPanel {
             } catch (final Exception ex) {
                 final boolean aborted = ourTurns.isAborted();
                 if(aborted) {
-                    System.out.println("[colleague] cancelled turn unwound with error: "
+                    ColleagueLog.info("[colleague] cancelled turn unwound with error: "
                         + ex.getMessage() + ", stop->unwind latency "
                         + ourTurns.stopLatencyMs() + " ms");
                 }
@@ -1495,81 +1572,6 @@ public final class ChatPanel {
             }
         };
         ourQuestionJob = Job.create("Colleague: question", questionBody);
-        ourQuestionJob.schedule();
-    }
-
-    /**
-     * Picks an agent turn whose step budget ran out back up: the carried
-     * conversation goes through the same edit-mode wiring, so the model sees
-     * its own executed tool results and finishes the work where the budget
-     * interrupted it instead of starting the task blind. Only the browser
-     * page offers this gesture; the plain fallback never carries a history.
-     */
-    private void continueAgent() {
-        final List<ChatMessage> conversation = ourInterruptedConversation;
-        if(ourBusy || conversation.isEmpty() || ourBridge == null || !ourBridge.isReady()) {
-            return;
-        }
-        // the continuation owns the exchange from here: a fresh interruption
-        // re-arms the offer, a completed answer clears it in runAgent
-        ourInterruptedConversation = List.of();
-        ourBusy = true;
-        final TurnController.Turn turn = ourTurns.startTurn();
-        final JsonObject busyOn = new JsonObject();
-        busyOn.addProperty("busy", Boolean.TRUE);
-        pushNow("busy", busyOn);
-        setStatus("Агент: продолжает прерванный ход...");
-        final IJobFunction continueBody = (final IProgressMonitor monitor) -> {
-            GeneratorGate.GLOBAL.enter();
-            try {
-                ourTurns.attachWorker(turn, Thread.currentThread());
-                final String answer = runAgent("", "", turn.cancellation(), conversation);
-                final int split = answer.lastIndexOf("\n--- ");
-                final String body = split > 0 ? answer.substring(0, split).strip() : answer;
-                final String stats = split > 0 ? answer.substring(split + 1).strip() : "";
-                ourLastAnswer = body;
-                if(!body.isEmpty() && ourTurns.isCurrent(turn)) {
-                    final JsonObject payload = new JsonObject();
-                    payload.addProperty("text", body);
-                    payload.addProperty("time", timeLabel());
-                    // the continuation may spend the new budget too: the page
-                    // gets another offer over the newly open history
-                    payload.addProperty("resumable",
-                        Boolean.valueOf(!ourInterruptedConversation.isEmpty()));
-                    pushNow("answer", payload);
-                }
-                setStatus(stats);
-                // the exchange is complete and already in the session's
-                // memory: hand it to the durable store before the turn ends,
-                // so a crash or restart right after an answer loses nothing
-                persistTranscript();
-                return Status.OK_STATUS;
-            } catch (final Exception ex) {
-                if(!ourTurns.isAborted() && ourTurns.isCurrent(turn)) {
-                    final JsonObject payload = new JsonObject();
-                    payload.addProperty("text", String.valueOf(ex.getMessage()));
-                    payload.addProperty("time", timeLabel());
-                    pushNow("error", payload);
-                }
-                return Status.OK_STATUS;
-            } finally {
-                GeneratorGate.GLOBAL.leave();
-                if(Thread.currentThread().isInterrupted()) {
-                    // the stop interrupt belongs to this turn only: clear its
-                    // status so it cannot leak into the next pooled worker run
-                    Thread.interrupted();
-                }
-                ourBusy = false;
-                Display.getDefault().asyncExec(() -> {
-                    if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
-                        final JsonObject busyOff = new JsonObject();
-                        busyOff.addProperty("busy", Boolean.FALSE);
-                        pushNow("busy", busyOff);
-                    }
-                });
-            }
-        };
-        ourQuestionJob = Job.create("Colleague: continue turn", continueBody);
         ourQuestionJob.schedule();
     }
 
@@ -1719,9 +1721,10 @@ public final class ChatPanel {
             // delivery to the page goes through asyncExec as everywhere else
             // the delegate resolves its own profile model inside the tool, so
             // the parent hands over just the chat's model as the fallback
-            tools.add(new SubagentTool(ourSession.getProvider(), ourModel, tools,
-                profileCatalog(), 0, theCancellation, ourSubagents,
-                (agent, description, result) -> Display.getDefault().asyncExec(() -> {
+            tools.add(new SubagentTool(SubagentSettings
+                .of(ourSession.getProvider(), ourModel, tools, profileCatalog(), 0)
+                .withCancellation(theCancellation).withRegistry(ourSubagents)
+                .withListener((agent, description, result) -> Display.getDefault().asyncExec(() -> {
                     if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
                         final JsonObject card = new JsonObject();
                         card.addProperty("agent", agent);
@@ -1729,7 +1732,7 @@ public final class ChatPanel {
                         card.addProperty("result", result);
                         pushNow("subagent", card);
                     }
-                })));
+                }))));
         }
         final String model = profile != null && profile.getModelName() != null
             && !profile.getModelName().isEmpty() ? profile.getModelName() : ourModel;
@@ -1887,7 +1890,7 @@ public final class ChatPanel {
             // mid-generation ESC means "stop the answer", never the edit
             // pair: arming write tools under a user who is trying to halt
             // generation is the one thing this gesture must not do
-            System.out.println("[colleague] escape during generation: stopping"
+            ColleagueLog.info("[colleague] escape during generation: stopping"
                 + " turn, edit mode untouched");
             stopGeneration();
             return;
@@ -1898,7 +1901,7 @@ public final class ChatPanel {
                 // key filter and once as a bridge call forwarded by the page
                 return;
             case TOGGLED:
-                System.out.println("[colleague] escape pair observed within window:"
+                ColleagueLog.info("[colleague] escape pair observed within window:"
                     + " toggling edit mode");
                 toggleEdit();
                 return;
@@ -1957,7 +1960,7 @@ public final class ChatPanel {
         }
     }
 
-    private static String applyOrEmpty(final Function<String, String> theFunction,
+    private static String applyOrEmpty(final UnaryOperator<String> theFunction,
         final String theArgument) {
         try {
             final String value = theFunction.apply(theArgument);

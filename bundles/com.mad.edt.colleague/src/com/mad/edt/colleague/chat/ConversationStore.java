@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.chat;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -186,7 +187,7 @@ public final class ConversationStore {
         } catch (final IOException | RuntimeException ex) {
             // an unreadable document starts empty: losing the transcripts must
             // not cost the chat itself, and the next save rewrites the file
-            System.err.println("[colleague] transcripts unreadable, starting empty: "
+            ColleagueLog.error("[colleague] transcripts unreadable, starting empty: "
                 + ex.getMessage());
         }
         return new JsonObject();
@@ -212,7 +213,7 @@ public final class ConversationStore {
         } catch (final IOException ex) {
             // persistence is the first thing to give up, the in-memory
             // transcripts stay: losing the disk must not lose the session
-            System.err.println("[colleague] transcripts not saved to disk: "
+            ColleagueLog.error("[colleague] transcripts not saved to disk: "
                 + ex.getMessage());
             try {
                 Files.deleteIfExists(temporary);

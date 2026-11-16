@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.context.vector;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -325,7 +326,7 @@ public class VectorIndex {
             } catch (final IOException ex) {
                 failed++;
                 consecutiveFailures++;
-                System.err.println("[colleague] semantic pass cannot read "
+                ColleagueLog.error("[colleague] semantic pass cannot read "
                     + file.displayPath() + ": " + ex.getMessage());
                 if(consecutiveFailures >= MAX_CONSECUTIVE_FILE_FAILURES) {
                     throw new IndexFailure("giving up the pass after " + consecutiveFailures
@@ -341,7 +342,7 @@ public class VectorIndex {
             } catch (final IndexFailure ex) {
                 failed++;
                 consecutiveFailures++;
-                System.err.println("[colleague] semantic pass " + ex.getMessage());
+                ColleagueLog.error("[colleague] semantic pass " + ex.getMessage());
                 if(consecutiveFailures >= MAX_CONSECUTIVE_FILE_FAILURES) {
                     throw new IndexFailure("giving up the pass after " + consecutiveFailures
                         + " consecutive file failures, last: " + ex.getMessage(), ex);

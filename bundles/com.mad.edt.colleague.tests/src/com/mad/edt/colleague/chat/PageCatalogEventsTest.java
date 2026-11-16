@@ -64,10 +64,11 @@ class PageCatalogEventsTest {
     @DisplayName("profiles join the catalog as soon as the workspace has them")
     void profilesAreListedAndHiddenOnesStayOut() {
         final JsonObject payload = PageCatalogEvents.build(List.of(), new SkillRegistry(),
-            List.of(new AgentProfile("reviewer", "review only", "system", null, 4,
-                    AgentProfile.Mode.PRIMARY, Set.of("read_file"), false),
-                new AgentProfile("internal", "not for the chip", "system", null, 0,
-                    AgentProfile.Mode.ALL, Set.of(), true)));
+            List.of(AgentProfile.builder("reviewer").description("review only").system("system")
+                    .maxSteps(4).mode(AgentProfile.Mode.PRIMARY)
+                    .tools(Set.of("read_file")).build(),
+                AgentProfile.builder("internal").description("not for the chip").system("system")
+                    .tools(Set.of()).hidden(true).build()));
 
         final JsonArray profiles = payload.getAsJsonArray("profiles");
         Assertions.assertEquals(1, profiles.size(),
@@ -81,14 +82,14 @@ class PageCatalogEventsTest {
     @DisplayName("the contacts rail leads with the default colleague and keeps chat profiles")
     void contactsLeadWithDefaultAndKeepChatProfiles() {
         final JsonObject payload = PageCatalogEvents.build(List.of(), new SkillRegistry(),
-            List.of(new AgentProfile("reviewer", "review only", "system", null, 4,
-                    AgentProfile.Mode.PRIMARY, Set.of(), false),
-                new AgentProfile("helper", "delegate worker", "system", null, 0,
-                    AgentProfile.Mode.ALL, Set.of(), false),
-                new AgentProfile("delegated", "sub-agent only", "system", null, 0,
-                    AgentProfile.Mode.SUBAGENT, Set.of(), false),
-                new AgentProfile("invisible", "not for the rail", "system", null, 0,
-                    AgentProfile.Mode.ALL, Set.of(), true)));
+            List.of(AgentProfile.builder("reviewer").description("review only").system("system")
+                    .maxSteps(4).mode(AgentProfile.Mode.PRIMARY).tools(Set.of()).build(),
+                AgentProfile.builder("helper").description("delegate worker").system("system")
+                    .tools(Set.of()).build(),
+                AgentProfile.builder("delegated").description("sub-agent only").system("system")
+                    .mode(AgentProfile.Mode.SUBAGENT).tools(Set.of()).build(),
+                AgentProfile.builder("invisible").description("not for the rail").system("system")
+                    .tools(Set.of()).hidden(true).build()));
 
         final JsonArray contacts = payload.getAsJsonArray("contacts");
         Assertions.assertEquals(3, contacts.size(),
@@ -118,12 +119,13 @@ class PageCatalogEventsTest {
     @DisplayName("the agents page cards lead with the built-in and carry the model")
     void agentCardsLeadWithBuiltInAndCarryModel() {
         final JsonArray cards = PageCatalogEvents.agents(
-            List.of(new AgentProfile("analyst", "аналитик типовых решений", "system",
-                    "qwen3:8b", 0, AgentProfile.Mode.PRIMARY, Set.of(), false),
-                new AgentProfile("delegated", "sub-agent only", "system", null, 0,
-                    AgentProfile.Mode.SUBAGENT, Set.of(), false),
-                new AgentProfile("invisible", "not for the page", "system", null, 0,
-                    AgentProfile.Mode.ALL, Set.of(), true)));
+            List.of(AgentProfile.builder("analyst").description("аналитик типовых решений")
+                    .system("system").model("qwen3:8b").mode(AgentProfile.Mode.PRIMARY)
+                    .tools(Set.of()).build(),
+                AgentProfile.builder("delegated").description("sub-agent only").system("system")
+                    .mode(AgentProfile.Mode.SUBAGENT).tools(Set.of()).build(),
+                AgentProfile.builder("invisible").description("not for the page").system("system")
+                    .tools(Set.of()).hidden(true).build()));
 
         Assertions.assertEquals(2, cards.size(),
             "built-in plus only the profiles allowed to run as the chat itself");
@@ -154,9 +156,9 @@ class PageCatalogEventsTest {
     @DisplayName("the card shows the profile title as its label, the id stays pickable")
     void agentCardsLabelFollowsTheProfileTitle() {
         final JsonArray cards = PageCatalogEvents.agents(
-            List.of(new AgentProfile("analyst-1c", "разбор типовых", "Ты — аналитик 1С.",
-                null, 6, AgentProfile.Mode.PRIMARY, Set.of("read_file", "search_code"),
-                false, "Аналитик 1С")));
+            List.of(AgentProfile.builder("analyst-1c").description("разбор типовых")
+                .system("Ты — аналитик 1С.").maxSteps(6).mode(AgentProfile.Mode.PRIMARY)
+                .tools(Set.of("read_file", "search_code")).title("Аналитик 1С").build()));
 
         final JsonObject card = cards.get(1).getAsJsonObject();
         Assertions.assertEquals("analyst-1c", card.get("name").getAsString(),

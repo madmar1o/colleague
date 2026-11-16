@@ -44,16 +44,17 @@ public final class AgentProfileLoader {
             final String raw = Files.readString(file.toPath(), StandardCharsets.UTF_8);
             final Frontmatter header = Frontmatter.split(raw);
             final String fileName = file.getName();
-            profiles.add(new AgentProfile(
-                fileName.substring(0, fileName.length() - MARKDOWN_SUFFIX.length()),
-                header.fields().getOrDefault("description", ""),
-                header.body(),
-                emptyToNull(header.fields().get("model")),
-                intOrZero(header.fields().get("max-steps")),
-                modeOf(header.fields().get("mode")),
-                toolNamesOf(header.fields().get("tools")),
-                "true".equalsIgnoreCase(header.fields().getOrDefault("hidden", "false")),
-                header.fields().getOrDefault("title", "")));
+            profiles.add(AgentProfile.builder(
+                    fileName.substring(0, fileName.length() - MARKDOWN_SUFFIX.length()))
+                .description(header.fields().getOrDefault("description", ""))
+                .system(header.body())
+                .model(emptyToNull(header.fields().get("model")))
+                .maxSteps(intOrZero(header.fields().get("max-steps")))
+                .mode(modeOf(header.fields().get("mode")))
+                .tools(toolNamesOf(header.fields().get("tools")))
+                .hidden("true".equalsIgnoreCase(header.fields().getOrDefault("hidden", "false")))
+                .title(header.fields().getOrDefault("title", ""))
+                .build());
         }
         profiles.sort((left, right) -> left.getName().compareTo(right.getName()));
         return profiles;

@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui.internal;
 
+import com.mad.edt.colleague.ColleagueLog;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ResourcesPlugin;
@@ -19,7 +20,6 @@ import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchPart;
 import org.eclipse.ui.IWorkbenchPartReference;
 import org.eclipse.ui.PartInitException;
-import org.eclipse.ui.IPartListener2;
 import org.eclipse.ui.texteditor.ITextEditor;
 import org.eclipse.ui.texteditor.IDocumentProvider;
 import org.eclipse.xtext.ui.editor.XtextEditor;
@@ -46,16 +46,16 @@ public final class ActiveEditorWatcher {
         if(thePage == null) {
             return;
         }
-        System.err.println("[colleague] ActiveEditorWatcher: attach called");
+        ColleagueLog.info("[colleague] ActiveEditorWatcher: attach called");
         thePage.addPartListener(new PartTracker());
         // also capture the currently active editor, in case the view opened
         // after the editor was already active
         final IEditorPart active = thePage.getActiveEditor();
         if(active != null) {
-            System.err.println("[colleague] ActiveEditorWatcher: initial active editorClass=" + active.getClass().getName());
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: initial active editorClass=" + active.getClass().getName());
             // Try XtextEditor first (1C EDT editors are Xtext-based)
             final XtextEditor xtextEditor = active.getAdapter(XtextEditor.class);
-            System.err.println("[colleague] ActiveEditorWatcher: XtextEditor adapter=" + xtextEditor);
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: XtextEditor adapter=" + xtextEditor);
             if(xtextEditor != null) {
                 snapshotXtext(xtextEditor);
                 return;
@@ -64,7 +64,7 @@ public final class ActiveEditorWatcher {
                 snapshot((ITextEditor)active);
             } else {
                 final ITextEditor adapted = active.getAdapter(ITextEditor.class);
-                System.err.println("[colleague] ActiveEditorWatcher: ITextEditor adapter=" + adapted);
+                ColleagueLog.info("[colleague] ActiveEditorWatcher: ITextEditor adapter=" + adapted);
                 if(adapted != null) {
                     snapshot(adapted);
                 } else {
@@ -178,39 +178,39 @@ public final class ActiveEditorWatcher {
         // Try to get IFile from editor input
         final IEditorInput input = theEditor.getEditorInput();
         if (input == null) {
-            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric - no editor input");
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric - no editor input");
             ourContext.clear();
             return;
         }
-        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric inputClass=" + input.getClass().getName());
+        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric inputClass=" + input.getClass().getName());
 
         // Try DtEditorProxyInput (1C-specific) to get the real file
         final IFile file = getFileFrom1cInput(input);
         if (file == null) {
-            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric - input doesn't adapt to IFile");
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric - input doesn't adapt to IFile");
             ourContext.clear();
             return;
         }
         final String path = file.getProjectRelativePath().toPortableString();
-        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric path=" + path);
+        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric path=" + path);
 
         // Try to get document via IDocumentProvider adapter
         final IDocumentProvider provider = theEditor.getAdapter(IDocumentProvider.class);
         if (provider == null) {
-            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric - editor doesn't adapt to IDocumentProvider");
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric - editor doesn't adapt to IDocumentProvider");
             ourContext.clear();
             return;
         }
-        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric providerClass=" + provider.getClass().getName());
+        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric providerClass=" + provider.getClass().getName());
         try {
             final org.eclipse.jface.text.IDocument doc = provider.getDocument(input);
             if (doc == null) {
-                System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric - provider returned null document");
+                ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric - provider returned null document");
                 ourContext.clear();
                 return;
             }
             final String text = doc.get();
-            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric docLength=" + text.length());
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric docLength=" + text.length());
 
             // Try to get caret/selection line via editor input's getSelection() (1C-specific)
             int caretLine = 1;
@@ -218,11 +218,11 @@ public final class ActiveEditorWatcher {
                 final java.lang.reflect.Method getSelection = input.getClass().getMethod("getSelection");
                 final Object sel = getSelection.invoke(input);
                 if (sel instanceof ISelection) {
-                    System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric has ISelection from input");
+                    ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric has ISelection from input");
                     if (sel instanceof TextSelection) {
                         final TextSelection textSel = (TextSelection) sel;
                         caretLine = textSel.getStartLine() + 1;
-                        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from input TextSelection=" + caretLine);
+                        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from input TextSelection=" + caretLine);
                     }
                 }
             } catch (final Exception ignored) {
@@ -233,36 +233,36 @@ public final class ActiveEditorWatcher {
             if (caretLine == 1) {
                 final ITextViewer viewer = theEditor.getAdapter(ITextViewer.class);
                 if (viewer != null) {
-                    System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric has ITextViewer");
+                    ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric has ITextViewer");
                     final org.eclipse.swt.custom.StyledText textWidget = viewer.getTextWidget();
                     if (textWidget != null) {
                         caretLine = textWidget.getLineAtOffset(textWidget.getCaretOffset()) + 1;
-                        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from StyledText=" + caretLine);
+                        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from StyledText=" + caretLine);
                     }
                 } else {
-                    System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric no ITextViewer, trying ISelectionProvider");
+                    ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric no ITextViewer, trying ISelectionProvider");
                     // Try selection provider
                     final ISelectionProvider selProvider = theEditor.getAdapter(ISelectionProvider.class);
                     if (selProvider != null) {
-                        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric has ISelectionProvider");
+                        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric has ISelectionProvider");
                         final ISelection sel = selProvider.getSelection();
                         if (sel instanceof TextSelection) {
                             caretLine = ((TextSelection) sel).getStartLine() + 1;
-                            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from TextSelection=" + caretLine);
+                            ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from TextSelection=" + caretLine);
                         } else {
-                            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric selection is not TextSelection: " + sel);
+                            ColleagueLog.warn("[colleague] ActiveEditorWatcher: snapshotGeneric selection is not TextSelection: " + sel);
                         }
                     } else {
-                        System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric no ISelectionProvider");
+                        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric no ISelectionProvider");
                     }
                 }
             }
 
             ourContext.show(path, caretLine, text);
-            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric OK path=" + path + " line=" + caretLine + " chars=" + text.length());
+            ColleagueLog.warn("[colleague] ActiveEditorWatcher: snapshotGeneric OK path=" + path + " line=" + caretLine + " chars=" + text.length());
         } catch (final Exception ex) {
-            System.err.println("[colleague] ActiveEditorWatcher: snapshotGeneric failed: " + ex);
-            ex.printStackTrace(System.err);
+            ColleagueLog.error("[colleague] ActiveEditorWatcher: snapshotGeneric failed: " + ex);
+            ColleagueLog.error("[colleague] unexpected failure", ex);
             ourContext.clear();
         }
     }
@@ -300,9 +300,11 @@ public final class ActiveEditorWatcher {
     }
 
     /**
-     * Tracks part activation, focusing on text editors.
+     * Tracks part activation, focusing on text editors. Events it does not
+     * consume (brought to top, deactivation, opening, hiding, visibility) are
+     * inherited empty from the adapter skeleton.
      */
-    private final class PartTracker implements IPartListener2 {
+    private final class PartTracker extends PartListenerAdapter {
 
         @Override
         public void partActivated(final IWorkbenchPartReference theRef) {
@@ -313,10 +315,10 @@ public final class ActiveEditorWatcher {
             if(editor == null) {
                 return;
             }
-            System.err.println("[colleague] ActiveEditorWatcher: partActivated editorClass=" + editor.getClass().getName());
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: partActivated editorClass=" + editor.getClass().getName());
             // Try XtextEditor first (1C EDT editors are Xtext-based)
             final XtextEditor xtextEditor = editor.getAdapter(XtextEditor.class);
-            System.err.println("[colleague] ActiveEditorWatcher: XtextEditor adapter=" + xtextEditor);
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: XtextEditor adapter=" + xtextEditor);
             if(xtextEditor != null) {
                 snapshotXtext(xtextEditor);
                 return;
@@ -327,17 +329,13 @@ public final class ActiveEditorWatcher {
             }
             // Try to adapt to ITextEditor (some editors support this)
             final ITextEditor adapted = editor.getAdapter(ITextEditor.class);
-            System.err.println("[colleague] ActiveEditorWatcher: ITextEditor adapter=" + adapted);
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: ITextEditor adapter=" + adapted);
             if(adapted != null) {
                 snapshot(adapted);
                 return;
             }
             // Fallback: try to get document and caret via generic adapters
             snapshotGeneric(editor);
-        }
-
-        @Override
-        public void partBroughtToTop(final IWorkbenchPartReference theRef) {
         }
 
         @Override
@@ -352,22 +350,6 @@ public final class ActiveEditorWatcher {
         }
 
         @Override
-        public void partDeactivated(final IWorkbenchPartReference theRef) {
-        }
-
-        @Override
-        public void partOpened(final IWorkbenchPartReference theRef) {
-        }
-
-        @Override
-        public void partHidden(final IWorkbenchPartReference theRef) {
-        }
-
-        @Override
-        public void partVisible(final IWorkbenchPartReference theRef) {
-        }
-
-        @Override
         public void partInputChanged(final IWorkbenchPartReference theRef) {
             if(!(theRef instanceof IEditorReference)) {
                 return;
@@ -376,10 +358,10 @@ public final class ActiveEditorWatcher {
             if(editor == null) {
                 return;
             }
-            System.err.println("[colleague] ActiveEditorWatcher: partInputChanged editorClass=" + editor.getClass().getName());
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: partInputChanged editorClass=" + editor.getClass().getName());
             // Try XtextEditor first (1C EDT editors are Xtext-based)
             final XtextEditor xtextEditor = editor.getAdapter(XtextEditor.class);
-            System.err.println("[colleague] ActiveEditorWatcher: XtextEditor adapter=" + xtextEditor);
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: XtextEditor adapter=" + xtextEditor);
             if(xtextEditor != null) {
                 snapshotXtext(xtextEditor);
                 return;
@@ -388,7 +370,7 @@ public final class ActiveEditorWatcher {
                 snapshot((ITextEditor)editor);
             } else {
                 final ITextEditor adapted = editor.getAdapter(ITextEditor.class);
-                System.err.println("[colleague] ActiveEditorWatcher: ITextEditor adapter=" + adapted);
+                ColleagueLog.info("[colleague] ActiveEditorWatcher: ITextEditor adapter=" + adapted);
                 if(adapted != null) {
                     snapshot(adapted);
                 } else {

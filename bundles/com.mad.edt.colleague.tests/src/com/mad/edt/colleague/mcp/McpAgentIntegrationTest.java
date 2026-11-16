@@ -104,9 +104,9 @@ class McpAgentIntegrationTest {
     /**
      * @param theDir temp folder to write the fake server source into
      * @return a config that spawns the live stdio fake
-     * @throws Exception when the source file cannot be written
+     * @throws java.io.IOException when the source file cannot be written
      */
-    private static McpServerConfig spawnFake(final Path theDir) throws Exception {
+    private static McpServerConfig spawnFake(final Path theDir) throws java.io.IOException {
         final Path source = theDir.resolve("StdioFakeServer.java");
         Files.writeString(source, McpClientHandshakeTest.STDIO_FAKE_SOURCE,
             StandardCharsets.UTF_8);

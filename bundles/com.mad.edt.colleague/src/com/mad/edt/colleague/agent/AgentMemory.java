@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.agent;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -105,7 +106,7 @@ public final class AgentMemory {
         } catch (final IOException ex) {
             // an unreadable store starts empty: the agent works, it just
             // does not remember, and the next save rewrites the file
-            System.err.println("[colleague] lesson memory unreadable, starting empty: "
+            ColleagueLog.error("[colleague] lesson memory unreadable, starting empty: "
                 + ex.getMessage());
         }
     }
@@ -116,7 +117,7 @@ public final class AgentMemory {
         } catch (final IOException ex) {
             // persistence is the first thing to give up, the in-memory
             // lessons stay: losing the disk must not lose the session
-            System.err.println("[colleague] lesson memory not saved to disk: "
+            ColleagueLog.error("[colleague] lesson memory not saved to disk: "
                 + ex.getMessage());
         }
     }

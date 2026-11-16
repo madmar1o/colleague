@@ -18,10 +18,6 @@ public final class ActiveEditorContext {
     /** Rendered snapshot, empty when no editor is tracked. */
     private String ourText = "";
 
-    /** Creates an empty snapshot: no question carries editor context yet. */
-    public ActiveEditorContext() {
-    }
-
     /**
      * Replaces the snapshot with the window around one caret line. A blank
      * path, a missing document or an empty one means there is no editor worth

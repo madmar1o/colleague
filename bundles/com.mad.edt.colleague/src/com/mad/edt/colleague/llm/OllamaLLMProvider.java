@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.llm;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -315,7 +316,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
     private void forgetThinking(final ChatRequest theRequest) {
         final String key = modelKey(theRequest.getModel());
         ourNoThinking.add(key);
-        System.err.println("[colleague] model " + key
+        ColleagueLog.info("[colleague] model " + key
             + " has no thinking pass: the round is retried without it");
     }
 

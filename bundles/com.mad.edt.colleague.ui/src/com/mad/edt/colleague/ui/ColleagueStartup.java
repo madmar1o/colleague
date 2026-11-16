@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui;
 
+import com.mad.edt.colleague.ColleagueLog;
 import org.eclipse.core.runtime.IProduct;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Platform;
@@ -34,7 +35,7 @@ public class ColleagueStartup implements IStartup {
         Platform.getLog(bundle).log(new Status(IStatus.INFO, ColleagueUIPlugin.PLUGIN_ID, 0,
             "Colleague startup hook ran: version " + bundle.getVersion() + ", state " + bundle.getState()
                 + ", product " + productInfo, null));
-        System.err.println("[colleague] startup hook ran, version=" + bundle.getVersion());
+        ColleagueLog.info("[colleague] startup hook ran, version=" + bundle.getVersion());
         if(Boolean.getBoolean("colleague.llm.smoke")) {
             runLLMSmoke(bundle);
         }
@@ -52,14 +53,14 @@ public class ColleagueStartup implements IStartup {
                 try {
                     final var window = org.eclipse.ui.PlatformUI.getWorkbench().getActiveWorkbenchWindow();
                     if(window == null || window.getActivePage() == null) {
-                        System.err.println("[colleague] page not ready, retrying");
+                        ColleagueLog.warn("[colleague] page not ready, retrying");
                         org.eclipse.swt.widgets.Display.getDefault().timerExec(5_000, VIEW_RETRY);
                         return;
                     }
                     window.getActivePage().showView(com.mad.edt.colleague.ui.view.ColleagueView.ID);
-                    System.err.println("[colleague] view opened");
+                    ColleagueLog.warn("[colleague] view opened");
                 } catch (final Exception ex) {
-                    System.err.println("[colleague] view open failed: " + ex);
+                    ColleagueLog.warn("[colleague] view open failed: " + ex);
                 }
             });
         });
@@ -70,13 +71,13 @@ public class ColleagueStartup implements IStartup {
             final var window = org.eclipse.ui.PlatformUI.getWorkbench().getActiveWorkbenchWindow();
             final var page = window == null ? null : window.getActivePage();
             if(page == null) {
-                System.err.println("[colleague] page still not ready, giving up");
+                ColleagueLog.warn("[colleague] page still not ready, giving up");
                 return;
             }
             page.showView(com.mad.edt.colleague.ui.view.ColleagueView.ID);
-            System.err.println("[colleague] view opened (retry)");
+            ColleagueLog.warn("[colleague] view opened (retry)");
         } catch (final Exception ex) {
-            System.err.println("[colleague] view open retry failed: " + ex);
+            ColleagueLog.warn("[colleague] view open retry failed: " + ex);
         }
     };
 
@@ -88,11 +89,11 @@ public class ColleagueStartup implements IStartup {
                 + ", models=" + provider.listModels();
             Platform.getLog(theBundle).log(new Status(IStatus.INFO, ColleagueUIPlugin.PLUGIN_ID, 0,
                 message, null));
-            System.err.println("[colleague] " + message);
+            ColleagueLog.warn("[colleague] " + message);
         } catch (final Exception ex) {
             Platform.getLog(theBundle).log(new Status(IStatus.ERROR, ColleagueUIPlugin.PLUGIN_ID, 0,
                 "LLM smoke failed: " + ex.getMessage(), ex));
-            System.err.println("[colleague] LLM smoke failed: " + ex.getMessage());
+            ColleagueLog.error("[colleague] LLM smoke failed: " + ex.getMessage());
         }
     }
 }

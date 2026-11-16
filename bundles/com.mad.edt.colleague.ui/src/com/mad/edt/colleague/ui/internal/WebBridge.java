@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui.internal;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -192,7 +193,7 @@ public final class WebBridge implements PageTransport {
                 worker.start();
             } catch (final IOException ex) {
                 if(ourOpen) {
-                    System.err.println("[colleague] web bridge accept failed: "
+                    ColleagueLog.error("[colleague] web bridge accept failed: "
                         + ex.getMessage());
                 }
                 return;
@@ -303,7 +304,7 @@ public final class WebBridge implements PageTransport {
         } else {
             // the page is open but no chat tab has attached to this bridge yet:
             // saying so beats dropping a call without a trace
-            System.out.println("[colleague] web bridge dropped page call '" + name
+            ColleagueLog.info("[colleague] web bridge dropped page call '" + name
                 + "': no chat tab attached");
         }
         // any event the panel produced while taking the call leaves with the
@@ -567,7 +568,7 @@ public final class WebBridge implements PageTransport {
             }
             return new String(bytes.toByteArray(), StandardCharsets.UTF_8);
         } catch (final IOException ex) {
-            System.err.println("[colleague] web bridge page unreadable: " + thePath + ": "
+            ColleagueLog.error("[colleague] web bridge page unreadable: " + thePath + ": "
                 + ex.getMessage());
             return "";
         }

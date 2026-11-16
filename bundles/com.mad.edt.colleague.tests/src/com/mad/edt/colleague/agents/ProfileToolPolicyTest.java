@@ -29,8 +29,8 @@ class ProfileToolPolicyTest {
     }
 
     private static AgentProfile profileWithTools(final String... theNames) {
-        return new AgentProfile("reviewer", "d", "s", null, 0,
-            AgentProfile.Mode.ALL, Set.of(theNames), false);
+        return AgentProfile.builder("reviewer").description("d").system("s")
+            .maxSteps(0).mode(AgentProfile.Mode.ALL).tools(Set.of(theNames)).build();
     }
 
     @Test

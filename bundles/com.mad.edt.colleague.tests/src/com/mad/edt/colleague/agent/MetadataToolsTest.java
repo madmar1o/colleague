@@ -31,7 +31,7 @@ class MetadataToolsTest {
     private Path ourSrc;
 
     @BeforeEach
-    void buildFixture() throws Exception {
+    void buildFixture() throws java.io.IOException {
         ourSrc = ourDir.resolve("Demo").resolve("src");
         write("Catalogs/Валюты/Валюты.mdo", catalog("Валюты", "Валюта", "Currencies",
             attribute("Код", "String", "9"), attribute("Наименование", "String", "150")));

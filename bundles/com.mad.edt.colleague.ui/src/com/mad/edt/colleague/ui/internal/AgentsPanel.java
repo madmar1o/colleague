@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.ui.internal;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.io.File;
 import java.io.IOException;
 import java.util.LinkedHashSet;
@@ -41,7 +42,6 @@ public final class AgentsPanel {
 
     private Composite ourRoot;
     private BridgeBrowser ourBridge;
-    private String ourLastPalette = "";
     private Color ourPageBackground;
 
     /**
@@ -116,13 +116,12 @@ public final class AgentsPanel {
             ViewBridge.ensureUserDataDir();
             ourBridge = new BridgeBrowser(ourRoot, "web/agents.html", this::handleBridge);
             final JsonObject ready = ThemeSupport.pagePalette(ourRoot);
-            ourLastPalette = ready.toString();
             applyNativePalette(ready);
             ourBridge.push("ready", ready);
             watchTheme();
             return;
         } catch (final RuntimeException | LinkageError | org.eclipse.swt.SWTError ex) {
-            System.err.println("colleague: agents browser unavailable, plain fallback: "
+            ColleagueLog.error("colleague: agents browser unavailable, plain fallback: "
                 + ex.getMessage());
             ourBridge = null;
         }
@@ -241,12 +240,16 @@ public final class AgentsPanel {
         } catch (final NumberFormatException ignored) {
             steps = 0;
         }
-        return new AgentProfile(theId,
-            BridgeBrowser.optString(theArguments, "description"),
-            BridgeBrowser.optString(theArguments, "system"),
-            model.isEmpty() ? null : model,
-            steps, modeOf(BridgeBrowser.optString(theArguments, "mode")),
-            tools, false, BridgeBrowser.optString(theArguments, "title"));
+        return AgentProfile.builder(theId)
+            .description(BridgeBrowser.optString(theArguments, "description"))
+            .system(BridgeBrowser.optString(theArguments, "system"))
+            .model(model.isEmpty() ? null : model)
+            .maxSteps(steps)
+            .mode(modeOf(BridgeBrowser.optString(theArguments, "mode")))
+            .tools(tools)
+            .hidden(false)
+            .title(BridgeBrowser.optString(theArguments, "title"))
+            .build();
     }
 
     /**
@@ -326,7 +329,6 @@ public final class AgentsPanel {
     private void watchTheme() {
         ThemeSupport.watchPalette(ourRoot, palette -> {
             if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
-                ourLastPalette = palette.toString();
                 applyNativePalette(palette);
                 ourBridge.push("readyPalette", palette);
             }

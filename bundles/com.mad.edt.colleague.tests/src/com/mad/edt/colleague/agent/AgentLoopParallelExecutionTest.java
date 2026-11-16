@@ -116,13 +116,18 @@ class AgentLoopParallelExecutionTest {
         }
 
         @Override
-        public String execute(final String theArgumentsJson) throws InterruptedException {
+        public String execute(final String theArgumentsJson) throws ToolExecutionException {
             if(waiting.incrementAndGet() >= 2) {
                 return "overlapped";
             }
             final long deadline = System.currentTimeMillis() + BARRIER_MS;
-            while(waiting.get() < 2 && System.currentTimeMillis() < deadline) {
-                Thread.sleep(10L);
+            try {
+                while(waiting.get() < 2 && System.currentTimeMillis() < deadline) {
+                    Thread.sleep(10L);
+                }
+            } catch (final InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new ToolExecutionException("interrupted while waiting for a peer", ex);
             }
             if(waiting.get() >= 2) {
                 return "overlapped";
@@ -208,8 +213,13 @@ class AgentLoopParallelExecutionTest {
         final BarrierTool slow = new BarrierTool("search_code", true, barrier) {
 
             @Override
-            public String execute(final String theArgumentsJson) throws InterruptedException {
-                Thread.sleep(150L);
+            public String execute(final String theArgumentsJson) throws ToolExecutionException {
+                try {
+                    Thread.sleep(150L);
+                } catch (final InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    throw new ToolExecutionException("interrupted before the barrier", ex);
+                }
                 return super.execute(theArgumentsJson);
             }
         };

@@ -1,4 +1,5 @@
 package com.mad.edt.colleague.agent;
+import com.mad.edt.colleague.ColleagueLog;
 
 /**
  * Observer that prints the run trace to the platform output stream so every
@@ -34,9 +35,9 @@ public final class LoggingAgentObserver implements AgentObserver {
     @Override
     public void onRound(final int theStep, final int theRequestedToolCalls) {
         if(theRequestedToolCalls == 0) {
-            System.out.println("[colleague] agent round " + theStep + ": final answer");
+            ColleagueLog.info("[colleague] agent round " + theStep + ": final answer");
         } else {
-            System.out.println("[colleague] agent round " + theStep + ": asked "
+            ColleagueLog.info("[colleague] agent round " + theStep + ": asked "
                 + theRequestedToolCalls + " tool call(s)");
         }
     }
@@ -48,7 +49,7 @@ public final class LoggingAgentObserver implements AgentObserver {
             usage.noteCall(theName);
         }
         final int resultChars = theResult == null ? 0 : theResult.length();
-        System.out.println("[colleague] agent step " + theStep + ": tool " + theName
+        ColleagueLog.info("[colleague] agent step " + theStep + ": tool " + theName
             + " args=" + clip(theArgumentsJson) + " -> " + resultChars + " chars, "
             + theElapsedMs + " ms");
     }

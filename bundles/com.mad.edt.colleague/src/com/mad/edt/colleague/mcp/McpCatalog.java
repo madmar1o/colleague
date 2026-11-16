@@ -1,5 +1,6 @@
 package com.mad.edt.colleague.mcp;
 
+import com.mad.edt.colleague.ColleagueLog;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -10,6 +11,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import com.mad.edt.colleague.agent.IToolExecutor;
+import com.mad.edt.colleague.agent.ToolExecutionException;
 
 /**
  * The one place the chat asks for remote tools, so every server shares a
@@ -26,9 +28,9 @@ public final class McpCatalog {
         /**
          * @param theConfig server to ask
          * @return the tools that server exposes
-         * @throws Exception when the server is unreachable or refuses
+         * @throws ToolExecutionException when the server is unreachable or refuses
          */
-        McpToolInfo[] discover(McpServerConfig theConfig) throws Exception;
+        McpToolInfo[] discover(McpServerConfig theConfig) throws ToolExecutionException;
     }
 
     /** Opens (or scripts) the call channel of one server. */
@@ -112,7 +114,7 @@ public final class McpCatalog {
             } catch (final Exception ex) {
                 // one silent server must not cost the chat its other tools;
                 // the settings page test button gives the loud error instead
-                System.err.println("[colleague] mcp server " + config.getName()
+                ColleagueLog.error("[colleague] mcp server " + config.getName()
                     + " is not answering: " + (ex.getMessage() == null
                         ? ex.getClass().getSimpleName() : ex.getMessage()));
                 continue;

@@ -2,7 +2,6 @@ package com.mad.edt.colleague.agent;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,6 +23,7 @@ import com.mad.edt.colleague.agent.subagent.SubagentTool;
 import com.mad.edt.colleague.llm.CancellationFlag;
 import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.ChatRequest;
+import com.mad.edt.colleague.llm.LLMException;
 import com.mad.edt.colleague.llm.LLMProviderType;
 import com.mad.edt.colleague.llm.OllamaLLMProvider;
 import com.mad.edt.colleague.llm.ProviderConfig;
@@ -168,9 +168,13 @@ class AgentLoopEndToEndTest {
         }
 
         @Override
-        public String execute(final String theArgumentsJson) throws IOException {
-            final JsonObject args = JsonParser.parseString(theArgumentsJson).getAsJsonObject();
-            return Files.readString(fileOf(args, "path"), StandardCharsets.UTF_8);
+        public String execute(final String theArgumentsJson) throws ToolExecutionException {
+            try {
+                final JsonObject args = JsonParser.parseString(theArgumentsJson).getAsJsonObject();
+                return Files.readString(fileOf(args, "path"), StandardCharsets.UTF_8);
+            } catch (final IOException ex) {
+                throw new ToolExecutionException("read failed", ex);
+            }
         }
     }
 
@@ -193,18 +197,22 @@ class AgentLoopEndToEndTest {
         }
 
         @Override
-        public String execute(final String theArgumentsJson) throws IOException {
-            final JsonObject args = JsonParser.parseString(theArgumentsJson).getAsJsonObject();
-            final Path file = fileOf(args, "path");
-            final String search = args.get("search").getAsString();
-            final String replace = args.get("replace").getAsString();
-            final String content = Files.readString(file, StandardCharsets.UTF_8);
-            if(!content.contains(search)) {
-                return "ERROR: '" + search + "' does not occur in the file";
+        public String execute(final String theArgumentsJson) throws ToolExecutionException {
+            try {
+                final JsonObject args = JsonParser.parseString(theArgumentsJson).getAsJsonObject();
+                final Path file = fileOf(args, "path");
+                final String search = args.get("search").getAsString();
+                final String replace = args.get("replace").getAsString();
+                final String content = Files.readString(file, StandardCharsets.UTF_8);
+                if(!content.contains(search)) {
+                    return "ERROR: '" + search + "' does not occur in the file";
+                }
+                final int occurrences = content.split(Pattern.quote(search), -1).length - 1;
+                Files.writeString(file, content.replace(search, replace), StandardCharsets.UTF_8);
+                return "replaced " + occurrences + " occurrence(s)";
+            } catch (final IOException ex) {
+                throw new ToolExecutionException("edit failed", ex);
             }
-            final int occurrences = content.split(Pattern.quote(search), -1).length - 1;
-            Files.writeString(file, content.replace(search, replace), StandardCharsets.UTF_8);
-            return "replaced " + occurrences + " occurrence(s)";
         }
     }
 
@@ -236,15 +244,56 @@ class AgentLoopEndToEndTest {
      * so it costs the harness a moment instead of a full generation.
      *
      * @param theProvider provider the measured run will answer from
-     * @throws Exception when even the warm-up call fails: the measured run
+     * @throws LLMException when even the warm-up call fails: the measured run
      *             would face the same dead endpoint anyway
      */
-    private static void warmUpGenerator(final OllamaLLMProvider theProvider) throws Exception {
+    private static void warmUpGenerator(final OllamaLLMProvider theProvider) throws LLMException {
         theProvider.chat(ChatRequest.builder(MODEL)
             .addMessage(ChatMessage.user("reply with the single word pong"))
             .think(false)
             .maxTokens(16)
             .build());
+    }
+
+    /**
+     * Attaches a {@code java.util.logging} handler to the plugin's log namespace
+     * so everything {@code ColleagueLog} writes while unbound lands in the given
+     * sink. The harness needs the production trace as evidence; with the facade
+     * in place the records come from JUL, not from stdout.
+     *
+     * @param theSink byte sink receiving one UTF-8 line per log record
+     * @return handle that detaches the handler when closed
+     */
+    private static AutoCloseable captureFacadeLogs(final ByteArrayOutputStream theSink) {
+        final java.util.logging.Logger jul =
+            java.util.logging.Logger.getLogger("com.mad.edt.colleague");
+        final java.util.logging.Handler handler = new java.util.logging.Handler() {
+            @Override
+            public void publish(final java.util.logging.LogRecord theRecord) {
+                theSink.writeBytes((String.valueOf(theRecord.getMessage())
+                    + System.lineSeparator()).getBytes(StandardCharsets.UTF_8));
+            }
+
+            @Override
+            public void flush() {
+                // the sink is a byte array, nothing buffered
+            }
+
+            @Override
+            public void close() {
+                // the sink outlives the handler; nothing to release
+            }
+        };
+        final boolean priorUseParent = jul.getUseParentHandlers();
+        final java.util.logging.Level priorLevel = jul.getLevel();
+        jul.addHandler(handler);
+        jul.setUseParentHandlers(false);
+        jul.setLevel(java.util.logging.Level.ALL);
+        return () -> {
+            jul.removeHandler(handler);
+            jul.setUseParentHandlers(priorUseParent);
+            jul.setLevel(priorLevel);
+        };
     }
 
     @Test
@@ -279,13 +328,10 @@ class AgentLoopEndToEndTest {
             List.of(new ReadFileTool(theWorkspace), new EditFileTool(theWorkspace)),
             MODEL, 8, new CancellationFlag(), recorder);
 
-        final PrintStream originalOut = System.out;
         final ByteArrayOutputStream console = new ByteArrayOutputStream();
         final AgentAnswer answer;
         final long startedAtNanos = System.nanoTime();
-        try (PrintStream redirectedOut =
-            new PrintStream(console, true, StandardCharsets.UTF_8)) {
-            System.setOut(redirectedOut);
+        try (AutoCloseable ignored = captureFacadeLogs(console)) {
             answer = loop.run(
                 "You fix code in a workspace using tools. Always call the tools,"
                     + " never describe changes in prose.",
@@ -294,13 +340,12 @@ class AgentLoopEndToEndTest {
                     + " with path src/invoice.bsl. Then call edit_file with path"
                     + " src/invoice.bsl, search " + BROKEN_NAME + ", replace " + FIXED_NAME
                     + ". When the edit tool says replaced, answer exactly DONE.");
-        } finally {
-            System.setOut(originalOut);
         }
         // replay the captured production trace into the build log: an
         // unattended run must leave the step-by-step evidence behind, not
         // only a passed/failed line
-        System.out.print(console.toString(StandardCharsets.UTF_8));
+        java.util.logging.Logger.getLogger("com.mad.edt.colleague.e2e")
+            .info(console.toString(StandardCharsets.UTF_8));
 
         final java.util.function.Supplier<String> trace =
             () -> String.join("\n", recorder.events);
@@ -380,13 +425,10 @@ class AgentLoopEndToEndTest {
             List.of(new ReadFileTool(theWorkspace), new EditFileTool(theWorkspace), subagent),
             MODEL, 6, new CancellationFlag(), recorder);
 
-        final PrintStream originalOut = System.out;
         final ByteArrayOutputStream console = new ByteArrayOutputStream();
         final AgentAnswer answer;
         final long startedAtNanos = System.nanoTime();
-        try (PrintStream redirectedOut =
-            new PrintStream(console, true, StandardCharsets.UTF_8)) {
-            System.setOut(redirectedOut);
+        try (AutoCloseable ignored = captureFacadeLogs(console)) {
             answer = loop.run(
                 "You answer questions using tools. Always call the tools,"
                     + " never describe actions in prose.",
@@ -396,10 +438,9 @@ class AgentLoopEndToEndTest {
                     + " src/secret.txt and answer with the exact word it read."
                     + " When the subagent result comes back, answer with exactly that"
                     + " word and nothing else.");
-        } finally {
-            System.setOut(originalOut);
         }
-        System.out.print(console.toString(StandardCharsets.UTF_8));
+        java.util.logging.Logger.getLogger("com.mad.edt.colleague.e2e")
+            .info(console.toString(StandardCharsets.UTF_8));
 
         final java.util.function.Supplier<String> trace =
             () -> String.join("\n", recorder.events);

@@ -199,47 +199,13 @@ public final class MetadataTools {
     }
 
     /**
-     * @param theFile metadata file to read
-     * @return the whole object summary, or an explanation of why it was not read
-     */
-    private String describe(final Path theFile) {
-        final String content = readText(theFile, PARSED_CHARS);
-        if(content == null) {
-            return "ERROR: cannot read " + pathOf(theFile);
-        }
-        final Snapshot snapshot = parse(content);
-        if(snapshot.kind == null || snapshot.name == null) {
-            return "ERROR: " + pathOf(theFile)
-                + " is not a metadata object file (no root element or name)";
-        }
-        final Budget out = new Budget();
-        final StringBuilder title = new StringBuilder(snapshot.kind).append(' ')
-            .append(snapshot.name);
-        if(snapshot.synonymRu != null && !snapshot.synonymRu.equals(snapshot.name)) {
-            title.append(" (").append(snapshot.synonymRu).append(')');
-        }
-        out.line(title.toString());
-        out.line("Path: " + pathOf(theFile));
-        fields(out, "Attributes", snapshot.attributes);
-        sections(out, snapshot.sections);
-        fields(out, "Dimensions", snapshot.dimensions);
-        fields(out, "Resources", snapshot.resources);
-        if(snapshot.incomplete) {
-            out.line("(the file ends inside unclosed elements, the summary is incomplete)");
-        }
-        if(snapshot.sections.isEmpty() && snapshot.attributes.isEmpty()
-            && snapshot.dimensions.isEmpty() && snapshot.resources.isEmpty()) {
-            out.line("(no attributes, tabular sections, dimensions or resources)");
-        }
-        return out.finish();
-    }
-
-    /**
      * @param theFile metadata file to locate
      * @return its workspace-relative path, or the bare file name when the
      *         file sits outside every supplied root
      */
-    private String pathOf(final Path theFile) {
+    // shared by FindMetadataTool and ReadMetadataTool, so it stays package
+    // visible: S3398 only suggests moving methods with a single inner caller
+    String pathOf(final Path theFile) {
         final Path absolute = theFile.toAbsolutePath().normalize();
         for(final Root root : configuredRoots()) {
             final Path src = root.srcDirectory().toAbsolutePath().normalize();
@@ -249,99 +215,6 @@ public final class MetadataTools {
             }
         }
         return theFile.getFileName().toString();
-    }
-
-    /**
-     * @param theText workspace-relative path of a metadata file
-     * @return the file inside one of the supplied roots
-     * @throws IOException when the path is empty, escapes the tree or names a
-     *             project that is not open
-     */
-    private Path resolve(final String theText) throws IOException {
-        final String text = theText == null ? "" : theText.trim().replace('\\', '/');
-        if(text.isEmpty()) {
-            throw new IOException("pass the path find_metadata returned");
-        }
-        final int slash = text.indexOf('/');
-        final String project = slash < 0 ? "" : text.substring(0, slash);
-        String rest = slash < 0 ? text : text.substring(slash + 1);
-        // answers carry the "src/" segment of the EDT export, the root is
-        // already that folder, so the prefix is dropped instead of doubled
-        if("src".equals(rest) || rest.startsWith("src/")) {
-            rest = rest.length() <= 3 ? "" : rest.substring(4);
-        }
-        for(final Root root : configuredRoots()) {
-            if(!root.project().equals(project)) {
-                continue;
-            }
-            final Path src = root.srcDirectory().toAbsolutePath().normalize();
-            final Path file = src.resolve(rest).normalize();
-            if(!file.startsWith(src)) {
-                throw new IOException("path escapes the configuration tree: " + theText);
-            }
-            return file;
-        }
-        throw new IOException("unknown project \"" + project
-            + "\" in the path, pass the path find_metadata returned");
-    }
-
-    /**
-     * @param theOut answer being built
-     * @param theLabel heading of the block
-     * @param theFields fields to list, skipped entirely when the block does
-     *            not fit
-     */
-    private void fields(final Budget theOut, final String theLabel,
-        final List<Field> theFields) {
-        if(theFields.isEmpty()) {
-            return;
-        }
-        if(!theOut.line(theLabel + " (" + theFields.size() + "):")) {
-            theOut.skip(theFields.size());
-            return;
-        }
-        for(int index = 0; index < theFields.size(); index++) {
-            if(!theOut.line("  " + theFields.get(index).render())) {
-                theOut.skip(theFields.size() - index);
-                return;
-            }
-        }
-    }
-
-    /**
-     * @param theOut answer being built
-     * @param theSections tabular sections to list with the first attribute
-     *            names of each
-     */
-    private void sections(final Budget theOut, final List<Section> theSections) {
-        if(theSections.isEmpty()) {
-            return;
-        }
-        if(!theOut.line("Tabular sections (" + theSections.size() + "):")) {
-            theOut.skip(theSections.size());
-            return;
-        }
-        for(int index = 0; index < theSections.size(); index++) {
-            final Section section = theSections.get(index);
-            final StringBuilder line = new StringBuilder("  ").append(section.name);
-            if(!section.fields.isEmpty()) {
-                line.append(" (").append(section.fields.size()).append("): ");
-                for(int field = 0; field < section.fields.size() && field < FIELDS_PER_SECTION;
-                    field++) {
-                    if(field > 0) {
-                        line.append(", ");
-                    }
-                    line.append(section.fields.get(field).render());
-                }
-                if(section.fields.size() > FIELDS_PER_SECTION) {
-                    line.append(", ...");
-                }
-            }
-            if(!theOut.line(line.toString())) {
-                theOut.skip(theSections.size() - index);
-                return;
-            }
-        }
     }
 
     /**
@@ -817,6 +690,135 @@ public final class MetadataTools {
                 return answer.toString();
             }
             return describe(hits.get(0).file());
+        }
+
+        /**
+         * @param theFile metadata file to read
+         * @return the whole object summary, or an explanation of why it was not read
+         */
+        private String describe(final Path theFile) {
+            final String content = readText(theFile, PARSED_CHARS);
+            if(content == null) {
+                return "ERROR: cannot read " + pathOf(theFile);
+            }
+            final Snapshot snapshot = parse(content);
+            if(snapshot.kind == null || snapshot.name == null) {
+                return "ERROR: " + pathOf(theFile)
+                    + " is not a metadata object file (no root element or name)";
+            }
+            final Budget out = new Budget();
+            final StringBuilder title = new StringBuilder(snapshot.kind).append(' ')
+                .append(snapshot.name);
+            if(snapshot.synonymRu != null && !snapshot.synonymRu.equals(snapshot.name)) {
+                title.append(" (").append(snapshot.synonymRu).append(')');
+            }
+            out.line(title.toString());
+            out.line("Path: " + pathOf(theFile));
+            fields(out, "Attributes", snapshot.attributes);
+            sections(out, snapshot.sections);
+            fields(out, "Dimensions", snapshot.dimensions);
+            fields(out, "Resources", snapshot.resources);
+            if(snapshot.incomplete) {
+                out.line("(the file ends inside unclosed elements, the summary is incomplete)");
+            }
+            if(snapshot.sections.isEmpty() && snapshot.attributes.isEmpty()
+                && snapshot.dimensions.isEmpty() && snapshot.resources.isEmpty()) {
+                out.line("(no attributes, tabular sections, dimensions or resources)");
+            }
+            return out.finish();
+        }
+
+        /**
+         * @param theText workspace-relative path of a metadata file
+         * @return the file inside one of the supplied roots
+         * @throws IOException when the path is empty, escapes the tree or names a
+         *             project that is not open
+         */
+        private Path resolve(final String theText) throws IOException {
+            final String text = theText == null ? "" : theText.trim().replace('\\', '/');
+            if(text.isEmpty()) {
+                throw new IOException("pass the path find_metadata returned");
+            }
+            final int slash = text.indexOf('/');
+            final String project = slash < 0 ? "" : text.substring(0, slash);
+            String rest = slash < 0 ? text : text.substring(slash + 1);
+            // answers carry the "src/" segment of the EDT export, the root is
+            // already that folder, so the prefix is dropped instead of doubled
+            if("src".equals(rest) || rest.startsWith("src/")) {
+                rest = rest.length() <= 3 ? "" : rest.substring(4);
+            }
+            for(final Root root : configuredRoots()) {
+                if(!root.project().equals(project)) {
+                    continue;
+                }
+                final Path src = root.srcDirectory().toAbsolutePath().normalize();
+                final Path file = src.resolve(rest).normalize();
+                if(!file.startsWith(src)) {
+                    throw new IOException("path escapes the configuration tree: " + theText);
+                }
+                return file;
+            }
+            throw new IOException("unknown project \"" + project
+                + "\" in the path, pass the path find_metadata returned");
+        }
+
+        /**
+         * @param theOut answer being built
+         * @param theLabel heading of the block
+         * @param theFields fields to list, skipped entirely when the block does
+         *            not fit
+         */
+        private static void fields(final Budget theOut, final String theLabel,
+            final List<Field> theFields) {
+            if(theFields.isEmpty()) {
+                return;
+            }
+            if(!theOut.line(theLabel + " (" + theFields.size() + "):")) {
+                theOut.skip(theFields.size());
+                return;
+            }
+            for(int index = 0; index < theFields.size(); index++) {
+                if(!theOut.line("  " + theFields.get(index).render())) {
+                    theOut.skip(theFields.size() - index);
+                    return;
+                }
+            }
+        }
+
+        /**
+         * @param theOut answer being built
+         * @param theSections tabular sections to list with the first attribute
+         *            names of each
+         */
+        private static void sections(final Budget theOut, final List<Section> theSections) {
+            if(theSections.isEmpty()) {
+                return;
+            }
+            if(!theOut.line("Tabular sections (" + theSections.size() + "):")) {
+                theOut.skip(theSections.size());
+                return;
+            }
+            for(int index = 0; index < theSections.size(); index++) {
+                final Section section = theSections.get(index);
+                final StringBuilder line = new StringBuilder("  ").append(section.name);
+                if(!section.fields.isEmpty()) {
+                    line.append(" (").append(section.fields.size()).append("): ");
+                    for(int field = 0; field < section.fields.size() && field < FIELDS_PER_SECTION;
+                        field++) {
+                        if(field > 0) {
+                            line.append(", ");
+                        }
+                        line.append(section.fields.get(field).render());
+                    }
+                    if(section.fields.size() > FIELDS_PER_SECTION) {
+                        line.append(", ...");
+                    }
+                }
+                if(!theOut.line(line.toString())) {
+                    theOut.skip(theSections.size() - index);
+                    return;
+                }
+            }
         }
     }
 

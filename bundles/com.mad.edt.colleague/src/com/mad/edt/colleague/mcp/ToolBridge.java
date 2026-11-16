@@ -3,6 +3,7 @@ package com.mad.edt.colleague.mcp;
 import java.util.List;
 
 import com.google.gson.JsonObject;
+import com.mad.edt.colleague.agent.ToolExecutionException;
 
 /**
  * The two calls the adapter layer needs from a live tool server.
@@ -13,9 +14,9 @@ public interface ToolBridge {
 
     /**
      * @return the tools the server exposes, handshake included
-     * @throws Exception when the server is unreachable or refuses
+     * @throws ToolExecutionException when the server is unreachable or refuses
      */
-    List<McpToolInfo> listTools() throws Exception;
+    List<McpToolInfo> listTools() throws ToolExecutionException;
 
     /**
      * Invokes one remote tool.
@@ -23,7 +24,7 @@ public interface ToolBridge {
      * @param theName tool name as discovered
      * @param theArguments JSON object of arguments, {@code null} for none
      * @return concatenated text content of the result
-     * @throws Exception on transport or protocol failure
+     * @throws ToolExecutionException on transport or protocol failure
      */
-    String call(String theName, JsonObject theArguments) throws Exception;
+    String call(String theName, JsonObject theArguments) throws ToolExecutionException;
 }

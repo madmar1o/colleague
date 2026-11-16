@@ -18,7 +18,8 @@ class ReadOnlyProfileTest {
 
     private static AgentProfile profile(final String theName, final AgentProfile.Mode theMode,
         final Set<String> theTools) {
-        return new AgentProfile(theName, "d", "s", null, 0, theMode, theTools, false);
+        return AgentProfile.builder(theName).description("d").system("s")
+            .maxSteps(0).mode(theMode).tools(theTools).build();
     }
 
     @Test
