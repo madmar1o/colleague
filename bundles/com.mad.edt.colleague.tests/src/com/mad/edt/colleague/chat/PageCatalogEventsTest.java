@@ -28,20 +28,60 @@ class PageCatalogEventsTest {
     private static final String SKILLS = "skills";
     private static final String PROFILES = "profiles";
     /** entry fields the page reads out of the payload */
+    private static final String NAME = "name";
     private static final String DESCRIPTION = "description";
     private static final String LABEL = "label";
+    private static final String MODE = "mode";
+    private static final String MODEL = "model";
+    private static final String BUILTIN = "builtin";
+    private static final String TITLE = "title";
+    private static final String MAX_STEPS = "maxSteps";
+    private static final String TOOLS = "tools";
+    /** the rail section the page reads contacts out of */
+    private static final String CONTACTS = "contacts";
     /** fixture profile names and values reused across tests */
     private static final String REVIEWER = "reviewer";
     private static final String REVIEW_ONLY = "review only";
     private static final String SYSTEM = "system";
+    private static final String SUBAGENT_ONLY = "sub-agent only";
+    private static final String DEFAULT_LABEL = "Колега по умолчанию";
     private static final String ANALYST = "analyst";
     private static final String ANALYST_TITLE = "Аналитик 1С";
+    /** built-in contact and built-in card carry an empty name and model */
+    private static final String BUILT_IN = "";
+    /** contact rail modes the page distinguishes */
+    private static final String DEFAULT_MODE = "default";
+    private static final String PRIMARY_MODE = "primary";
+    /** profiles the workspace owns and must keep out of the rail */
+    private static final String HELPER = "helper";
+    private static final String DELEGATED = "delegated";
+    private static final String INVISIBLE = "invisible";
+    private static final String READ_FILE = "read_file";
+    private static final String SEARCH_CODE = "search_code";
+    /** model the analyst profile pins */
+    private static final String ANALYST_MODEL = "qwen3:8b";
+    /** skill the workspace has installed in the first fixture */
+    private static final String REPORTER = "reporter";
+    /** profile hidden from the chip and from the page */
+    private static final String INTERNAL = "internal";
+    private static final String NOT_FOR_CHIP = "not for the chip";
+    private static final String NOT_FOR_RAIL = "not for the rail";
+    private static final String NOT_FOR_PAGE = "not for the page";
+    /** description the helper profile carries on the rail */
+    private static final String DELEGATE_WORKER = "delegate worker";
+    /** analyst fixture reused by the agents page tests */
+    private static final String ANALYST_ID = "analyst-1c";
+    private static final String ANALYST_DESCRIPTION = "аналитик типовых решений";
+    private static final String ANALYST_BRIEF = "разбор типовых";
+    private static final String SYSTEM_PROMPT = "Ты — аналитик 1С.";
+    /** tools listed in the analyst card and joined for the page */
+    private static final String TOOLS_LIST = READ_FILE + ", " + SEARCH_CODE;
 
     @Test
     @DisplayName("the catalog event lists commands and skills with descriptions")
     void catalogCarriesCommandsAndSkills() {
         final SkillRegistry skills = new SkillRegistry();
-        skills.register(new SkillDefinition("reporter", "print a report", "body", List.of()));
+        skills.register(new SkillDefinition(REPORTER, "print a report", "body", List.of()));
         skills.register(new SkillDefinition("quiet", "hidden helper", "body", List.of(),
             null, false));
 
@@ -52,12 +92,12 @@ class PageCatalogEventsTest {
 
         Assertions.assertEquals(2, payload.getAsJsonArray(COMMANDS).size());
         final JsonObject first = payload.getAsJsonArray(COMMANDS).get(0).getAsJsonObject();
-        Assertions.assertEquals("review", first.get("name").getAsString());
+        Assertions.assertEquals("review", first.get(NAME).getAsString());
         Assertions.assertEquals("review a change", first.get(DESCRIPTION).getAsString());
 
         Assertions.assertEquals(2, payload.getAsJsonArray(SKILLS).size());
-        Assertions.assertEquals("reporter",
-            payload.getAsJsonArray(SKILLS).get(0).getAsJsonObject().get("name").getAsString());
+        Assertions.assertEquals(REPORTER,
+            payload.getAsJsonArray(SKILLS).get(0).getAsJsonObject().get(NAME).getAsString());
 
         // profiles arrive with a later milestone: the page must be able to
         // read the field today, as an empty array rather than a gap
@@ -80,15 +120,15 @@ class PageCatalogEventsTest {
         final JsonObject payload = PageCatalogEvents.build(List.of(), new SkillRegistry(),
             List.of(AgentProfile.builder(REVIEWER).description(REVIEW_ONLY).system(SYSTEM)
                     .maxSteps(4).mode(AgentProfile.Mode.PRIMARY)
-                    .tools(Set.of("read_file")).build(),
-                AgentProfile.builder("internal").description("not for the chip").system(SYSTEM)
+                    .tools(Set.of(READ_FILE)).build(),
+                AgentProfile.builder(INTERNAL).description(NOT_FOR_CHIP).system(SYSTEM)
                     .tools(Set.of()).hidden(true).build()));
 
         final JsonArray profiles = payload.getAsJsonArray(PROFILES);
         Assertions.assertEquals(1, profiles.size(),
             "a hidden profile is not something the user picks from a chip");
         final JsonObject profile = profiles.get(0).getAsJsonObject();
-        Assertions.assertEquals(REVIEWER, profile.get("name").getAsString());
+        Assertions.assertEquals(REVIEWER, profile.get(NAME).getAsString());
         Assertions.assertEquals(REVIEW_ONLY, profile.get(DESCRIPTION).getAsString());
     }
 
@@ -98,64 +138,66 @@ class PageCatalogEventsTest {
         final JsonObject payload = PageCatalogEvents.build(List.of(), new SkillRegistry(),
             List.of(AgentProfile.builder(REVIEWER).description(REVIEW_ONLY).system(SYSTEM)
                     .maxSteps(4).mode(AgentProfile.Mode.PRIMARY).tools(Set.of()).build(),
-                AgentProfile.builder("helper").description("delegate worker").system(SYSTEM)
+                AgentProfile.builder(HELPER).description(DELEGATE_WORKER).system(SYSTEM)
                     .tools(Set.of()).build(),
-                AgentProfile.builder("delegated").description("sub-agent only").system(SYSTEM)
+                AgentProfile.builder(DELEGATED).description(SUBAGENT_ONLY).system(SYSTEM)
                     .mode(AgentProfile.Mode.SUBAGENT).tools(Set.of()).build(),
-                AgentProfile.builder("invisible").description("not for the rail").system(SYSTEM)
+                AgentProfile.builder(INVISIBLE).description(NOT_FOR_RAIL).system(SYSTEM)
                     .tools(Set.of()).hidden(true).build()));
 
-        final JsonArray contacts = payload.getAsJsonArray("contacts");
+        final JsonArray contacts = payload.getAsJsonArray(CONTACTS);
         Assertions.assertEquals(3, contacts.size(),
             "default plus the two profiles allowed to run as the chat itself");
         final JsonObject builtIn = contacts.get(0).getAsJsonObject();
-        Assertions.assertEquals("", builtIn.get("name").getAsString(),
+        Assertions.assertEquals(BUILT_IN, builtIn.get(NAME).getAsString(),
             "the built-in colleague is picked by the empty profile name");
-        Assertions.assertEquals("Колега по умолчанию", builtIn.get(LABEL).getAsString());
-        Assertions.assertEquals("default", builtIn.get("mode").getAsString());
+        Assertions.assertEquals(DEFAULT_LABEL, builtIn.get(LABEL).getAsString());
+        Assertions.assertEquals(DEFAULT_MODE, builtIn.get(MODE).getAsString());
         final JsonObject reviewer = contacts.get(1).getAsJsonObject();
-        Assertions.assertEquals(REVIEWER, reviewer.get("name").getAsString());
+        Assertions.assertEquals(REVIEWER, reviewer.get(NAME).getAsString());
         Assertions.assertEquals(REVIEW_ONLY, reviewer.get(DESCRIPTION).getAsString());
-        Assertions.assertEquals("primary", reviewer.get("mode").getAsString());
-        Assertions.assertEquals("helper", contacts.get(2).getAsJsonObject().get("name").getAsString());
+        Assertions.assertEquals(PRIMARY_MODE, reviewer.get(MODE).getAsString());
+        Assertions.assertEquals(HELPER,
+            contacts.get(2).getAsJsonObject().get(NAME).getAsString());
     }
 
     @Test
     @DisplayName("with no workspace profiles the rail still offers the default contact")
     void contactsAlwaysCarryTheDefault() {
         final JsonObject payload = PageCatalogEvents.build(List.of(), new SkillRegistry(), null);
-        final JsonArray contacts = payload.getAsJsonArray("contacts");
+        final JsonArray contacts = payload.getAsJsonArray(CONTACTS);
         Assertions.assertEquals(1, contacts.size());
-        Assertions.assertEquals("", contacts.get(0).getAsJsonObject().get("name").getAsString());
+        Assertions.assertEquals(BUILT_IN,
+            contacts.get(0).getAsJsonObject().get(NAME).getAsString());
     }
 
     @Test
     @DisplayName("the agents page cards lead with the built-in and carry the model")
     void agentCardsLeadWithBuiltInAndCarryModel() {
         final JsonArray cards = PageCatalogEvents.agents(
-            List.of(AgentProfile.builder(ANALYST).description("аналитик типовых решений")
-                    .system(SYSTEM).model("qwen3:8b").mode(AgentProfile.Mode.PRIMARY)
+            List.of(AgentProfile.builder(ANALYST).description(ANALYST_DESCRIPTION)
+                    .system(SYSTEM).model(ANALYST_MODEL).mode(AgentProfile.Mode.PRIMARY)
                     .tools(Set.of()).build(),
-                AgentProfile.builder("delegated").description("sub-agent only").system(SYSTEM)
+                AgentProfile.builder(DELEGATED).description(SUBAGENT_ONLY).system(SYSTEM)
                     .mode(AgentProfile.Mode.SUBAGENT).tools(Set.of()).build(),
-                AgentProfile.builder("invisible").description("not for the page").system(SYSTEM)
+                AgentProfile.builder(INVISIBLE).description(NOT_FOR_PAGE).system(SYSTEM)
                     .tools(Set.of()).hidden(true).build()));
 
         Assertions.assertEquals(2, cards.size(),
             "built-in plus only the profiles allowed to run as the chat itself");
         final JsonObject builtIn = cards.get(0).getAsJsonObject();
-        Assertions.assertEquals("", builtIn.get("name").getAsString());
-        Assertions.assertEquals("Колега по умолчанию", builtIn.get(LABEL).getAsString());
-        Assertions.assertTrue(builtIn.get("builtin").getAsBoolean());
-        Assertions.assertEquals("", builtIn.get("model").getAsString(),
+        Assertions.assertEquals(BUILT_IN, builtIn.get(NAME).getAsString());
+        Assertions.assertEquals(DEFAULT_LABEL, builtIn.get(LABEL).getAsString());
+        Assertions.assertTrue(builtIn.get(BUILTIN).getAsBoolean());
+        Assertions.assertEquals(BUILT_IN, builtIn.get(MODEL).getAsString(),
             "the built-in colleague follows whatever provider model is default");
         final JsonObject analyst = cards.get(1).getAsJsonObject();
-        Assertions.assertEquals(ANALYST, analyst.get("name").getAsString());
+        Assertions.assertEquals(ANALYST, analyst.get(NAME).getAsString());
         Assertions.assertEquals(ANALYST, analyst.get(LABEL).getAsString());
-        Assertions.assertEquals("аналитик типовых решений",
+        Assertions.assertEquals(ANALYST_DESCRIPTION,
             analyst.get(DESCRIPTION).getAsString());
-        Assertions.assertEquals("qwen3:8b", analyst.get("model").getAsString());
-        Assertions.assertFalse(analyst.has("builtin"),
+        Assertions.assertEquals(ANALYST_MODEL, analyst.get(MODEL).getAsString());
+        Assertions.assertFalse(analyst.has(BUILTIN),
             "only the built-in card marks itself as built-in");
     }
 
@@ -170,18 +212,18 @@ class PageCatalogEventsTest {
     @DisplayName("the card shows the profile title as its label, the id stays pickable")
     void agentCardsLabelFollowsTheProfileTitle() {
         final JsonArray cards = PageCatalogEvents.agents(
-            List.of(AgentProfile.builder("analyst-1c").description("разбор типовых")
-                .system("Ты — аналитик 1С.").maxSteps(6).mode(AgentProfile.Mode.PRIMARY)
-                .tools(Set.of("read_file", "search_code")).title(ANALYST_TITLE).build()));
+            List.of(AgentProfile.builder(ANALYST_ID).description(ANALYST_BRIEF)
+                .system(SYSTEM_PROMPT).maxSteps(6).mode(AgentProfile.Mode.PRIMARY)
+                .tools(Set.of(READ_FILE, SEARCH_CODE)).title(ANALYST_TITLE).build()));
 
         final JsonObject card = cards.get(1).getAsJsonObject();
-        Assertions.assertEquals("analyst-1c", card.get("name").getAsString(),
+        Assertions.assertEquals(ANALYST_ID, card.get(NAME).getAsString(),
             "picking still travels by the file-name id");
         Assertions.assertEquals(ANALYST_TITLE, card.get(LABEL).getAsString());
-        Assertions.assertEquals(ANALYST_TITLE, card.get("title").getAsString());
-        Assertions.assertEquals(6, card.get("maxSteps").getAsInt());
-        Assertions.assertEquals("read_file, search_code", card.get("tools").getAsString());
-        Assertions.assertEquals("Ты — аналитик 1С.", card.get("system").getAsString(),
+        Assertions.assertEquals(ANALYST_TITLE, card.get(TITLE).getAsString());
+        Assertions.assertEquals(6, card.get(MAX_STEPS).getAsInt());
+        Assertions.assertEquals(TOOLS_LIST, card.get(TOOLS).getAsString());
+        Assertions.assertEquals(SYSTEM_PROMPT, card.get(SYSTEM).getAsString(),
             "the edit form repopulates from the card, so the prompt travels with it");
     }
 }
