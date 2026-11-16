@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -40,7 +41,7 @@ class McpClientHandshakeTest {
      */
     private static final class FakeHttpServer implements AutoCloseable {
 
-        final List<String> methods = new ArrayList<>();
+        final List<String> methods = Collections.synchronizedList(new ArrayList<>());
         private final ServerSocket socket;
         private final AtomicBoolean running = new AtomicBoolean(true);
 
@@ -59,15 +60,29 @@ class McpClientHandshakeTest {
 
         private void acceptLoop() {
             while(running.get()) {
-                try (Socket client = socket.accept()) {
-                    serve(client);
+                final Socket client;
+                try {
+                    client = socket.accept();
                 } catch (final IOException ex) {
                     return; // the close() unblocked accept
                 }
+                // one connection must not be able to park the whole server:
+                // a client that opens a connection and stays silent would
+                // otherwise block every later request until its own timeout
+                final Thread worker = new Thread(() -> {
+                    try (Socket connected = client) {
+                        serve(connected);
+                    } catch (final IOException ex) {
+                        // a client that vanished mid-request is not worth failing over
+                    }
+                }, "mcp-fake-http-conn");
+                worker.setDaemon(true);
+                worker.start();
             }
         }
 
         private void serve(final Socket theClient) throws IOException {
+            theClient.setSoTimeout(10_000);
             final InputStream in = theClient.getInputStream();
             final BufferedReader head =
                 new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
