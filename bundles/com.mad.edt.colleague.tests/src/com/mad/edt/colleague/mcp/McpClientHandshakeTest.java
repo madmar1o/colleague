@@ -1,9 +1,7 @@
 package com.mad.edt.colleague.mcp;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -84,11 +82,24 @@ class McpClientHandshakeTest {
         private void serve(final Socket theClient) throws IOException {
             theClient.setSoTimeout(10_000);
             final InputStream in = theClient.getInputStream();
-            final BufferedReader head =
-                new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+            // the head is taken one byte at a time on purpose: a buffered reader
+            // would already have pulled the body that follows the empty line into
+            // its own buffer, and the body read below would then wait for bytes
+            // that arrived long ago until the socket timeout closes the connection
+            final StringBuilder head = new StringBuilder();
+            int current;
+            while((current = in.read()) >= 0) {
+                head.append((char) current);
+                if(head.length() >= 4
+                    && head.charAt(head.length() - 4) == '\r'
+                    && head.charAt(head.length() - 3) == '\n'
+                    && head.charAt(head.length() - 2) == '\r'
+                    && head.charAt(head.length() - 1) == '\n') {
+                    break;
+                }
+            }
             int contentLength = 0;
-            String line;
-            while((line = head.readLine()) != null && !line.isEmpty()) {
+            for(final String line : head.toString().split("\r\n")) {
                 if(line.toLowerCase().startsWith("content-length:")) {
                     contentLength = Integer.parseInt(line.substring(15).trim());
                 }
