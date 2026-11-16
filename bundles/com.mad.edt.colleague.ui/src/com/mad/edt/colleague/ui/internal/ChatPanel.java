@@ -599,7 +599,8 @@ public final class ChatPanel {
         // the chat tab shows a blank page while the webview runs fine. The
         // pass runs after the children exist: one layout cascade then sizes
         // body -> ourRoot -> browser in a single pass
-        if(createBrowser()) {
+        createBrowser();
+        if(ourBridge != null) {
             theParent.layout(true);
             return;
         }
@@ -608,14 +609,12 @@ public final class ChatPanel {
     }
 
     /**
-     * Tries the embedded browser with the bundled chat page.
-     *
-     * @return {@code true} when the browser path is active
+     * Tries the embedded browser with the bundled chat page. On success the
+     * live bridge stays in {@code ourBridge}; on failure the field is cleared
+     * and the root is emptied of half-built widgets so the caller can lay a
+     * plain fallback over it.
      */
-    @SuppressWarnings("java:S3516")
-    private boolean createBrowser() {
-        // Return value deliberately reflects success (true) vs. failure (false);
-        // Sonar's dataflow collapses the tail, see specs/0014.
+    private void createBrowser() {
         try {
             ViewBridge.ensureUserDataDir();
             ourBridge = new BridgeBrowser(ourRoot, "web/chat.html", this::handleBridge);
@@ -623,19 +622,15 @@ public final class ChatPanel {
             watchTheme();
             traceGeometry();
             installEscapeFilter();
-            return true;
+            return;
         } catch (final RuntimeException | LinkageError | org.eclipse.swt.SWTError ex) {
             ColleagueLog.error("colleague: embedded browser unavailable, plain fallback: "
                 + ex.getMessage());
             ourBridge = null;
         }
-        if(ourRoot.getChildren().length != 1) {
-            for(final Control child : ourRoot.getChildren()) {
-                child.dispose();
-            }
-            return false;
+        for(final Control child : ourRoot.getChildren()) {
+            child.dispose();
         }
-        return false;
     }
 
     /** Logs where the chat browser sits on screen and who receives SWT input. */

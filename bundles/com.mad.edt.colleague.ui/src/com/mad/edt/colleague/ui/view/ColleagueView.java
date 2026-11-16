@@ -242,8 +242,18 @@ public class ColleagueView extends ViewPart {
 
     @Override
     public void init(final org.eclipse.ui.IViewSite theSite) throws PartInitException {
-        ourInstance = this;
+        bindInstance(this);
         super.init(theSite);
+    }
+
+    /**
+     * Publishes or clears the single visible instance; the write lives in a
+     * static helper so instance methods never touch the static field directly.
+     *
+     * @param theView the view to publish, {@code null} to clear the slot
+     */
+    private static void bindInstance(final ColleagueView theView) {
+        ourInstance = theView;
     }
 
     @Override
@@ -497,7 +507,7 @@ public class ColleagueView extends ViewPart {
     @Override
     public void dispose() {
         if(ourInstance == this) {
-            ourInstance = null;
+            bindInstance(null);
         }
         if(ourWebBridge != null) {
             // the port belongs to the view: closing the view closes the door
@@ -531,22 +541,53 @@ public class ColleagueView extends ViewPart {
      * staged profile name reroutes the question into a tab of that profile.
      */
     public void applyStaged() {
-        final String stagedProfile = ourPendingProfile;
-        ourPendingProfile = null;
+        final String stagedProfile = takePendingProfile();
         final ChatPanel panel = targetPanelForStaged(stagedProfile);
         if(panel == null) {
             return;
         }
-        final String staged = ourPendingQuestion;
-        ourPendingQuestion = null;
+        final String staged = takePendingQuestion();
         if(staged != null && !staged.isEmpty()) {
             panel.fillQuestion(staged);
         }
-        final String stagedContext = ourPendingContext;
-        ourPendingContext = null;
+        final String stagedContext = takePendingContext();
         if(stagedContext != null && !stagedContext.isEmpty()) {
             panel.attachContext(stagedContext);
         }
+    }
+
+    /**
+     * Takes and clears the staged profile name; the static field is only ever
+     * touched from static helpers like this one.
+     *
+     * @return the staged profile name, {@code null} when none was staged
+     */
+    private static String takePendingProfile() {
+        final String staged = ourPendingProfile;
+        ourPendingProfile = null;
+        return staged;
+    }
+
+    /**
+     * Takes and clears the staged question text.
+     *
+     * @return the staged question, {@code null} when none was staged
+     */
+    private static String takePendingQuestion() {
+        final String staged = ourPendingQuestion;
+        ourPendingQuestion = null;
+        return staged;
+    }
+
+    /**
+     * Takes and clears the staged context text.
+     *
+     * @return the staged context, {@code null} when none was staged
+     */
+    private static String takePendingContext() {
+        final String staged = ourPendingContext;
+        ourPendingContext = null;
+        return staged;
     }
 
     /**

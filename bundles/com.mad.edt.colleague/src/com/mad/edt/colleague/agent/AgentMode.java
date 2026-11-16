@@ -41,7 +41,7 @@ public final class AgentMode {
      * @return {@code true} when the assistant may hand any tool to the model,
      *         i.e. in {@link ChatMode#PLAN} and {@link ChatMode#EXECUTE}
      */
-    public static boolean isOn() {
+    public static synchronized boolean isOn() {
         return ourCurrent != ChatMode.ASK;
     }
 

@@ -71,10 +71,8 @@ class ChatSessionRegistryTest {
             .build();
     }
 
-    private static String contactKey() {
-        // same shape as ContactsPanel.Contact.getKey(): id, NUL, model
-        return "srata\u0000qwen3.8-flash-next-iq3_s";
-    }
+    /** Same shape as ContactsPanel.Contact.getKey(): id, NUL, model. */
+    private static final String CONTACT_KEY = "srata\u0000qwen3.8-flash-next-iq3_s";
 
     @Test
     void unchangedConfigurationKeepsTheConversation() {
@@ -83,8 +81,8 @@ class ChatSessionRegistryTest {
         final Supplier<ChatSession> factory =
             () -> new ChatSession(new FakeProvider(saved), "prompt");
 
-        final ChatSession first = registry.sessionFor(contactKey(), saved, factory);
-        final ChatSession again = registry.sessionFor(contactKey(), saved, factory);
+        final ChatSession first = registry.sessionFor(CONTACT_KEY, saved, factory);
+        final ChatSession again = registry.sessionFor(CONTACT_KEY, saved, factory);
         assertSame(first, again, "reopening a contact must not restart its history");
         assertTrue(registry.isCurrent(first, saved),
             "a session matching the saved configuration is current");
@@ -94,13 +92,13 @@ class ChatSessionRegistryTest {
     void correctedAddressRebuildsTheSession() {
         final ChatSessionRegistry registry = new ChatSessionRegistry();
         final ProviderConfig stale = config("http://127.0.0.1:8080", "k");
-        final ChatSession old = registry.sessionFor(contactKey(), stale,
+        final ChatSession old = registry.sessionFor(CONTACT_KEY, stale,
             () -> new ChatSession(new FakeProvider(stale), "prompt"));
 
         final ProviderConfig fixed = config("http://127.0.0.1:8080/v1", "k");
         assertFalse(registry.isCurrent(old, fixed),
             "the open tab must be recognised as built for the old address");
-        final ChatSession current = registry.sessionFor(contactKey(), fixed,
+        final ChatSession current = registry.sessionFor(CONTACT_KEY, fixed,
             () -> new ChatSession(new FakeProvider(fixed), "prompt"));
 
         assertNotSame(old, current,
@@ -111,11 +109,11 @@ class ChatSessionRegistryTest {
     void keyChangeOfTheApiKeyAlsoRebuilds() {
         final ChatSessionRegistry registry = new ChatSessionRegistry();
         final ProviderConfig withOldKey = config("http://127.0.0.1:8080/v1", "old");
-        final ChatSession old = registry.sessionFor(contactKey(), withOldKey,
+        final ChatSession old = registry.sessionFor(CONTACT_KEY, withOldKey,
             () -> new ChatSession(new FakeProvider(withOldKey), "prompt"));
 
         final ProviderConfig withNewKey = config("http://127.0.0.1:8080/v1", "new");
-        final ChatSession current = registry.sessionFor(contactKey(), withNewKey,
+        final ChatSession current = registry.sessionFor(CONTACT_KEY, withNewKey,
             () -> new ChatSession(new FakeProvider(withNewKey), "prompt"));
         assertNotSame(old, current, "a rotated key is a different endpoint contract");
     }
@@ -124,7 +122,7 @@ class ChatSessionRegistryTest {
     void removedProviderIsNeverCurrent() {
         final ChatSessionRegistry registry = new ChatSessionRegistry();
         final ProviderConfig saved = config("http://127.0.0.1:8080/v1", "k");
-        final ChatSession session = registry.sessionFor(contactKey(), saved,
+        final ChatSession session = registry.sessionFor(CONTACT_KEY, saved,
             () -> new ChatSession(new FakeProvider(saved), "prompt"));
 
         assertFalse(registry.isCurrent(session, null),

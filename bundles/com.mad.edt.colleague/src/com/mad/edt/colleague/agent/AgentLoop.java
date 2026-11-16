@@ -210,7 +210,7 @@ public final class AgentLoop {
                     wrap.addMessage(message);
                 }
                 wrap.think(false);
-                wrap.maxTokens(Integer.valueOf(REPAIR_ROUND_OUTPUT_TOKENS));
+                wrap.maxTokens(REPAIR_ROUND_OUTPUT_TOKENS);
                 wrap.cancellation(cancellation);
                 final ChatResult wrapResult = streamedRound(wrap.build());
                 observer.onRound(steps + 1, 0);
