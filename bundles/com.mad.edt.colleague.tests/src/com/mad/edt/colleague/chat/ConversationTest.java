@@ -31,12 +31,23 @@ import com.mad.edt.colleague.llm.ProviderConfig;
  */
 class ConversationTest {
 
+    // fixture vocabulary: the scripted endpoint always answers under this
+    // model name, and the questions below are the ones the history asserts on
+    private static final String MODEL = "model";
+    private static final String BASE_MODEL = "base-model";
+    private static final String PLAIN_MODEL = "plain-model";
+    private static final String NEW_CONTEXT = "new context";
+    private static final String CONTEXT_NEW = "system|Workspace context:\nnew context";
+    private static final String USER_Q1 = "user|q1";
+    private static final String USER_Q2 = "user|q2";
+    private static final String THE_ANSWER = "the answer";
+
     /** records every request and replays scripted results */
     private static final class ScriptedProvider implements ILLMProvider {
 
         private final ProviderConfig myConfig;
         private final List<ChatRequest> myRequests = new ArrayList<>();
-        private ChatResult myNext = new ChatResult("a", "model", "stop", 7, 12);
+        private ChatResult myNext = new ChatResult("a", MODEL, "stop", 7, 12);
         private List<String> myStreamChunks = List.of();
         private LLMException myStreamFailure;
         private boolean myThinking = true;
@@ -152,9 +163,9 @@ class ConversationTest {
 
     @Test
     void firstQuestionCarriesSystemPromptThenContextThenQuestion() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
         final Conversation conversation = new Conversation(provider, "You are the colleague.");
-        conversation.ask("plain-model", "file A.java", "hello");
+        conversation.ask(PLAIN_MODEL, "file A.java", "hello");
         assertEquals(List.of(
             "system|You are the colleague.",
             "system|Workspace context:\nfile A.java",
@@ -164,32 +175,32 @@ class ConversationTest {
 
     @Test
     void nextTurnReplaysHistoryBeforeTheFreshContext() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
-        provider.script(new ChatResult("first answer", "model", "stop", 1, 2));
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
+        provider.script(new ChatResult("first answer", MODEL, "stop", 1, 2));
         final Conversation conversation = new Conversation(provider, "prompt");
-        conversation.ask("plain-model", "old context", "q1");
-        conversation.ask("plain-model", "new context", "q2");
+        conversation.ask(PLAIN_MODEL, "old context", "q1");
+        conversation.ask(PLAIN_MODEL, NEW_CONTEXT, "q2");
         // the context message of the finished turn joins the history and is
         // replayed with it, while the new turn's context sits right before
         // its question
         assertEquals(List.of(
             "system|prompt",
             "system|Workspace context:\nold context",
-            "user|q1",
+            USER_Q1,
             "assistant|first answer",
-            "system|Workspace context:\nnew context",
-            "user|q2"),
+            CONTEXT_NEW,
+            USER_Q2),
             rolesAndContent(provider.requests().get(1)));
     }
 
     @Test
     void historyKeepsFinalAnswerNotTheReasoningPass() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
         provider.script(new ChatResult("final answer", "secret chain of thought",
-            "model", "stop", 1, 2, null));
+            MODEL, "stop", 1, 2, null));
         final Conversation conversation = new Conversation(provider, null);
-        conversation.ask("plain-model", null, "q1");
-        conversation.ask("plain-model", null, "q2");
+        conversation.ask(PLAIN_MODEL, null, "q1");
+        conversation.ask(PLAIN_MODEL, null, "q2");
         final List<String> second = rolesAndContent(provider.requests().get(1));
         assertTrue(second.contains("assistant|final answer"));
         for(final String entry : second) {
@@ -199,12 +210,12 @@ class ConversationTest {
 
     @Test
     void thinkingIsRequestedOnlyWhereTheProviderReportsTheCapability() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
         final Conversation conversation = new Conversation(provider, null);
         conversation.ask("thinking-model", null, "q1");
         assertEquals(Boolean.TRUE, provider.requests().get(0).getThink());
         provider.thinking(false);
-        conversation.ask("plain-model", null, "q2");
+        conversation.ask(PLAIN_MODEL, null, "q2");
         assertEquals(Boolean.FALSE, provider.requests().get(1).getThink());
     }
 
@@ -234,30 +245,30 @@ class ConversationTest {
 
     @Test
     void emptyPromptAndContextProduceNoSystemMessages() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
         final Conversation conversation = new Conversation(provider, "");
-        conversation.ask("plain-model", "", "just a question");
+        conversation.ask(PLAIN_MODEL, "", "just a question");
         assertEquals(List.of("user|just a question"),
             rolesAndContent(provider.requests().get(0)));
     }
 
     @Test
     void replyCarriesUsageStatisticsAfterTheAnswer() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
-        provider.script(new ChatResult("the answer", "model", "stop", 7, 12));
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
+        provider.script(new ChatResult(THE_ANSWER, MODEL, "stop", 7, 12));
         final Conversation conversation = new Conversation(provider, null);
-        final String reply = conversation.ask("plain-model", null, "q");
-        assertTrue(reply.startsWith("the answer"), reply);
-        final String tail = reply.substring("the answer".length());
+        final String reply = conversation.ask(PLAIN_MODEL, null, "q");
+        assertTrue(reply.startsWith(THE_ANSWER), reply);
+        final String tail = reply.substring(THE_ANSWER.length());
         assertTrue(Pattern.compile("\\R--- 7/12 tokens, \\d+ ms\\z").matcher(tail).find(), tail);
     }
 
     @Test
     void noteExchangeEntersTheMemoryOfTheNextRequest() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
         final Conversation conversation = new Conversation(provider, null);
         conversation.noteExchange("agent question", "agent answer");
-        conversation.ask("plain-model", null, "follow-up");
+        conversation.ask(PLAIN_MODEL, null, "follow-up");
         assertEquals(List.of(
             "user|agent question",
             "assistant|agent answer",
@@ -267,7 +278,7 @@ class ConversationTest {
 
     @Test
     void historyCapCompactsTheOldestMessages() {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
         final Conversation conversation = new Conversation(provider, null);
         for(int index = 0; index < 30; index++) {
             conversation.noteExchange("q" + index, "a" + index);
@@ -284,26 +295,26 @@ class ConversationTest {
 
     @Test
     void resetClearsTheMemory() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
         final Conversation conversation = new Conversation(provider, "prompt");
         conversation.noteExchange("q1", "a1");
         conversation.reset();
         assertTrue(conversation.snapshotHistory().isEmpty());
-        conversation.ask("plain-model", null, "q2");
+        conversation.ask(PLAIN_MODEL, null, "q2");
         // the system prompt is not part of the history: reset only forgets
         // the accumulated conversation, the instructions stay
-        assertEquals(List.of("system|prompt", "user|q2"),
+        assertEquals(List.of("system|prompt", USER_Q2),
             rolesAndContent(provider.requests().get(0)));
     }
 
     @Test
     void cancellationLatchTravelsInsideTheRequest() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
         final Conversation conversation = new Conversation(provider, null);
         final CancellationFlag latch = new CancellationFlag();
-        conversation.ask("plain-model", null, "q", chunk -> { }, chunk -> { }, latch);
+        conversation.ask(PLAIN_MODEL, null, "q", chunk -> { }, chunk -> { }, latch);
         assertSame(latch, provider.requests().get(0).getCancellation());
-        conversation.ask("plain-model", null, "q2");
+        conversation.ask(PLAIN_MODEL, null, "q2");
         // without an explicit latch the request carries its own fresh one,
         // so provider code can always poll a cancellation without a null check
         final CancellationFlag implicit = provider.requests().get(1).getCancellation();
@@ -312,77 +323,77 @@ class ConversationTest {
 
     @Test
     void streamedChunksFlowIntoBothConsumers() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
-        provider.script(new ChatResult("body", "thinking-text", "model", "stop", 1, 2, null));
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
+        provider.script(new ChatResult("body", "thinking-text", MODEL, "stop", 1, 2, null));
         final Conversation conversation = new Conversation(provider, null);
         final StringBuilder content = new StringBuilder();
         final StringBuilder thinking = new StringBuilder();
-        conversation.ask("plain-model", null, "q", content::append, thinking::append);
+        conversation.ask(PLAIN_MODEL, null, "q", content::append, thinking::append);
         assertEquals("body", content.toString());
         assertEquals("thinking-text", thinking.toString());
     }
 
     @Test
     void droppedAnswerKeepsTheQuestionAndItsTextInMemory() {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
         provider.scriptStream(List.of("first half", ", second half"),
             new LLMException("stream ended too early"));
         final Conversation conversation = new Conversation(provider, null);
-        assertThrows(LLMException.class, () -> conversation.ask("plain-model", null, "q1"));
+        assertThrows(LLMException.class, () -> conversation.ask(PLAIN_MODEL, null, "q1"));
         // the half an answer already reached the user through the delta feed,
         // so the memory must carry the question and the same text: losing
         // them makes the next turn forget what was already shown
-        assertEquals(List.of("user|q1", "assistant|first half, second half\n"
+        assertEquals(List.of(USER_Q1, "assistant|first half, second half\n"
             + "[the answer was cut short: stream ended too early]"),
             contents(conversation.snapshotHistory()));
     }
 
     @Test
     void droppedAnswerContextJoinsTheMemoryOfTheNextTurn() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
         provider.scriptStream(List.of("partial"), new LLMException("connection reset"));
         final Conversation conversation = new Conversation(provider, null);
-        assertThrows(LLMException.class, () -> conversation.ask("plain-model", "file B", "q1"));
-        conversation.ask("plain-model", "new context", "q2");
+        assertThrows(LLMException.class, () -> conversation.ask(PLAIN_MODEL, "file B", "q1"));
+        conversation.ask(PLAIN_MODEL, NEW_CONTEXT, "q2");
         // just like a successful turn, its workspace context message enters
         // the memory and is replayed before the recovered exchange
         assertEquals(List.of(
             "system|Workspace context:\nfile B",
-            "user|q1",
+            USER_Q1,
             "assistant|partial\n[the answer was cut short: connection reset]",
-            "system|Workspace context:\nnew context",
-            "user|q2"),
+            CONTEXT_NEW,
+            USER_Q2),
             rolesAndContent(provider.requests().get(1)));
     }
 
     @Test
     void endpointThatNeverAnsweredLeavesNoTraceInTheMemory() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
         provider.scriptStream(List.of(), new LLMException("cannot reach the runtime"));
         final Conversation conversation = new Conversation(provider, null);
-        assertThrows(LLMException.class, () -> conversation.ask("plain-model", "ctx", "q1"));
+        assertThrows(LLMException.class, () -> conversation.ask(PLAIN_MODEL, "ctx", "q1"));
         // nothing was produced for the user, so the next request replays an
         // empty memory: pretending a half-empty exchange happened would
         // steer the model through a question it never answered
         assertTrue(conversation.snapshotHistory().isEmpty());
-        conversation.ask("plain-model", "new context", "q2");
+        conversation.ask(PLAIN_MODEL, NEW_CONTEXT, "q2");
         assertEquals(List.of(
-            "system|Workspace context:\nnew context",
-            "user|q2"),
+            CONTEXT_NEW,
+            USER_Q2),
             rolesAndContent(provider.requests().get(1)));
     }
 
     @Test
     void truncationFromTheRuntimeReachesTheUiSide() throws LLMException {
-        final ScriptedProvider provider = new ScriptedProvider("base-model");
+        final ScriptedProvider provider = new ScriptedProvider(BASE_MODEL);
         final Conversation conversation = new Conversation(provider, null);
         // the runtime says the window ran out: the chat panel reads the flag
         // off the conversation after the call and says the answer is cut
-        provider.script(new ChatResult("half", "model", "length", 900, 40));
-        conversation.ask("plain-model", "ctx", "q1");
+        provider.script(new ChatResult("half", MODEL, "length", 900, 40));
+        conversation.ask(PLAIN_MODEL, "ctx", "q1");
         assertTrue(conversation.wasLastTurnTruncated());
-        provider.script(new ChatResult("whole", "model", "stop", 9, 4));
-        conversation.ask("plain-model", "ctx", "q2");
+        provider.script(new ChatResult("whole", MODEL, "stop", 9, 4));
+        conversation.ask(PLAIN_MODEL, "ctx", "q2");
         assertEquals(false, Boolean.valueOf(conversation.wasLastTurnTruncated()),
             "a normally finished turn clears the flag");
     }
