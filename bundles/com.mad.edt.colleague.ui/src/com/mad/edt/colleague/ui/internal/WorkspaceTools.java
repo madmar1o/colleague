@@ -515,7 +515,9 @@ public final class WorkspaceTools {
         }
     }
 
-    private static Path resolve(final String thePathText) throws IOException {
+    // shared by ReadFileTool and EditFileTool, so it stays package visible:
+    // S3398 only suggests moving methods with a single inner-class caller
+    static Path resolve(final String thePathText) throws IOException {
         if(thePathText == null || thePathText.isBlank()) {
             throw new IOException("path is required");
         }
