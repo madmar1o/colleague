@@ -15,6 +15,9 @@
 param(
   [string]$ProjectKey = "colleague-edt-ci",
   [string]$SonarHost = "http://127.0.0.1:9000",
+  # the scanner runs inside a container and cannot reach the host's loopback;
+  # by default its URL is resolved from the SonarQube container's bridge IP
+  [string]$ScannerContainer = "sonarqube",
   [string]$Token = $env:SONAR_TOKEN,
   [string]$TokenFile = "$env:USERPROFILE\.sonar\dsh-scan-token.txt",
   [string]$OutDir,
@@ -38,19 +41,26 @@ if (-not $Token) {
 $cred = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${Token}:"))
 $hdr = @{ Authorization = "Basic $cred" }
 
-function Wait-CeTask([string]$key, [int]$timeout) {
+function Wait-CeTask([string]$key, [int]$timeout, [string]$previousId) {
+  # right after upload the "current" task is still the PREVIOUS analysis, so
+  # first wait for a new task id to appear, then wait for that task itself
   $deadline = (Get-Date).AddSeconds($timeout)
+  $newTask = $null
   while ((Get-Date) -lt $deadline) {
     try {
       $task = (Invoke-RestMethod -Uri "$SonarHost/api/ce/component?component=$key" -Headers $hdr -TimeoutSec 30).current
     } catch {
       $task = $null
     }
-    if ($task -and $task.status) {
-      if ($task.status -eq "SUCCESS") { return }
-      if ($task.status -eq "FAILED" -or $task.status -eq "CANCELED") {
-        throw "SonarQube analysis $($task.status) for ${key}: $($task.errorMessage)"
-      }
+    if ($task -and $task.id -and $task.id -ne $previousId) { $newTask = $task; break }
+    Start-Sleep -Seconds 5
+  }
+  if (-not $newTask) { throw "SonarQube analysis of $key did not start in $timeout s" }
+  while ((Get-Date) -lt $deadline) {
+    $ce = (Invoke-RestMethod -Uri "$SonarHost/api/ce/task?id=$($newTask.id)" -Headers $hdr -TimeoutSec 30).task
+    if ($ce.status -eq "SUCCESS") { return }
+    if ($ce.status -eq "FAILED" -or $ce.status -eq "CANCELED") {
+      throw "SonarQube analysis $($ce.status) for ${key}: $($ce.errorMessage)"
     }
     Start-Sleep -Seconds 5
   }
@@ -74,9 +84,16 @@ if (-not $CollectOnly) {
   if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "docker is required for the scanner step"
   }
+  $scannerUrl = $SonarHost
+  if ($ScannerContainer) {
+    $sip = (& docker inspect -f "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" $ScannerContainer).Trim()
+    if (-not $sip) { throw "container $ScannerContainer not found for the scanner URL" }
+    $port = ([Uri]$SonarHost).Port
+    $scannerUrl = "http://${sip}:$port"
+  }
   $scanArgs = @(
     "run", "--rm",
-    "-e", "SONAR_HOST_URL=$SonarHost",
+    "-e", "SONAR_HOST_URL=$scannerUrl",
     "-e", "SONAR_TOKEN=$Token",
     "-v", "${repo}:/usr/src",
     "sonarsource/sonar-scanner-cli:5",
@@ -86,9 +103,13 @@ if (-not $CollectOnly) {
     "-Dsonar.scm.disabled=true"
   )
   foreach ($p in $ExtraProps) { $scanArgs += $p }
+  $prevTaskId = ""
+  try {
+    $prevTaskId = (Invoke-RestMethod -Uri "$SonarHost/api/ce/component?component=$ProjectKey" -Headers $hdr -TimeoutSec 30).current.id
+  } catch { }
   & docker @scanArgs
   if ($LASTEXITCODE -ne 0) { throw "sonar scanner exited with $LASTEXITCODE" }
-  Wait-CeTask $ProjectKey $TimeoutSec
+  Wait-CeTask $ProjectKey $TimeoutSec $prevTaskId
 }
 
 $issues = Get-Issues $ProjectKey
