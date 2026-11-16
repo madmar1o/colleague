@@ -9,8 +9,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
@@ -248,7 +248,7 @@ public final class ChatPanel {
      * the agent instructions.
      */
     private AgentMemory ourLessonMemory;
-    private Function<String, String> ourAutoContextSupplier;
+    private UnaryOperator<String> ourAutoContextSupplier;
     private final EscapeSequence ourEscGesture =
         new EscapeSequence(ESC_WINDOW_MS, ESC_DEDUP_MS);
     private String ourLastPalette = "";
@@ -464,7 +464,7 @@ public final class ChatPanel {
      *            for it when no context was attached manually; runs on a
      *            background thread
      */
-    public void setAutoContextSupplier(final Function<String, String> theSupplier) {
+    public void setAutoContextSupplier(final UnaryOperator<String> theSupplier) {
         ourAutoContextSupplier = theSupplier;
     }
 
@@ -1957,7 +1957,7 @@ public final class ChatPanel {
         }
     }
 
-    private static String applyOrEmpty(final Function<String, String> theFunction,
+    private static String applyOrEmpty(final UnaryOperator<String> theFunction,
         final String theArgument) {
         try {
             final String value = theFunction.apply(theArgument);

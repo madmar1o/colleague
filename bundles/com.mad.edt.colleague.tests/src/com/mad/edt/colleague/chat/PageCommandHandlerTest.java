@@ -6,7 +6,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 import org.junit.jupiter.api.Test;
 
@@ -107,7 +107,7 @@ class PageCommandHandlerTest {
     }
 
     /** page arguments as name-value pairs, missing name arrives as null */
-    private static Function<String, String> args(final Object... theNameValuePairs) {
+    private static UnaryOperator<String> args(final Object... theNameValuePairs) {
         final Map<String, String> values = new HashMap<>();
         for(int index = 0; index < theNameValuePairs.length; index += 2) {
             values.put((String)theNameValuePairs[index], (String)theNameValuePairs[index + 1]);
