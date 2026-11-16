@@ -31,6 +31,7 @@ import com.mad.edt.colleague.agent.AgentMode;
 import com.mad.edt.colleague.agent.ChatMode;
 import com.mad.edt.colleague.agent.IToolExecutor;
 import com.mad.edt.colleague.agent.MetadataTools;
+import com.mad.edt.colleague.agent.ToolExecutionException;
 import com.mad.edt.colleague.context.CodeSearch;
 import com.mad.edt.colleague.context.ConfigurationOverview;
 import com.mad.edt.colleague.edit.EditScript;
@@ -222,7 +223,15 @@ public final class WorkspaceTools {
         }
 
         @Override
-        public String execute(final String theArgumentsJson) throws Exception {
+        public String execute(final String theArgumentsJson) throws ToolExecutionException {
+            try {
+                return readWindow(theArgumentsJson);
+            } catch (final IOException ex) {
+                throw new ToolExecutionException("read_file failed: " + ex.getMessage(), ex);
+            }
+        }
+
+        private String readWindow(final String theArgumentsJson) throws IOException {
             final Path file = resolve(stringArg(theArgumentsJson, "path"));
             final int fromLine = intArg(theArgumentsJson, "fromLine", 1);
             final List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
@@ -262,7 +271,16 @@ public final class WorkspaceTools {
         }
 
         @Override
-        public String execute(final String theArgumentsJson) throws Exception {
+        public String execute(final String theArgumentsJson) throws ToolExecutionException {
+            try {
+                return writeNewFile(theArgumentsJson);
+            } catch (final IOException | CoreException ex) {
+                throw new ToolExecutionException("write_file failed: " + ex.getMessage(), ex);
+            }
+        }
+
+        private String writeNewFile(final String theArgumentsJson)
+            throws IOException, CoreException {
             if(AgentMode.current() != ChatMode.EXECUTE) {
                 return "ERROR: write_file is disabled outside the execute mode";
             }
@@ -328,7 +346,16 @@ public final class WorkspaceTools {
         }
 
         @Override
-        public String execute(final String theArgumentsJson) throws Exception {
+        public String execute(final String theArgumentsJson) throws ToolExecutionException {
+            try {
+                return applyEditScript(theArgumentsJson);
+            } catch (final IOException | CoreException ex) {
+                throw new ToolExecutionException("edit_file failed: " + ex.getMessage(), ex);
+            }
+        }
+
+        private String applyEditScript(final String theArgumentsJson)
+            throws IOException, CoreException {
             if(AgentMode.current() != ChatMode.EXECUTE) {
                 return "ERROR: edit_file is disabled outside the execute mode";
             }

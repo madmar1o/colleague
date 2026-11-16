@@ -33,7 +33,7 @@ public interface IToolExecutor {
      *
      * @param theArgumentsJson JSON object with arguments as emitted by the model
      * @return textual result fed back to the model
-     * @throws Exception any failure is converted to an error result message
+     * @throws ToolExecutionException any failure is converted to an error result message
      */
-    String execute(String theArgumentsJson) throws Exception;
+    String execute(String theArgumentsJson) throws ToolExecutionException;
 }

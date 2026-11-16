@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import com.mad.edt.colleague.agent.IToolExecutor;
+import com.mad.edt.colleague.agent.ToolExecutionException;
 
 /**
  * The one place the chat asks for remote tools, so every server shares a
@@ -27,9 +28,9 @@ public final class McpCatalog {
         /**
          * @param theConfig server to ask
          * @return the tools that server exposes
-         * @throws Exception when the server is unreachable or refuses
+         * @throws ToolExecutionException when the server is unreachable or refuses
          */
-        McpToolInfo[] discover(McpServerConfig theConfig) throws Exception;
+        McpToolInfo[] discover(McpServerConfig theConfig) throws ToolExecutionException;
     }
 
     /** Opens (or scripts) the call channel of one server. */

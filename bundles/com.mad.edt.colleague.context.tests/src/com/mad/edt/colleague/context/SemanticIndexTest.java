@@ -382,7 +382,8 @@ class SemanticIndexTest {
         assertNull(index.readyIndex(), index.getStatus());
     }
 
-    private static String sha256Hex(final byte[] theContent) throws Exception {
+    private static String sha256Hex(final byte[] theContent)
+        throws java.security.NoSuchAlgorithmException {
         final java.security.MessageDigest digest =
             java.security.MessageDigest.getInstance("SHA-256");
         final StringBuilder hex = new StringBuilder();

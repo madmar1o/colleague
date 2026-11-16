@@ -4,6 +4,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import com.mad.edt.colleague.agent.ToolExecutionException;
+
 /**
  * A name-keyed catalog that can be rebuilt from a source without losing
  * registration order, and can restore the previous snapshot when a rebuild
@@ -25,9 +27,9 @@ public final class ReloadableRegistry<V> {
          * @param thePrevious current catalog, never {@code null}, usable as
          *            the starting point of an incremental rebuild
          * @return the complete new catalog
-         * @throws Exception any load failure: the previous catalog stays live
+         * @throws ToolExecutionException any load failure: the previous catalog stays live
          */
-        Map<String, V> build(Map<String, V> thePrevious) throws Exception;
+        Map<String, V> build(Map<String, V> thePrevious) throws ToolExecutionException;
     }
 
     private Map<String, V> current = new LinkedHashMap<>();

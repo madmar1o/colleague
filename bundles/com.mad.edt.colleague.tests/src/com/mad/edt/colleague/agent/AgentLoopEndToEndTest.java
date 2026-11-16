@@ -168,9 +168,13 @@ class AgentLoopEndToEndTest {
         }
 
         @Override
-        public String execute(final String theArgumentsJson) throws IOException {
-            final JsonObject args = JsonParser.parseString(theArgumentsJson).getAsJsonObject();
-            return Files.readString(fileOf(args, "path"), StandardCharsets.UTF_8);
+        public String execute(final String theArgumentsJson) throws ToolExecutionException {
+            try {
+                final JsonObject args = JsonParser.parseString(theArgumentsJson).getAsJsonObject();
+                return Files.readString(fileOf(args, "path"), StandardCharsets.UTF_8);
+            } catch (final IOException ex) {
+                throw new ToolExecutionException("read failed", ex);
+            }
         }
     }
 
@@ -193,18 +197,22 @@ class AgentLoopEndToEndTest {
         }
 
         @Override
-        public String execute(final String theArgumentsJson) throws IOException {
-            final JsonObject args = JsonParser.parseString(theArgumentsJson).getAsJsonObject();
-            final Path file = fileOf(args, "path");
-            final String search = args.get("search").getAsString();
-            final String replace = args.get("replace").getAsString();
-            final String content = Files.readString(file, StandardCharsets.UTF_8);
-            if(!content.contains(search)) {
-                return "ERROR: '" + search + "' does not occur in the file";
+        public String execute(final String theArgumentsJson) throws ToolExecutionException {
+            try {
+                final JsonObject args = JsonParser.parseString(theArgumentsJson).getAsJsonObject();
+                final Path file = fileOf(args, "path");
+                final String search = args.get("search").getAsString();
+                final String replace = args.get("replace").getAsString();
+                final String content = Files.readString(file, StandardCharsets.UTF_8);
+                if(!content.contains(search)) {
+                    return "ERROR: '" + search + "' does not occur in the file";
+                }
+                final int occurrences = content.split(Pattern.quote(search), -1).length - 1;
+                Files.writeString(file, content.replace(search, replace), StandardCharsets.UTF_8);
+                return "replaced " + occurrences + " occurrence(s)";
+            } catch (final IOException ex) {
+                throw new ToolExecutionException("edit failed", ex);
             }
-            final int occurrences = content.split(Pattern.quote(search), -1).length - 1;
-            Files.writeString(file, content.replace(search, replace), StandardCharsets.UTF_8);
-            return "replaced " + occurrences + " occurrence(s)";
         }
     }
 
