@@ -100,7 +100,7 @@ class SemanticIndexTest {
         assertNull(index.readyIndex());
         final HybridContextSource hybrid = new HybridContextSource(
             new KeywordStub(KEYWORD_HIT), index::readyIndex);
-        assertEquals("File: m/y.bsl (line 1)\nkeyword hit\n\n", hybrid.gather("q"));
+        assertEquals(KEYWORD_HIT, hybrid.gather("q"));
         // the failed attempt touched no endpoint: the supplier said null
         assertEquals(0, embed.getCallCount());
         assertEquals(0, store.getCallCount());

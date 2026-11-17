@@ -34,6 +34,8 @@ import com.mad.edt.colleague.llm.GeneratorGate;
 class SemanticIndexEndpointTest {
 
     private static final String COLLECTION = "ws_endpoint";
+    private static final String SRC_A = "a.bsl";
+    private static final String LOCAL_11434 = "http://127.0.0.1:11434";
 
     private final ScriptedHttpTransport storeTransport = new ScriptedHttpTransport();
     private final ScriptedHttpTransport embedTransport = new ScriptedHttpTransport();
@@ -64,7 +66,7 @@ class SemanticIndexEndpointTest {
     @DisplayName("a held chat turn does not stall a pass whose embedding runtime is separate")
     void separatedEndpointsNeverWaitOnTheGate(@TempDir final Path theDir)
         throws IOException, IndexFailure {
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(SRC_A);
         Files.writeString(file, numberedFile(5), StandardCharsets.UTF_8);
         final GeneratorGate gate = new GeneratorGate();
         gate.enter();
@@ -77,7 +79,7 @@ class SemanticIndexEndpointTest {
         // the gate for quiet it would give up instantly, endpoints differ so
         // it must not ask at all
         final UpdateReport report = index(gate, 0, "http://chat.test:11434")
-            .update(List.of(new SourceFile(file, "a.bsl")));
+            .update(List.of(new SourceFile(file, SRC_A)));
         gate.leave();
 
         assertEquals(1, report.reembedded());
@@ -87,14 +89,14 @@ class SemanticIndexEndpointTest {
     @Test
     @DisplayName("a shared host:port keeps the gate even when the paths differ")
     void sameHostAndPortStillWaitsOnTheGate(@TempDir final Path theDir) throws IOException {
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(SRC_A);
         Files.writeString(file, numberedFile(5), StandardCharsets.UTF_8);
         final GeneratorGate gate = new GeneratorGate();
         gate.enter();
 
         final IndexFailure failure = assertThrows(IndexFailure.class,
             () -> index(gate, 60, "http://embed.test:11435/v2")
-                .update(List.of(new SourceFile(file, "a.bsl"))));
+                .update(List.of(new SourceFile(file, SRC_A))));
 
         assertTrue(failure.getMessage().contains("generator busy"), failure.getMessage());
         gate.leave();
@@ -104,18 +106,18 @@ class SemanticIndexEndpointTest {
     @DisplayName("endpoint match is judged by host:port, not by the whole URL")
     void hostAndPortMatchRules() {
         assertTrue(VectorIndex.sharesHostAndPort(
-            "http://127.0.0.1:11434", "http://127.0.0.1:11434/api/embed"),
+            LOCAL_11434, "http://127.0.0.1:11434/api/embed"),
             "same host and port with different paths is one server");
         assertTrue(VectorIndex.sharesHostAndPort(
-            "http://127.0.0.1:11434/", "http://127.0.0.1:11434"),
+            "http://127.0.0.1:11434/", LOCAL_11434),
             "trailing slashes and missing paths change nothing");
         assertFalse(VectorIndex.sharesHostAndPort(
-            "http://127.0.0.1:11435", "http://127.0.0.1:11434"),
+            "http://127.0.0.1:11435", LOCAL_11434),
             "the default endpoints are separated by port and must read as separate");
         assertFalse(VectorIndex.sharesHostAndPort(
             "http://gpu.local:11434", "http://cpu.local:11434"),
             "same port on different hosts are different generators");
-        assertFalse(VectorIndex.sharesHostAndPort("http://127.0.0.1:11434", ""),
+        assertFalse(VectorIndex.sharesHostAndPort(LOCAL_11434, ""),
             "an unknown chat endpoint is not a match");
     }
 }

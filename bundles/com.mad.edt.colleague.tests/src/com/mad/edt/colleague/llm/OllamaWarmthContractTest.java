@@ -18,9 +18,14 @@ import com.mad.edt.colleague.http.HttpCallSpec;
  */
 class OllamaWarmthContractTest {
 
+    // fixture endpoint, model name and JSON field repeated across the scenarios
+    private static final String RUNTIME_URL = "http://runtime.test";
+    private static final String TEST_MODEL = "test-model";
+    private static final String KEEP_ALIVE = "keep_alive";
+
     private static ProviderConfig local() {
         return ProviderConfig.builder("test", LLMProviderType.OLLAMA)
-            .baseUrl("http://runtime.test").readTimeoutMs(1_000).build();
+            .baseUrl(RUNTIME_URL).readTimeoutMs(1_000).build();
     }
 
     private static ProviderConfig gateway() {
@@ -38,31 +43,31 @@ class OllamaWarmthContractTest {
         final RecordingHttpTransport transport = RecordingHttpTransport.streaming(200,
             "{\"message\":{\"content\":\"ok\"},\"done\":true}");
         new OllamaLLMProvider(local(), transport).chatStream(
-            ChatRequest.builder("test-model").addMessage(ChatMessage.user("hi")).build(),
+            ChatRequest.builder(TEST_MODEL).addMessage(ChatMessage.user("hi")).build(),
             piece -> { }, piece -> { });
 
         final JsonObject body = bodyOf(transport.getOnlyCall());
         Assertions.assertEquals(ProviderConfig.DEFAULT_LOCAL_KEEP_ALIVE,
-            body.get("keep_alive").getAsString());
+            body.get(KEEP_ALIVE).getAsString());
     }
 
     @Test
     @DisplayName("an empty lifetime opts the residence claim out of both calls")
     void keepAliveCanBeTurnedOff() throws LLMException {
         final ProviderConfig plain = ProviderConfig.builder("test", LLMProviderType.OLLAMA)
-            .baseUrl("http://runtime.test").readTimeoutMs(1_000).keepAlive("").build();
+            .baseUrl(RUNTIME_URL).readTimeoutMs(1_000).keepAlive("").build();
         final RecordingHttpTransport chatTransport = RecordingHttpTransport.streaming(200,
             "{\"message\":{\"content\":\"ok\"},\"done\":true}");
         new OllamaLLMProvider(plain, chatTransport).chatStream(
-            ChatRequest.builder("test-model").addMessage(ChatMessage.user("hi")).build(),
+            ChatRequest.builder(TEST_MODEL).addMessage(ChatMessage.user("hi")).build(),
             piece -> { }, piece -> { });
         final RecordingHttpTransport warmTransport = RecordingHttpTransport
             .answering(HttpCallResult.ofBody(200, "{\"model\":\"test-model\",\"done\":true}"));
-        new OllamaLLMProvider(plain, warmTransport).warmModel("test-model");
+        new OllamaLLMProvider(plain, warmTransport).warmModel(TEST_MODEL);
 
-        Assertions.assertFalse(bodyOf(chatTransport.getOnlyCall()).has("keep_alive"),
+        Assertions.assertFalse(bodyOf(chatTransport.getOnlyCall()).has(KEEP_ALIVE),
             chatTransport.getOnlyCall().getJsonBody());
-        Assertions.assertFalse(bodyOf(warmTransport.getOnlyCall()).has("keep_alive"),
+        Assertions.assertFalse(bodyOf(warmTransport.getOnlyCall()).has(KEEP_ALIVE),
             warmTransport.getOnlyCall().getJsonBody());
     }
 
@@ -71,14 +76,14 @@ class OllamaWarmthContractTest {
     void warmupLoadsWithoutGenerating() throws LLMException {
         final RecordingHttpTransport transport = RecordingHttpTransport
             .answering(HttpCallResult.ofBody(200, "{\"model\":\"test-model\",\"done\":true}"));
-        new OllamaLLMProvider(local(), transport).warmModel("test-model");
+        new OllamaLLMProvider(local(), transport).warmModel(TEST_MODEL);
 
         final HttpCallSpec call = transport.getOnlyCall();
         Assertions.assertEquals("http://runtime.test/api/generate", call.getUrl());
         final JsonObject body = bodyOf(call);
-        Assertions.assertEquals("test-model", body.get("model").getAsString());
+        Assertions.assertEquals(TEST_MODEL, body.get("model").getAsString());
         Assertions.assertEquals(ProviderConfig.DEFAULT_LOCAL_KEEP_ALIVE,
-            body.get("keep_alive").getAsString());
+            body.get(KEEP_ALIVE).getAsString());
         Assertions.assertEquals(Boolean.FALSE, body.get("stream").getAsBoolean(),
             "warm-up must answer with one buffered JSON document");
         Assertions.assertFalse(body.has("prompt"),
@@ -107,7 +112,7 @@ class OllamaWarmthContractTest {
             .answering(HttpCallResult.ofBody(500, "model file missing"));
         final OllamaLLMProvider provider = new OllamaLLMProvider(local(), transport);
         final LLMException failure =
-            Assertions.assertThrows(LLMException.class, () -> provider.warmModel("test-model"));
+            Assertions.assertThrows(LLMException.class, () -> provider.warmModel(TEST_MODEL));
         Assertions.assertTrue(failure.getMessage().contains("HTTP 500"), failure.getMessage());
     }
 
@@ -121,21 +126,21 @@ class OllamaWarmthContractTest {
 
         Assertions.assertEquals(180_000,
             ProviderConfig.builder("t", LLMProviderType.OLLAMA)
-                .baseUrl("http://runtime.test").keepAlive("3m").build()
+                .baseUrl(RUNTIME_URL).keepAlive("3m").build()
                 .keepAliveLifetimeMs());
         Assertions.assertEquals(900_000,
             ProviderConfig.builder("t", LLMProviderType.OLLAMA)
-                .baseUrl("http://runtime.test").keepAlive("15m").build()
+                .baseUrl(RUNTIME_URL).keepAlive("15m").build()
                 .keepAliveLifetimeMs());
 
         // nothing to renew: gateway, opted-out, forever or unparseable claims
         Assertions.assertEquals(-1, gateway().keepAliveLifetimeMs());
         Assertions.assertEquals(-1, gateway().warmRenewalDelayMs());
         Assertions.assertEquals(-1, ProviderConfig.builder("t", LLMProviderType.OLLAMA)
-            .baseUrl("http://runtime.test").keepAlive("").build().keepAliveLifetimeMs());
+            .baseUrl(RUNTIME_URL).keepAlive("").build().keepAliveLifetimeMs());
         Assertions.assertEquals(-1, ProviderConfig.builder("t", LLMProviderType.OLLAMA)
-            .baseUrl("http://runtime.test").keepAlive("-1").build().keepAliveLifetimeMs());
+            .baseUrl(RUNTIME_URL).keepAlive("-1").build().keepAliveLifetimeMs());
         Assertions.assertEquals(-1, ProviderConfig.builder("t", LLMProviderType.OLLAMA)
-            .baseUrl("http://runtime.test").keepAlive("soon").build().keepAliveLifetimeMs());
+            .baseUrl(RUNTIME_URL).keepAlive("soon").build().keepAliveLifetimeMs());
     }
 }

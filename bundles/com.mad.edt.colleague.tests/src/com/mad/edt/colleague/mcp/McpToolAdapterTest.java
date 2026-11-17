@@ -19,6 +19,12 @@ import com.mad.edt.colleague.agent.IToolExecutor;
  */
 class McpToolAdapterTest {
 
+    // fixture names: the prefixed adapter name, its remote tool, the other
+    // remote tool and the built-in tool name it collides with
+    private static final String ADAPTER_NAME = "mcp_qdb_query";
+    private static final String DROP_ROW = "drop_row";
+    private static final String READ_FILE = "read_file";
+
     /** scripted bridge standing in for a live client */
     private static final class FakeBridge implements ToolBridge {
 
@@ -48,8 +54,8 @@ class McpToolAdapterTest {
         final McpToolAdapter adapter = new McpToolAdapter("qdb", bridge,
             tool("query", true), name -> name);
 
-        Assertions.assertEquals("mcp_qdb_query", adapter.getName());
-        Assertions.assertEquals("mcp_qdb_query", adapter.getSpec().getName(),
+        Assertions.assertEquals(ADAPTER_NAME, adapter.getName());
+        Assertions.assertEquals(ADAPTER_NAME, adapter.getSpec().getName(),
             "the spec name must match the executor name or the loop cannot dispatch");
         Assertions.assertTrue(adapter.isParallelSafe(),
             "a readOnlyHint tool may run side by side like a reader");
@@ -65,7 +71,7 @@ class McpToolAdapterTest {
         final FakeBridge bridge = new FakeBridge();
         final List<String> asked = new ArrayList<>();
         final McpToolAdapter adapter = new McpToolAdapter("qdb", bridge,
-            tool("drop_row", false), question -> {
+            tool(DROP_ROW, false), question -> {
                 asked.add(question);
                 return "denied";
             });
@@ -75,7 +81,7 @@ class McpToolAdapterTest {
         final String result = adapter.execute("{\"row\":\"42\"}");
         Assertions.assertTrue(result.startsWith("ERROR"), result);
         Assertions.assertEquals(1, asked.size());
-        Assertions.assertTrue(asked.get(0).contains("drop_row"), asked.toString());
+        Assertions.assertTrue(asked.get(0).contains(DROP_ROW), asked.toString());
         Assertions.assertTrue(bridge.called.isEmpty(),
             "a denied confirmation must not reach the server at all");
     }
@@ -85,7 +91,7 @@ class McpToolAdapterTest {
     void confirmedWriteToolRuns() {
         final FakeBridge bridge = new FakeBridge();
         final McpToolAdapter adapter = new McpToolAdapter("qdb", bridge,
-            tool("drop_row", false), question -> "yes");
+            tool(DROP_ROW, false), question -> "yes");
 
         Assertions.assertEquals("remote said ok", adapter.execute("{}"));
         Assertions.assertEquals(List.of("drop_row|{}"), bridge.called);
@@ -98,20 +104,20 @@ class McpToolAdapterTest {
         final McpServerConfig config = new McpServerConfig("qdb", null, "http://localhost", true);
         final McpCatalog catalog = new McpCatalog(
             unusedConfig -> new McpToolInfo[] {
-                new McpToolInfo("read_file", "collides with the built-in", new JsonObject(), true),
+                new McpToolInfo(READ_FILE, "collides with the built-in", new JsonObject(), true),
                 new McpToolInfo("query", "unique name", new JsonObject(), true),
             },
             unusedConfig -> bridge,
             () -> List.of(config));
 
         final List<IToolExecutor> tools = catalog.tools(
-            Set.of("read_file"), question -> "yes");
+            Set.of(READ_FILE), question -> "yes");
         final List<String> names = tools.stream().map(IToolExecutor::getName).toList();
 
-        Assertions.assertTrue(names.contains("mcp_qdb_query"), names.toString());
+        Assertions.assertTrue(names.contains(ADAPTER_NAME), names.toString());
         Assertions.assertFalse(names.contains("mcp_qdb_read_file"),
             "a colliding remote name must not be offered: " + names);
-        Assertions.assertFalse(names.contains("read_file"),
+        Assertions.assertFalse(names.contains(READ_FILE),
             "the catalog contributes no bare names: " + names);
     }
 

@@ -15,6 +15,9 @@ import org.junit.jupiter.api.Test;
  */
 class ProviderStoreLastUsedTest {
 
+    private static final String SRATA = "srata";
+    private static final String GEMMA = "gemma4:e4b";
+
     /** @return the preferences node the store writes into */
     private static org.osgi.service.prefs.Preferences node() {
         return org.eclipse.core.runtime.preferences.InstanceScope.INSTANCE
@@ -27,10 +30,10 @@ class ProviderStoreLastUsedTest {
      */
     @Test
     void rememberLastUsedWritesReadablePair() {
-        ProviderStore.rememberLastUsed("srata", "gemma4:e4b");
-        assertEquals("srata", ProviderStore.lastUsedProvider());
-        assertEquals("gemma4:e4b", ProviderStore.lastUsedModel());
-        assertEquals("srata\u0000gemma4:e4b", node().get("last-used", ""));
+        ProviderStore.rememberLastUsed(SRATA, GEMMA);
+        assertEquals(SRATA, ProviderStore.lastUsedProvider());
+        assertEquals(GEMMA, ProviderStore.lastUsedModel());
+        assertEquals(SRATA + "\u0000" + GEMMA, node().get("last-used", ""));
     }
 
     /**
@@ -39,11 +42,11 @@ class ProviderStoreLastUsedTest {
      */
     @Test
     void blankInputIsIgnored() {
-        ProviderStore.rememberLastUsed("srata", "gemma4:e4b");
-        ProviderStore.rememberLastUsed("", "gemma4:e4b");
-        assertEquals("srata", ProviderStore.lastUsedProvider());
-        ProviderStore.rememberLastUsed("srata", "");
-        assertEquals("gemma4:e4b", ProviderStore.lastUsedModel());
+        ProviderStore.rememberLastUsed(SRATA, GEMMA);
+        ProviderStore.rememberLastUsed("", GEMMA);
+        assertEquals(SRATA, ProviderStore.lastUsedProvider());
+        ProviderStore.rememberLastUsed(SRATA, "");
+        assertEquals(GEMMA, ProviderStore.lastUsedModel());
     }
 
     /**
@@ -52,9 +55,9 @@ class ProviderStoreLastUsedTest {
      */
     @Test
     void separatorInValueIsIgnored() {
-        ProviderStore.rememberLastUsed("srata", "gemma4:e4b");
-        ProviderStore.rememberLastUsed("bad\u0000open", "gemma4:e4b");
-        assertEquals("srata", ProviderStore.lastUsedProvider());
+        ProviderStore.rememberLastUsed(SRATA, GEMMA);
+        ProviderStore.rememberLastUsed("bad\u0000open", GEMMA);
+        assertEquals(SRATA, ProviderStore.lastUsedProvider());
     }
 
     /**

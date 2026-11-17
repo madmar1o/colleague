@@ -40,6 +40,7 @@ class MetadataToolsTest {
     private static final String TYPE_NUMBER = "Number";
     /** the currency catalog the read tests lean on */
     private static final String CURRENCIES = "Валюты";
+    private static final String CURRENCY_PRESENTATION = "Валюта";
     /** the tabular section of the questionnaire fixture */
     private static final String TOWNS = "Товары";
 
@@ -53,12 +54,12 @@ class MetadataToolsTest {
     void buildFixture() throws java.io.IOException {
         ourSrc = ourDir.resolve("Demo").resolve("src");
         write("Catalogs/" + CURRENCIES + "/" + CURRENCIES + ".mdo",
-            catalog(CURRENCIES, "Валюта", "Currencies",
+            catalog(CURRENCIES, CURRENCY_PRESENTATION, "Currencies",
                 attribute("Код", TYPE_STRING, "9"), attribute("Наименование", TYPE_STRING, "150")));
         write(BANK_FILE, catalog("Банк", "Банк", "Bank"));
         write("Catalogs/Банки/Банки.mdo", catalog("Банки", "Банк", "Banks"));
         write("InformationRegisters/КурсыВалют/КурсыВалют.mdo", register("КурсыВалют",
-            "Курсы валют", "Exchange rates", dimension("Валюта", "CatalogRef.Валюты"),
+            "Курсы валют", "Exchange rates", dimension(CURRENCY_PRESENTATION, "CatalogRef.Валюты"),
             resource("Курс", TYPE_NUMBER, "15", "4"), resource("Кратность", TYPE_NUMBER, "10", "0")));
         write(ANKETA_FILE, document("Анкета", "Анкета", "Questionnaire",
             attribute("Организация", "CatalogRef.Организации"),
@@ -104,7 +105,7 @@ class MetadataToolsTest {
 
         assertTrue(found.contains("Catalog"), "kind of the object: " + found);
         assertTrue(found.contains("Demo/src/Catalogs/Валюты/Валюты.mdo"), found);
-        assertTrue(found.contains("Валюта"), "russian presentation: " + found);
+        assertTrue(found.contains(CURRENCY_PRESENTATION), "russian presentation: " + found);
     }
 
     @Test
@@ -170,7 +171,7 @@ class MetadataToolsTest {
             .execute("{\"name\":\"КурсыВалют\",\"kind\":\"InformationRegister\"}");
 
         assertTrue(read.contains("Dimensions (1)"), read);
-        assertTrue(read.contains("Валюта"), read);
+        assertTrue(read.contains(CURRENCY_PRESENTATION), read);
         assertTrue(read.contains("CatalogRef.Валюты"), read);
         assertTrue(read.contains("Resources (2)"), read);
         assertTrue(read.contains("Курс"), read);

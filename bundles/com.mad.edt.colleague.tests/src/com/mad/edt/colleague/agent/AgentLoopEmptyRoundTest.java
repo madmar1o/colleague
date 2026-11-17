@@ -25,6 +25,8 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 class AgentLoopEmptyRoundTest {
 
+    private static final String READ_FILE = "read_file";
+
     /**
      * Serves the scripted rounds and records every request it received.
      */
@@ -76,12 +78,12 @@ class AgentLoopEmptyRoundTest {
 
         @Override
         public String getName() {
-            return "read_file";
+            return READ_FILE;
         }
 
         @Override
         public ToolSpec getSpec() {
-            return new ToolSpec("read_file", "reads a file", null);
+            return new ToolSpec(READ_FILE, "reads a file", null);
         }
 
         @Override
@@ -100,7 +102,7 @@ class AgentLoopEmptyRoundTest {
 
     private static ChatResult toolRound() {
         return new ChatResult("", null, "stub", "tool_calls", 1, 1,
-            List.of(new ToolCall("t1", "read_file", "{}")));
+            List.of(new ToolCall("t1", READ_FILE, "{}")));
     }
 
     @Test

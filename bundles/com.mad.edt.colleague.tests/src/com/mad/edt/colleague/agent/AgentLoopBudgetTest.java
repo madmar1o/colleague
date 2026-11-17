@@ -26,6 +26,8 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 class AgentLoopBudgetTest {
 
+    private static final String READ_FILE = "read_file";
+
     /** serves the scripted rounds, repeating the last one, and records requests */
     private static final class ScriptedProvider implements ILLMProvider {
 
@@ -75,12 +77,12 @@ class AgentLoopBudgetTest {
 
         @Override
         public String getName() {
-            return "read_file";
+            return READ_FILE;
         }
 
         @Override
         public ToolSpec getSpec() {
-            return new ToolSpec("read_file", "reads a file", null);
+            return new ToolSpec(READ_FILE, "reads a file", null);
         }
 
         @Override
@@ -91,7 +93,7 @@ class AgentLoopBudgetTest {
 
     private static ChatResult toolRound() {
         return new ChatResult("", null, "stub", "tool_calls", 1, 1,
-            List.of(new ToolCall("t1", "read_file", "{}")));
+            List.of(new ToolCall("t1", READ_FILE, "{}")));
     }
 
     private static ChatResult textRound(final String theText) {

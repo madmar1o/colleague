@@ -27,6 +27,9 @@ import com.mad.edt.colleague.llm.ProviderConfig;
  */
 class ConversationCompactByTokensTest {
 
+    private static final String MODEL = "test-model";
+    private static final String ANSWER = "answer";
+
     /** window the local provider is asked to keep ready by default */
     private static final int WINDOW_TOKENS = ProviderConfig.DEFAULT_LOCAL_CONTEXT_TOKENS;
 
@@ -38,7 +41,7 @@ class ConversationCompactByTokensTest {
 
         private final ProviderConfig myConfig = ProviderConfig.builder("test", LLMProviderType.OLLAMA)
             .baseUrl("http://runtime.test")
-            .defaultModel("test-model")
+            .defaultModel(MODEL)
             .build();
         private final List<ChatRequest> myRequests = new ArrayList<>();
 
@@ -59,15 +62,15 @@ class ConversationCompactByTokensTest {
         @Override
         public ChatResult chat(final ChatRequest theRequest) {
             myRequests.add(theRequest);
-            return new ChatResult("answer", "test-model", "stop", 1, 1);
+            return new ChatResult(ANSWER, MODEL, "stop", 1, 1);
         }
 
         @Override
         public ChatResult chatStream(final ChatRequest theRequest,
             final Consumer<String> theOnContent, final Consumer<String> theOnThinking) {
             myRequests.add(theRequest);
-            theOnContent.accept("answer");
-            return new ChatResult("answer", "test-model", "stop", 1, 1);
+            theOnContent.accept(ANSWER);
+            return new ChatResult(ANSWER, MODEL, "stop", 1, 1);
         }
 
         @Override
@@ -114,7 +117,7 @@ class ConversationCompactByTokensTest {
         // compaction below can only come from the token estimate
         assertEquals(38, conversation.snapshotHistory().size());
 
-        conversation.ask("test-model", null, "final question");
+        conversation.ask(MODEL, null, "final question");
 
         final List<ChatMessage> sent = provider.requests().get(0).getMessages();
         // the request keeps the assistant instructions first and replays the
@@ -146,7 +149,7 @@ class ConversationCompactByTokensTest {
             conversation.noteExchange("question " + index, "answer " + index);
         }
 
-        conversation.ask("test-model", null, "final question");
+        conversation.ask(MODEL, null, "final question");
 
         final List<ChatMessage> sent = provider.requests().get(0).getMessages();
         // system prompt + five exchanges + the fresh question, nothing folded

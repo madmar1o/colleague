@@ -18,6 +18,8 @@ import com.mad.edt.colleague.http.TransportFailure;
  */
 class ProviderFailureContractTest {
 
+    private static final String FIRST = "first";
+
     private static ProviderConfig config() {
         return ProviderConfig.builder("test", LLMProviderType.OLLAMA)
             .baseUrl("http://runtime.test")
@@ -90,13 +92,13 @@ class ProviderFailureContractTest {
 
         final ChatResult result = provider.chatStream(request(flag), piece -> {
             contentFrames.add(piece);
-            if("first".equals(piece)) {
+            if(FIRST.equals(piece)) {
                 flag.cancel();
             }
         }, piece -> { });
 
-        Assertions.assertEquals(List.of("first"), contentFrames);
-        Assertions.assertEquals("first", result.getContent());
+        Assertions.assertEquals(List.of(FIRST), contentFrames);
+        Assertions.assertEquals(FIRST, result.getContent());
         Assertions.assertTrue(transport.isStreamClosed(),
             "stopping a turn must release the connection");
     }

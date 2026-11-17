@@ -24,6 +24,8 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 class AgentLoopObservabilityTest {
 
+    private static final String READ_FILE = "read_file";
+
     /**
      * Round-trips the scripted list on each call.
      */
@@ -75,12 +77,12 @@ class AgentLoopObservabilityTest {
 
         @Override
         public String getName() {
-            return "read_file";
+            return READ_FILE;
         }
 
         @Override
         public ToolSpec getSpec() {
-            return new ToolSpec("read_file", "reads a file", null);
+            return new ToolSpec(READ_FILE, "reads a file", null);
         }
 
         @Override
@@ -122,7 +124,7 @@ class AgentLoopObservabilityTest {
     @DisplayName("a tool round then a final answer leaves a complete trace")
     void toolRunLeavesTrace() throws Exception {
         final ScriptedProvider provider = new ScriptedProvider(List.of(
-            toolRound("t1", "read_file", "{\"path\":\"a.txt\"}"),
+            toolRound("t1", READ_FILE, "{\"path\":\"a.txt\"}"),
             finalRound("all done")));
         final RecordingObserver observer = new RecordingObserver();
         final AgentAnswer answer = new AgentLoop(provider, List.of(new StubTool()), "stub", 5,
@@ -154,7 +156,7 @@ class AgentLoopObservabilityTest {
     @Test
     @DisplayName("the exhausted budget is visible round by round, then closes with a summary round")
     void exhaustedBudgetStillReportsRounds() throws Exception {
-        final ChatResult looping = toolRound("t1", "read_file", "{}");
+        final ChatResult looping = toolRound("t1", READ_FILE, "{}");
         final ScriptedProvider provider = new ScriptedProvider(List.of(looping, looping, looping,
             finalRound("closed: three reads done, task still open")));
         final RecordingObserver observer = new RecordingObserver();

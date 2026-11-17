@@ -32,6 +32,12 @@ class AgentLoopParallelExecutionTest {
     /** Barrier budget of one tool; the test serial path must hit it fast. */
     private static final long BARRIER_MS = 300L;
 
+    // fixture tool names and the overlap marker repeated across the scenarios
+    private static final String OVERLAPPED = "overlapped";
+    private static final String WRITE_FILE = "write_file";
+    private static final String SEARCH_CODE = "search_code";
+    private static final String LIST_FILES = "list_files";
+
     /**
      * Serves the scripted list on each call and records requests.
      */
@@ -118,7 +124,7 @@ class AgentLoopParallelExecutionTest {
         @Override
         public String execute(final String theArgumentsJson) throws ToolExecutionException {
             if(waiting.incrementAndGet() >= 2) {
-                return "overlapped";
+                return OVERLAPPED;
             }
             final long deadline = System.currentTimeMillis() + BARRIER_MS;
             try {
@@ -130,7 +136,7 @@ class AgentLoopParallelExecutionTest {
                 throw new ToolExecutionException("interrupted while waiting for a peer", ex);
             }
             if(waiting.get() >= 2) {
-                return "overlapped";
+                return OVERLAPPED;
             }
             // leaving without a peer must not let a later call count this
             // departed waiter as its overlap partner
@@ -147,12 +153,12 @@ class AgentLoopParallelExecutionTest {
 
         @Override
         public String getName() {
-            return "write_file";
+            return WRITE_FILE;
         }
 
         @Override
         public ToolSpec getSpec() {
-            return new ToolSpec("write_file", "writes", null);
+            return new ToolSpec(WRITE_FILE, "writes", null);
         }
 
         @Override
@@ -177,17 +183,17 @@ class AgentLoopParallelExecutionTest {
     @DisplayName("two parallel-safe calls in one round actually overlap")
     void parallelSafeCallsOverlap() throws Exception {
         final AtomicInteger barrier = new AtomicInteger();
-        final BarrierTool first = new BarrierTool("search_code", true, barrier);
-        final BarrierTool second = new BarrierTool("list_files", true, barrier);
+        final BarrierTool first = new BarrierTool(SEARCH_CODE, true, barrier);
+        final BarrierTool second = new BarrierTool(LIST_FILES, true, barrier);
         final ScriptedProvider provider = new ScriptedProvider(
-            toolRound(call("t1", "search_code"), call("t2", "list_files")),
+            toolRound(call("t1", SEARCH_CODE), call("t2", LIST_FILES)),
             finalRound("done"));
         final AgentAnswer answer = new AgentLoop(provider, List.of(first, second), "stub", 5,
             new CancellationFlag()).run("sys", "task");
 
         Assertions.assertEquals("done", answer.getText());
         final List<String> results = toolResultsOf(provider.seen.get(1));
-        Assertions.assertEquals(List.of("overlapped", "overlapped"), results,
+        Assertions.assertEquals(List.of(OVERLAPPED, OVERLAPPED), results,
             "each read-only call must have found a live peer, not waited alone");
     }
 
@@ -196,7 +202,7 @@ class AgentLoopParallelExecutionTest {
     void writeCapableRoundStaysSerial() throws Exception {
         final BarrierTool safeTool = new BarrierTool("read_file", true);
         final ScriptedProvider provider = new ScriptedProvider(
-            toolRound(call("t1", "read_file"), call("t2", "write_file")),
+            toolRound(call("t1", "read_file"), call("t2", WRITE_FILE)),
             finalRound("done"));
         new AgentLoop(provider, List.of(safeTool, new UnsafeTool()), "stub", 5,
             new CancellationFlag()).run("sys", "task");
@@ -210,7 +216,7 @@ class AgentLoopParallelExecutionTest {
     @DisplayName("parallel results still feed back in call order")
     void parallelResultsFeedBackInCallOrder() throws Exception {
         final AtomicInteger barrier = new AtomicInteger();
-        final BarrierTool slow = new BarrierTool("search_code", true, barrier) {
+        final BarrierTool slow = new BarrierTool(SEARCH_CODE, true, barrier) {
 
             @Override
             public String execute(final String theArgumentsJson) throws ToolExecutionException {
@@ -223,9 +229,9 @@ class AgentLoopParallelExecutionTest {
                 return super.execute(theArgumentsJson);
             }
         };
-        final BarrierTool fast = new BarrierTool("list_files", true, barrier);
+        final BarrierTool fast = new BarrierTool(LIST_FILES, true, barrier);
         final ScriptedProvider provider = new ScriptedProvider(
-            toolRound(call("c1", "search_code"), call("c2", "list_files")),
+            toolRound(call("c1", SEARCH_CODE), call("c2", LIST_FILES)),
             finalRound("done"));
         new AgentLoop(provider, List.of(slow, fast), "stub", 5,
             new CancellationFlag()).run("sys", "task");
@@ -241,7 +247,7 @@ class AgentLoopParallelExecutionTest {
         }
         Assertions.assertEquals(List.of("c1", "c2"), ids,
             "the conversation must list tool results in the order the model asked for them");
-        Assertions.assertEquals(List.of("overlapped", "overlapped"), results);
+        Assertions.assertEquals(List.of(OVERLAPPED, OVERLAPPED), results);
     }
 
     /**

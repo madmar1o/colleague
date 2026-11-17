@@ -15,27 +15,30 @@ import com.google.gson.JsonObject;
  */
 class ContactsPageContactPickTest {
 
+    private static final String SRATA = "srata";
+    private static final String QWEN = "qwen3.8-flash";
+
     @Test
     @DisplayName("a complete chip tap becomes a contact on that provider and model")
     void completeTapBecomesContact() {
         final JsonObject args = new JsonObject();
-        args.addProperty("id", "srata");
-        args.addProperty("model", "qwen3.8-flash");
+        args.addProperty("id", SRATA);
+        args.addProperty("model", QWEN);
 
         final ContactsPanel.Contact contact = ContactsPanel.contactFromArgs(args);
 
         Assertions.assertNotNull(contact);
-        Assertions.assertEquals("srata", contact.getProviderId());
-        Assertions.assertEquals("qwen3.8-flash", contact.getModel());
+        Assertions.assertEquals(SRATA, contact.getProviderId());
+        Assertions.assertEquals(QWEN, contact.getModel());
         Assertions.assertEquals("", contact.getAgentName());
-        Assertions.assertEquals("qwen3.8-flash", contact.getDisplayName());
+        Assertions.assertEquals(QWEN, contact.getDisplayName());
     }
 
     @Test
     @DisplayName("a call naming no model is rejected")
     void missingModelIsRejected() {
         final JsonObject args = new JsonObject();
-        args.addProperty("id", "srata");
+        args.addProperty("id", SRATA);
 
         Assertions.assertNull(ContactsPanel.contactFromArgs(args));
     }
@@ -44,7 +47,7 @@ class ContactsPageContactPickTest {
     @DisplayName("a call naming no provider is rejected")
     void missingProviderIsRejected() {
         final JsonObject args = new JsonObject();
-        args.addProperty("model", "qwen3.8-flash");
+        args.addProperty("model", QWEN);
 
         Assertions.assertNull(ContactsPanel.contactFromArgs(args));
     }

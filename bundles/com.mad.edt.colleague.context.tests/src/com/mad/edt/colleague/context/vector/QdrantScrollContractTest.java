@@ -22,6 +22,7 @@ import com.mad.edt.colleague.context.vector.QdrantClient.QdrantException;
 class QdrantScrollContractTest {
 
     private static final String COLLECTION = "ws_test";
+    private static final String STORE_URL = "http://store.test:6333";
 
     @Test
     void scrollWalksEveryPageViaTheStoresOwnOffsetCursor() throws QdrantException {
@@ -34,7 +35,7 @@ class QdrantScrollContractTest {
                 + "\"next_page_offset\":\"2\"}}")
             .answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"c.bsl\","
                 + "\"hash\":\"h3\"}}],\"next_page_offset\":null}}");
-        final List<JsonObject> payloads = new QdrantClient("http://store.test:6333", 1000, store)
+        final List<JsonObject> payloads = new QdrantClient(STORE_URL, 1000, store)
             .scrollPayloads(COLLECTION, List.of("path", "hash"));
 
         assertEquals(3, payloads.size());
@@ -51,7 +52,7 @@ class QdrantScrollContractTest {
                 + "\"hash\":\"h1\"}}],\"next_page_offset\":\"10\"}}")
             .answer(200, "{\"result\":{\"points\":[{\"payload\":{\"path\":\"b.bsl\","
                 + "\"hash\":\"h2\"}}],\"next_page_offset\":null}}");
-        final List<JsonObject> payloads = new QdrantClient("http://store.test:6333", 1000, store)
+        final List<JsonObject> payloads = new QdrantClient(STORE_URL, 1000, store)
             .scrollPayloads(COLLECTION, List.of("path", "hash"));
 
         assertEquals(2, payloads.size());
@@ -74,7 +75,7 @@ class QdrantScrollContractTest {
         final ScriptedHttpTransport store = new ScriptedHttpTransport()
             .answer(500, "{\"status\":{\"error\":\"boom\"}}");
         assertThrows(QdrantException.class,
-            () -> new QdrantClient("http://store.test:6333", 1000, store)
+            () -> new QdrantClient(STORE_URL, 1000, store)
                 .scrollPayloads(COLLECTION, List.of("path", "hash")));
     }
 }

@@ -18,6 +18,7 @@ import com.mad.edt.colleague.http.HttpCallSpec;
 class QdrantCollectionContractTest {
 
     private static final String COLLECTION = "chunks";
+    private static final String STORE = "http://store.test";
 
     private static JsonObject describeWithVectorSize(final int theSize) {
         final JsonObject vectors = new JsonObject();
@@ -42,17 +43,17 @@ class QdrantCollectionContractTest {
             .answer(200, "{\"status\":\"ok\",\"time\":0}")
             .answer(200, describeWithVectorSize(64).toString());
 
-        new QdrantClient("http://store.test", 1_000, transport)
+        new QdrantClient(STORE, 1_000, transport)
             .ensureCollection(COLLECTION, 64);
 
         Assertions.assertEquals(3, transport.getCallCount());
         final HttpCallSpec probe = transport.callAt(0);
         Assertions.assertEquals("GET", probe.getMethod());
-        Assertions.assertEquals("http://store.test/collections/" + COLLECTION, probe.getUrl());
+        Assertions.assertEquals(STORE + "/collections/" + COLLECTION, probe.getUrl());
 
         final HttpCallSpec create = transport.callAt(1);
         Assertions.assertEquals("PUT", create.getMethod());
-        Assertions.assertEquals("http://store.test/collections/" + COLLECTION, create.getUrl());
+        Assertions.assertEquals(STORE + "/collections/" + COLLECTION, create.getUrl());
         Assertions.assertEquals(
             JsonParser.parseString("{\"vectors\":{\"size\":64,\"distance\":\"Cosine\"}}")
                 .getAsJsonObject(),
@@ -68,7 +69,7 @@ class QdrantCollectionContractTest {
             .answer(200, describeWithVectorSize(64).toString())
             .answer(200, describeWithVectorSize(64).toString());
 
-        new QdrantClient("http://store.test", 1_000, transport)
+        new QdrantClient(STORE, 1_000, transport)
             .ensureCollection(COLLECTION, 64);
 
         for(final HttpCallSpec call : transport.getCalls()) {
@@ -86,7 +87,7 @@ class QdrantCollectionContractTest {
 
         final QdrantClient.QdrantException failure =
             Assertions.assertThrows(QdrantClient.QdrantException.class,
-                () -> new QdrantClient("http://store.test", 1_000, transport)
+                () -> new QdrantClient(STORE, 1_000, transport)
                     .ensureCollection(COLLECTION, 64));
         Assertions.assertTrue(failure.getMessage().contains("384"), failure.getMessage());
         Assertions.assertTrue(failure.getMessage().contains("64"), failure.getMessage());
@@ -102,7 +103,7 @@ class QdrantCollectionContractTest {
 
         final QdrantClient.QdrantException failure =
             Assertions.assertThrows(QdrantClient.QdrantException.class,
-                () -> new QdrantClient("http://store.test", 1_000, transport)
+                () -> new QdrantClient(STORE, 1_000, transport)
                     .ensureCollection(COLLECTION, 64));
         Assertions.assertTrue(failure.getMessage().contains("without vector configuration"),
             failure.getMessage());

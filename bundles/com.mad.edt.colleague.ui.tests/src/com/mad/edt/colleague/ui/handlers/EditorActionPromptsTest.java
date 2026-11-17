@@ -15,6 +15,8 @@ import org.junit.jupiter.api.Test;
  */
 class EditorActionPromptsTest {
 
+    private static final String READ_ONLY_MARK = "[read-only";
+
     private ExplainSelectionHandler explainHandler;
     private GenerateMethodHandler generateHandler;
 
@@ -57,15 +59,15 @@ class EditorActionPromptsTest {
         // the read-only right comes from the picked agent profile; a marker
         // inside the prompt would only decorate the message without binding
         // the model to anything
-        assertFalse(explainHandler.buildPrompt("Возврат 1;").contains("[read-only"));
-        assertFalse(generateHandler.buildPrompt("Возврат 1;").contains("[read-only"));
+        assertFalse(explainHandler.buildPrompt("Возврат 1;").contains(READ_ONLY_MARK));
+        assertFalse(generateHandler.buildPrompt("Возврат 1;").contains(READ_ONLY_MARK));
     }
 
     @Test
     void emptySelectionStillBuildsAnHonestPrompt() {
         assertNotNull(explainHandler.buildPrompt(""));
         assertNotNull(generateHandler.buildPrompt(""));
-        assertFalse(explainHandler.buildPrompt("").contains("[read-only"));
-        assertFalse(generateHandler.buildPrompt("").contains("[read-only"));
+        assertFalse(explainHandler.buildPrompt("").contains(READ_ONLY_MARK));
+        assertFalse(generateHandler.buildPrompt("").contains(READ_ONLY_MARK));
     }
 }

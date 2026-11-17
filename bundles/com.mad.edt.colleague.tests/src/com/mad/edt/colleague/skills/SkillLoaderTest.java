@@ -21,6 +21,8 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class SkillLoaderTest {
 
+    private static final String SKILL_FILE = "SKILL.md";
+
     private final SkillLoader loader = new SkillLoader();
 
     private static File skillDir(final File theRoot, final String theName) throws IOException {
@@ -38,7 +40,7 @@ class SkillLoaderTest {
     void headerSuppliesNameDescriptionAndBody(@TempDir final Path theRootTemp) throws IOException {
         final File root = theRootTemp.toFile();
         final File dir = skillDir(root, "folder");
-        write(new File(dir, "SKILL.md"),
+        write(new File(dir, SKILL_FILE),
             "---\nname: alpha\ndescription: use: carefully\n---\nDo things.\n");
 
         final List<SkillDefinition> skills = loader.loadAll(root);
@@ -54,7 +56,7 @@ class SkillLoaderTest {
     void missingHeaderFallsBackToDirectoryName(@TempDir final Path theRootTemp) throws IOException {
         final File root = theRootTemp.toFile();
         final File dir = skillDir(root, "beta-skill");
-        write(new File(dir, "SKILL.md"), "plain instructions, no fence at all");
+        write(new File(dir, SKILL_FILE), "plain instructions, no fence at all");
 
         final List<SkillDefinition> skills = loader.loadAll(root);
 
@@ -68,7 +70,7 @@ class SkillLoaderTest {
     void toolsFileDeclaresToolSpecs(@TempDir final Path theRootTemp) throws IOException {
         final File root = theRootTemp.toFile();
         final File dir = skillDir(root, "gamma");
-        write(new File(dir, "SKILL.md"), "---\nname: gamma\n---\nbody\n");
+        write(new File(dir, SKILL_FILE), "---\nname: gamma\n---\nbody\n");
         write(new File(dir, "tools.json"), """
             [{"name": "lookup", "description": "looks something up",
               "parameters": {"type": "object"}}]
@@ -84,9 +86,9 @@ class SkillLoaderTest {
     @DisplayName("loadAll sorts by name and ignores directories without SKILL.md")
     void loadAllSortsAndSkipsForeignDirectories(@TempDir final Path theRootTemp) throws IOException {
         final File root = theRootTemp.toFile();
-        write(new File(skillDir(root, "zeta"), "SKILL.md"), "---\nname: zulu\n---\nb\n");
+        write(new File(skillDir(root, "zeta"), SKILL_FILE), "---\nname: zulu\n---\nb\n");
         skillDir(root, "notes-only");
-        write(new File(skillDir(root, "alpha-dir"), "SKILL.md"), "---\nname: anchor\n---\nb\n");
+        write(new File(skillDir(root, "alpha-dir"), SKILL_FILE), "---\nname: anchor\n---\nb\n");
 
         final List<SkillDefinition> skills = loader.loadAll(root);
 

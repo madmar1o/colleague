@@ -19,6 +19,11 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 class ToolUsageStatsTest {
 
+    // fixture tool names repeated across the scenarios
+    private static final String READ_FILE = "read_file";
+    private static final String SEARCH_CODE = "search_code";
+    private static final String PLAN_TOOL = "plan_tool";
+
     private static ToolSpec spec(final String theName) {
         return new ToolSpec(theName, "tool " + theName, new JsonObject());
     }
@@ -37,15 +42,15 @@ class ToolUsageStatsTest {
         final ToolUsageStats stats = new ToolUsageStats();
         final AgentObserver observer = new LoggingAgentObserver(stats);
 
-        call(observer, "read_file");
-        call(observer, "read_file");
+        call(observer, READ_FILE);
+        call(observer, READ_FILE);
         stats.finishRun();
-        stats.noteOffered(List.of("read_file", "search_code"));
-        call(observer, "search_code");
+        stats.noteOffered(List.of(READ_FILE, SEARCH_CODE));
+        call(observer, SEARCH_CODE);
         stats.finishRun();
 
-        Assertions.assertEquals(2, stats.callsOf("read_file"));
-        Assertions.assertEquals(1, stats.callsOf("search_code"));
+        Assertions.assertEquals(2, stats.callsOf(READ_FILE));
+        Assertions.assertEquals(1, stats.callsOf(SEARCH_CODE));
         Assertions.assertEquals(0, stats.callsOf("never_called"));
     }
 
@@ -54,26 +59,26 @@ class ToolUsageStatsTest {
     void unusedToolsLeaveTheCatalog() {
         final ToolUsageStats stats = new ToolUsageStats();
         final ToolPolicy policy = new ToolPolicy().excludeUnused(2);
-        final List<ToolSpec> offered = Arrays.asList(spec("read_file"), spec("plan_tool"));
+        final List<ToolSpec> offered = Arrays.asList(spec(READ_FILE), spec(PLAN_TOOL));
 
-        stats.noteOffered(List.of("read_file", "plan_tool"));
-        call(new LoggingAgentObserver(stats), "read_file");
+        stats.noteOffered(List.of(READ_FILE, PLAN_TOOL));
+        call(new LoggingAgentObserver(stats), READ_FILE);
         stats.finishRun();
-        Assertions.assertTrue(policy.shouldOffer(stats, "read_file"));
-        Assertions.assertTrue(policy.shouldOffer(stats, "plan_tool"),
+        Assertions.assertTrue(policy.shouldOffer(stats, READ_FILE));
+        Assertions.assertTrue(policy.shouldOffer(stats, PLAN_TOOL),
             "one run without a call is not yet a reason to prune");
 
-        stats.noteOffered(List.of("read_file", "plan_tool"));
-        call(new LoggingAgentObserver(stats), "read_file");
+        stats.noteOffered(List.of(READ_FILE, PLAN_TOOL));
+        call(new LoggingAgentObserver(stats), READ_FILE);
         stats.finishRun();
-        stats.noteOffered(List.of("read_file", "plan_tool"));
-        call(new LoggingAgentObserver(stats), "read_file");
+        stats.noteOffered(List.of(READ_FILE, PLAN_TOOL));
+        call(new LoggingAgentObserver(stats), READ_FILE);
         stats.finishRun();
-        Assertions.assertFalse(policy.shouldOffer(stats, "plan_tool"),
+        Assertions.assertFalse(policy.shouldOffer(stats, PLAN_TOOL),
             "three runs offered without a call must prune the tool");
-        Assertions.assertTrue(policy.shouldOffer(stats, "read_file"),
+        Assertions.assertTrue(policy.shouldOffer(stats, READ_FILE),
             "a used tool never leaves the catalog");
-        Assertions.assertEquals(List.of("read_file"),
+        Assertions.assertEquals(List.of(READ_FILE),
             names(policy.allowed(null, offered, stats)));
         // a tool nobody ever offered is not penalised for never being used
         Assertions.assertTrue(policy.shouldOffer(stats, "brand_new"));
@@ -85,15 +90,15 @@ class ToolUsageStatsTest {
         final ToolUsageStats stats = new ToolUsageStats();
         final ToolPolicy policy = new ToolPolicy().excludeUnused(1);
 
-        stats.noteOffered(List.of("plan_tool"));
+        stats.noteOffered(List.of(PLAN_TOOL));
         stats.finishRun();
-        Assertions.assertFalse(policy.shouldOffer(stats, "plan_tool"),
+        Assertions.assertFalse(policy.shouldOffer(stats, PLAN_TOOL),
             "one unused run already prunes at threshold one");
 
-        stats.noteOffered(List.of("plan_tool"));
-        call(new LoggingAgentObserver(stats), "plan_tool");
+        stats.noteOffered(List.of(PLAN_TOOL));
+        call(new LoggingAgentObserver(stats), PLAN_TOOL);
         stats.finishRun();
-        Assertions.assertTrue(policy.shouldOffer(stats, "plan_tool"),
+        Assertions.assertTrue(policy.shouldOffer(stats, PLAN_TOOL),
             "the call during the run reset the streak");
     }
 }

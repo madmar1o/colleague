@@ -25,6 +25,9 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 class AgentLoopEmptyFinalTest {
 
+    private static final String READ_FILE = "read_file";
+    private static final String FINAL_AFTER_REPAIR = "final after repair";
+
     /** serves the scripted rounds and records every request it received */
     private static final class ScriptedProvider implements ILLMProvider {
 
@@ -75,12 +78,12 @@ class AgentLoopEmptyFinalTest {
 
         @Override
         public String getName() {
-            return "read_file";
+            return READ_FILE;
         }
 
         @Override
         public ToolSpec getSpec() {
-            return new ToolSpec("read_file", "reads a file", null);
+            return new ToolSpec(READ_FILE, "reads a file", null);
         }
 
         @Override
@@ -91,7 +94,7 @@ class AgentLoopEmptyFinalTest {
 
     private static ChatResult toolRound() {
         return new ChatResult("", null, "stub", "tool_calls", 1, 1,
-            List.of(new ToolCall("t1", "read_file", "{}")));
+            List.of(new ToolCall("t1", READ_FILE, "{}")));
     }
 
     /** thinking ran, generation died: no text, no call */
@@ -107,11 +110,11 @@ class AgentLoopEmptyFinalTest {
     @DisplayName("the repair round thinks not and budgets at least double")
     void repairRoundIsCheapOnThinkingWideOnBudget() throws Exception {
         final ScriptedProvider provider = new ScriptedProvider(toolRound(), emptyThinkingRound(),
-            textRound("final after repair"));
+            textRound(FINAL_AFTER_REPAIR));
         final AgentAnswer answer = new AgentLoop(provider, List.of(new StubTool()), "stub", 8,
             new CancellationFlag()).run("sys", "task");
 
-        Assertions.assertEquals("final after repair", answer.getText());
+        Assertions.assertEquals(FINAL_AFTER_REPAIR, answer.getText());
         Assertions.assertEquals(3, provider.seen.size(),
             "tool round, empty round, repair round");
 
@@ -134,7 +137,7 @@ class AgentLoopEmptyFinalTest {
     void repairRoundIsVisibleToTheObserver() throws Exception {
         final List<int[]> rounds = new ArrayList<>();
         final ScriptedProvider provider = new ScriptedProvider(toolRound(), emptyThinkingRound(),
-            textRound("final after repair"));
+            textRound(FINAL_AFTER_REPAIR));
         final AgentLoop loop = new AgentLoop(provider, List.of(new StubTool()), "stub", 8,
             new CancellationFlag(), new AgentObserver() {
                 @Override

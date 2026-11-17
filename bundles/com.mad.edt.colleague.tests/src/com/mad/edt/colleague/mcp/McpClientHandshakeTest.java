@@ -31,6 +31,11 @@ class McpClientHandshakeTest {
     /** The JSON-RPC identity of the tool both fakes expose. */
     private static final String TOOL_NAME = "echo";
 
+    /** JSON-RPC methods the client is expected to drive, in handshake order. */
+    private static final String INITIALIZE = "initialize";
+    private static final String TOOLS_LIST = "tools/list";
+    private static final String TOOLS_CALL = "tools/call";
+
     /**
      * Minimal in-process HTTP endpoint on a plain server socket answering
      * the three JSON-RPC methods the client is allowed to use; notifications
@@ -113,15 +118,15 @@ class McpClientHandshakeTest {
                 methods.add(method);
             }
             final String result;
-            if("initialize".equals(method)) {
+            if(INITIALIZE.equals(method)) {
                 result = "{\"protocolVersion\":\"2024-11-05\","
                     + "\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"fake\"}}";
-            } else if("tools/list".equals(method)) {
+            } else if(TOOLS_LIST.equals(method)) {
                 result = "{\"tools\":[{\"name\":\"" + TOOL_NAME + "\","
                     + "\"description\":\"echoes its argument\","
                     + "\"inputSchema\":{\"type\":\"object\"},"
                     + "\"annotations\":{\"readOnlyHint\":true}}]}";
-            } else if("tools/call".equals(method) && !request.contains("unknown_tool")) {
+            } else if(TOOLS_CALL.equals(method) && !request.contains("unknown_tool")) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"echo: hello\"}],"
                     + "\"isError\":false}";
             } else {
@@ -256,12 +261,12 @@ class McpClientHandshakeTest {
             Assertions.assertEquals("echoes its argument", tools.get(0).description());
             Assertions.assertTrue(tools.get(0).readOnly(),
                 "the readOnlyHint annotation must survive into the tool info");
-            Assertions.assertEquals(List.of("initialize", "tools/list"), fake.methods,
+            Assertions.assertEquals(List.of(INITIALIZE, TOOLS_LIST), fake.methods,
                 "initialize must come before listing, nothing else");
 
             final String text = client.call(TOOL_NAME, null);
             Assertions.assertEquals("echo: hello", text);
-            Assertions.assertEquals(List.of("initialize", "tools/list", "tools/call"),
+            Assertions.assertEquals(List.of(INITIALIZE, TOOLS_LIST, TOOLS_CALL),
                 fake.methods, "the call must not redo the handshake");
         }
     }
@@ -296,7 +301,7 @@ class McpClientHandshakeTest {
 
             final McpException failure = Assertions.assertThrows(McpException.class,
                 () -> client.call("unknown_tool", null));
-            Assertions.assertTrue(fake.methods.contains("tools/call"));
+            Assertions.assertTrue(fake.methods.contains(TOOLS_CALL));
             Assertions.assertTrue(failure.getMessage().contains("unknown method"),
                 failure.getMessage());
         }

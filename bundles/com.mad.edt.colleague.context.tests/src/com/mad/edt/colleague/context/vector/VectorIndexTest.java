@@ -402,10 +402,10 @@ class VectorIndexTest {
         ourIndex.forgetFingerprints();
         storeTransport.answer(200, "{\"result\":{\"points\":["
             + "{\"payload\":{\"path\":\"cfg/x.bsl\",\"location\":\""
-            + jsonEscape(alpha.toString()) + "\",\"hash\":\""
+            + jsonEscape(alpha.toString()) + HASH_FIELD
             + sha256Hex(Files.readAllBytes(alpha)) + "\"}},"
             + "{\"payload\":{\"path\":\"cfg/x.bsl\",\"location\":\""
-            + jsonEscape(beta.toString()) + "\",\"hash\":\""
+            + jsonEscape(beta.toString()) + HASH_FIELD
             + sha256Hex(Files.readAllBytes(beta)) + "\"}}],"
             + "\"next_page_offset\":null}}");
         assertEquals(2, ourIndex.restoreFingerprints());

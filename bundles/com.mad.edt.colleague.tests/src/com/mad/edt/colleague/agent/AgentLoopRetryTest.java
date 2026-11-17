@@ -25,6 +25,10 @@ import com.mad.edt.colleague.llm.TurnCancelledException;
  */
 class AgentLoopRetryTest {
 
+    // fixture answers repeated across the scenarios
+    private static final String RECOVERED = "recovered";
+    private static final String HTTP_500 = "returned HTTP 500";
+
     /**
      * Scripted endpoint: fails the first {@code failures} calls, answers after that.
      */
@@ -49,7 +53,7 @@ class AgentLoopRetryTest {
             if(calls <= failures.size()) {
                 throw failures.get(calls - 1);
             }
-            return new ChatResult("recovered", null, "stub", "stop", 1, 1, List.of());
+            return new ChatResult(RECOVERED, null, "stub", "stop", 1, 1, List.of());
         }
 
         @Override
@@ -73,7 +77,7 @@ class AgentLoopRetryTest {
                 + " closed by the remote host.\"}", 500, null));
         final AgentAnswer answer =
             new AgentLoop(provider, List.of(), "stub", 4, new CancellationFlag()).run("sys", "task");
-        Assertions.assertEquals("recovered", answer.getText());
+        Assertions.assertEquals(RECOVERED, answer.getText());
         Assertions.assertEquals(2, provider.calls, "one failure, one repair call");
         Assertions.assertEquals(2, answer.getSteps(), "the repair attempt pays from the step budget");
     }
@@ -82,9 +86,9 @@ class AgentLoopRetryTest {
     @DisplayName("a second failure ends the turn instead of retrying forever")
     void secondServerFailureEndsTheTurn() {
         final FlakyProvider provider = new FlakyProvider();
-        provider.failures.add(new LLMException("returned HTTP 500", 500, null));
-        provider.failures.add(new LLMException("returned HTTP 500", 500, null));
-        provider.failures.add(new LLMException("returned HTTP 500", 500, null));
+        provider.failures.add(new LLMException(HTTP_500, 500, null));
+        provider.failures.add(new LLMException(HTTP_500, 500, null));
+        provider.failures.add(new LLMException(HTTP_500, 500, null));
         final LLMException thrown = Assertions.assertThrows(LLMException.class,
             () -> new AgentLoop(provider, List.of(), "stub", 4, new CancellationFlag()).run("sys", "task"));
         Assertions.assertEquals(500, thrown.getStatusCode());
@@ -109,7 +113,7 @@ class AgentLoopRetryTest {
             new TransportFailure("connection reset")));
         final AgentAnswer answer =
             new AgentLoop(provider, List.of(), "stub", 4, new CancellationFlag()).run("sys", "task");
-        Assertions.assertEquals("recovered", answer.getText());
+        Assertions.assertEquals(RECOVERED, answer.getText());
         Assertions.assertEquals(2, provider.calls);
     }
 
@@ -117,7 +121,7 @@ class AgentLoopRetryTest {
     @DisplayName("no repair attempt exists outside the step budget")
     void repairAttemptPaysFromTheStepBudget() {
         final FlakyProvider provider = new FlakyProvider();
-        provider.failures.add(new LLMException("returned HTTP 500", 500, null));
+        provider.failures.add(new LLMException(HTTP_500, 500, null));
         Assertions.assertThrows(LLMException.class,
             () -> new AgentLoop(provider, List.of(), "stub", 1, new CancellationFlag()).run("sys", "task"));
         Assertions.assertEquals(1, provider.calls,

@@ -26,6 +26,9 @@ class AgentProfileWriterTest {
     private static final String REVIEWER = "reviewer";
     private static final String DESCRIPTION = "d";
     private static final String SYSTEM = "system";
+    private static final String READ_FILE = "read_file";
+    private static final String SEARCH_CODE = "search_code";
+    private static final String FIRST = "first";
 
     @Test
     @DisplayName("what the writer saves is exactly what the loader reads back")
@@ -34,7 +37,7 @@ class AgentProfileWriterTest {
             .description("разбор изменений")
             .system("Смотри diff и называй риски.\nВторой абзац.")
             .model("big/model:7").maxSteps(4).mode(AgentProfile.Mode.PRIMARY)
-            .tools(Set.of("read_file", "search_code"))
+            .tools(Set.of(READ_FILE, SEARCH_CODE))
             .title("Ревьюер")
             .build();
 
@@ -49,7 +52,7 @@ class AgentProfileWriterTest {
         Assertions.assertEquals("big/model:7", back.getModelName());
         Assertions.assertEquals(4, back.getMaxSteps());
         Assertions.assertEquals(AgentProfile.Mode.PRIMARY, back.getMode());
-        Assertions.assertEquals(Set.of("read_file", "search_code"), back.getToolNames());
+        Assertions.assertEquals(Set.of(READ_FILE, SEARCH_CODE), back.getToolNames());
         Assertions.assertEquals("Смотри diff и называй риски.\nВторой абзац.",
             back.getSystem().trim());
     }
@@ -104,13 +107,13 @@ class AgentProfileWriterTest {
     @Test
     @DisplayName("deleting an agent removes its file and only its file")
     void deleteRemovesOnlyThatProfile(@TempDir final Path theRoot) throws IOException {
-        AgentProfileWriter.save(theRoot.toFile(), AgentProfile.builder("first")
+        AgentProfileWriter.save(theRoot.toFile(), AgentProfile.builder(FIRST)
             .description("d one").system(SYSTEM).build());
         AgentProfileWriter.save(theRoot.toFile(), AgentProfile.builder("second")
             .description("d two").system(SYSTEM).build());
 
-        Assertions.assertTrue(AgentProfileWriter.delete(theRoot.toFile(), "first"));
-        Assertions.assertFalse(AgentProfileWriter.delete(theRoot.toFile(), "first"),
+        Assertions.assertTrue(AgentProfileWriter.delete(theRoot.toFile(), FIRST));
+        Assertions.assertFalse(AgentProfileWriter.delete(theRoot.toFile(), FIRST),
             "a second delete finds nothing to remove");
 
         final List<AgentProfile> loaded = new AgentProfileLoader().loadAll(theRoot.toFile());
@@ -151,9 +154,9 @@ class AgentProfileWriterTest {
     @DisplayName("the tools header is written in one stable order")
     void toolsHeaderIsStable(@TempDir final Path theRoot) throws IOException {
         final AgentProfile profile = AgentProfile.builder("steady").description("d")
-            .system(SYSTEM).tools(Set.of("write_file", "read_file", "search_code")).build();
+            .system(SYSTEM).tools(Set.of("write_file", READ_FILE, SEARCH_CODE)).build();
 
-        Assertions.assertEquals(List.of("read_file", "search_code", "write_file"),
+        Assertions.assertEquals(List.of(READ_FILE, SEARCH_CODE, "write_file"),
             profile.getToolNamesInOrder(),
             "the page form and the file must agree on one order");
 

@@ -26,6 +26,8 @@ class ConversationStoreTest {
 
     /** Tab key of one contact: provider id, NUL, model name. */
     private static final String TAB_KEY = "srata\u0000qwen3:8b";
+    private static final String TAB_KEY_B = "srata\u0000llama3.1:8b";
+    private static final String QUESTION = "вопрос";
 
     @TempDir
     Path stateArea;
@@ -74,11 +76,11 @@ class ConversationStoreTest {
     @Test
     void differentTabsKeepTheirOwnTranscriptsSideBySide() {
         final ConversationStore store = new ConversationStore(storeFile());
-        store.save("srata\u0000qwen3:8b", List.of(ChatMessage.user("вкладку A")));
-        store.save("srata\u0000llama3.1:8b", List.of(ChatMessage.user("вкладку B")));
+        store.save(TAB_KEY, List.of(ChatMessage.user("вкладку A")));
+        store.save(TAB_KEY_B, List.of(ChatMessage.user("вкладку B")));
 
-        assertEquals("вкладку A", store.load("srata\u0000qwen3:8b").get(0).getContent());
-        assertEquals("вкладку B", store.load("srata\u0000llama3.1:8b").get(0).getContent());
+        assertEquals("вкладку A", store.load(TAB_KEY).get(0).getContent());
+        assertEquals("вкладку B", store.load(TAB_KEY_B).get(0).getContent());
     }
 
     @Test
@@ -87,7 +89,7 @@ class ConversationStoreTest {
         final List<ChatMessage> messages = new ArrayList<>();
         messages.add(ChatMessage.system(Conversation.DIGEST_MARKER + "\nQ: старая реплика"));
         messages.add(ChatMessage.system("Workspace context:\nогромный дамп проекта"));
-        messages.add(ChatMessage.user("вопрос"));
+        messages.add(ChatMessage.user(QUESTION));
         messages.add(ChatMessage.assistant("ответ"));
         store.save(TAB_KEY, messages);
 
@@ -173,7 +175,7 @@ class ConversationStoreTest {
     void anEmptyTurnIsNotPersisted() {
         final ConversationStore store = new ConversationStore(storeFile());
         final List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.user("вопрос"));
+        messages.add(ChatMessage.user(QUESTION));
         messages.add(ChatMessage.assistant("нормальный ответ"));
         messages.add(ChatMessage.assistant(""));
         messages.add(ChatMessage.user("   "));
@@ -182,7 +184,7 @@ class ConversationStoreTest {
         final List<ChatMessage> loaded = new ConversationStore(storeFile()).load(TAB_KEY);
         assertEquals(2, loaded.size(),
             "empty texts are not a memory either side of the exchange");
-        assertEquals("вопрос", loaded.get(0).getContent());
+        assertEquals(QUESTION, loaded.get(0).getContent());
         assertEquals("нормальный ответ", loaded.get(1).getContent());
     }
 
@@ -196,7 +198,7 @@ class ConversationStoreTest {
         final com.google.gson.JsonArray transcript = new com.google.gson.JsonArray();
         final com.google.gson.JsonObject user = new com.google.gson.JsonObject();
         user.addProperty("role", ChatMessage.ROLE_USER);
-        user.addProperty("content", "вопрос");
+        user.addProperty("content", QUESTION);
         final com.google.gson.JsonObject assistant = new com.google.gson.JsonObject();
         assistant.addProperty("role", ChatMessage.ROLE_ASSISTANT);
         assistant.addProperty("content", "");
@@ -211,6 +213,6 @@ class ConversationStoreTest {
         final List<ChatMessage> loaded = new ConversationStore(storeFile()).load(TAB_KEY);
         assertEquals(1, loaded.size(), "the blank assistant turn must not come back");
         assertEquals(ChatMessage.ROLE_USER, loaded.get(0).getRole());
-        assertEquals("вопрос", loaded.get(0).getContent());
+        assertEquals(QUESTION, loaded.get(0).getContent());
     }
 }

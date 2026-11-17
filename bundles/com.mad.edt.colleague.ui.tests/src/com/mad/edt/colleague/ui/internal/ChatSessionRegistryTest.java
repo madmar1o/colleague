@@ -29,6 +29,9 @@ import com.mad.edt.colleague.llm.ProviderConfig;
  */
 class ChatSessionRegistryTest {
 
+    private static final String GATEWAY_V1 = "http://127.0.0.1:8080/v1";
+    private static final String PROMPT = "prompt";
+
     /** endpoint stand-in: only the configuration it captured matters here */
     private static final class FakeProvider implements ILLMProvider {
 
@@ -77,9 +80,9 @@ class ChatSessionRegistryTest {
     @Test
     void unchangedConfigurationKeepsTheConversation() {
         final ChatSessionRegistry registry = new ChatSessionRegistry();
-        final ProviderConfig saved = config("http://127.0.0.1:8080/v1", "k");
+        final ProviderConfig saved = config(GATEWAY_V1, "k");
         final Supplier<ChatSession> factory =
-            () -> new ChatSession(new FakeProvider(saved), "prompt");
+            () -> new ChatSession(new FakeProvider(saved), PROMPT);
 
         final ChatSession first = registry.sessionFor(CONTACT_KEY, saved, factory);
         final ChatSession again = registry.sessionFor(CONTACT_KEY, saved, factory);
@@ -93,13 +96,13 @@ class ChatSessionRegistryTest {
         final ChatSessionRegistry registry = new ChatSessionRegistry();
         final ProviderConfig stale = config("http://127.0.0.1:8080", "k");
         final ChatSession old = registry.sessionFor(CONTACT_KEY, stale,
-            () -> new ChatSession(new FakeProvider(stale), "prompt"));
+            () -> new ChatSession(new FakeProvider(stale), PROMPT));
 
-        final ProviderConfig fixed = config("http://127.0.0.1:8080/v1", "k");
+        final ProviderConfig fixed = config(GATEWAY_V1, "k");
         assertFalse(registry.isCurrent(old, fixed),
             "the open tab must be recognised as built for the old address");
         final ChatSession current = registry.sessionFor(CONTACT_KEY, fixed,
-            () -> new ChatSession(new FakeProvider(fixed), "prompt"));
+            () -> new ChatSession(new FakeProvider(fixed), PROMPT));
 
         assertNotSame(old, current,
             "a session built for the old address must not answer the corrected one");
@@ -108,22 +111,22 @@ class ChatSessionRegistryTest {
     @Test
     void keyChangeOfTheApiKeyAlsoRebuilds() {
         final ChatSessionRegistry registry = new ChatSessionRegistry();
-        final ProviderConfig withOldKey = config("http://127.0.0.1:8080/v1", "old");
+        final ProviderConfig withOldKey = config(GATEWAY_V1, "old");
         final ChatSession old = registry.sessionFor(CONTACT_KEY, withOldKey,
-            () -> new ChatSession(new FakeProvider(withOldKey), "prompt"));
+            () -> new ChatSession(new FakeProvider(withOldKey), PROMPT));
 
-        final ProviderConfig withNewKey = config("http://127.0.0.1:8080/v1", "new");
+        final ProviderConfig withNewKey = config(GATEWAY_V1, "new");
         final ChatSession current = registry.sessionFor(CONTACT_KEY, withNewKey,
-            () -> new ChatSession(new FakeProvider(withNewKey), "prompt"));
+            () -> new ChatSession(new FakeProvider(withNewKey), PROMPT));
         assertNotSame(old, current, "a rotated key is a different endpoint contract");
     }
 
     @Test
     void removedProviderIsNeverCurrent() {
         final ChatSessionRegistry registry = new ChatSessionRegistry();
-        final ProviderConfig saved = config("http://127.0.0.1:8080/v1", "k");
+        final ProviderConfig saved = config(GATEWAY_V1, "k");
         final ChatSession session = registry.sessionFor(CONTACT_KEY, saved,
-            () -> new ChatSession(new FakeProvider(saved), "prompt"));
+            () -> new ChatSession(new FakeProvider(saved), PROMPT));
 
         assertFalse(registry.isCurrent(session, null),
             "a provider the user deleted leaves no live conversation behind");
