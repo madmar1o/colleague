@@ -149,39 +149,59 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
             throw new TurnCancelledException();
         }
         if(response.getStatus() < 200 || response.getStatus() >= 300) {
-            final StringBuilder excerpt = new StringBuilder();
-            try (java.util.stream.Stream<String> lines = response.lines()) {
-                lines.limit(4).forEach(line -> excerpt.append(line));
-            }
-            throw new LLMException("Endpoint " + config.getBaseUrl() + " returned HTTP "
-                + response.getStatus() + ": " + excerpt + failureHint(response.getStatus()),
-                response.getStatus(), null);
+            throw streamFailure(response);
         }
         try (java.util.stream.Stream<String> lines = response.lines()) {
-            lines.forEach(line -> {
-                if(theCancellation.isCancelled()) {
-                    throw new TurnCancelledException();
-                }
-                final String trimmed = line.strip();
-                if(trimmed.isEmpty()) {
-                    return;
-                }
-                String payload = trimmed;
-                if(payload.startsWith("data:")) {
-                    payload = payload.substring(5).strip();
-                }
-                if(payload.isEmpty() || "[DONE]".equals(payload)) {
-                    return;
-                }
-                try {
-                    theOnEvent.accept(JsonParser.parseString(payload).getAsJsonObject());
-                } catch (final TurnCancelledException ex) {
-                    // a consumer that observed cancellation: unwinds the loop
-                    throw ex;
-                } catch (final RuntimeException ex) {
-                    // unparsable stream frame, ignore it and keep reading
-                }
-            });
+            lines.forEach(line -> acceptFrame(line, theCancellation, theOnEvent));
+        }
+    }
+
+    /**
+     * @param theResponse error response of a stream call
+     * @return exception carrying the status, a short body excerpt and the hint
+     */
+    private LLMException streamFailure(final HttpCallResult theResponse) {
+        final StringBuilder excerpt = new StringBuilder();
+        try (java.util.stream.Stream<String> lines = theResponse.lines()) {
+            lines.limit(4).forEach(line -> excerpt.append(line));
+        }
+        return new LLMException("Endpoint " + config.getBaseUrl() + " returned HTTP "
+            + theResponse.getStatus() + ": " + excerpt + failureHint(theResponse.getStatus()),
+            theResponse.getStatus(), null);
+    }
+
+    /**
+     * Hands one streamed line to the consumer; unparsable frames are ignored,
+     * a cancelled latch or a consumer that observed cancellation unwinds the
+     * read loop.
+     *
+     * @param theLine raw stream line
+     * @param theCancellation turn cancellation latch
+     * @param theOnEvent called for every parsed event object
+     */
+    private void acceptFrame(final String theLine, final CancellationFlag theCancellation,
+        final Consumer<JsonObject> theOnEvent) {
+        if(theCancellation.isCancelled()) {
+            throw new TurnCancelledException();
+        }
+        final String trimmed = theLine.strip();
+        if(trimmed.isEmpty()) {
+            return;
+        }
+        String payload = trimmed;
+        if(payload.startsWith("data:")) {
+            payload = payload.substring(5).strip();
+        }
+        if(payload.isEmpty() || "[DONE]".equals(payload)) {
+            return;
+        }
+        try {
+            theOnEvent.accept(JsonParser.parseString(payload).getAsJsonObject());
+        } catch (final TurnCancelledException ex) {
+            // a consumer that observed cancellation: unwinds the loop
+            throw ex;
+        } catch (final RuntimeException ex) {
+            // unparsable stream frame, ignore it and keep reading
         }
     }
 

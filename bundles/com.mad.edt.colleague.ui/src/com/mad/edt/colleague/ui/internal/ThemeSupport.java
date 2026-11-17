@@ -64,34 +64,50 @@ final class ThemeSupport {
         final Display display = theAnchor.getDisplay();
         final java.util.concurrent.atomic.AtomicReference<String> last =
             new java.util.concurrent.atomic.AtomicReference<>("");
-        final Thread worker = new Thread(() -> {
-            while(true) {
-                try {
-                    Thread.sleep(2000L);
-                } catch (final InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-                if(theAnchor.isDisposed() || display.isDisposed()) {
-                    return;
-                }
-                display.asyncExec(() -> {
-                    if(theAnchor.isDisposed()) {
-                        return;
-                    }
-                    final String palette = pagePalette(theAnchor).toString();
-                    if(palette.equals(last.get())) {
-                        return;
-                    }
-                    last.set(palette);
-                    if(!theAnchor.isDisposed()) {
-                        theOnChange.accept(JsonParser.parseString(palette).getAsJsonObject());
-                    }
-                });
-            }
-        }, "colleague-palette-watch");
+        final Thread worker = new Thread(
+            () -> paletteWatchLoop(theAnchor, display, last, theOnChange),
+            "colleague-palette-watch");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /**
+     * Compares the palette of the anchor every two seconds and reports every
+     * actual change on the UI thread; stops by itself once the control or the
+     * display is gone.
+     *
+     * @param theAnchor control whose palette is watched
+     * @param theDisplay display of the anchor
+     * @param theLast last palette text seen, empty before the first round
+     * @param theOnChange receives the new palette on the UI thread
+     */
+    private static void paletteWatchLoop(final Control theAnchor, final Display theDisplay,
+        final java.util.concurrent.atomic.AtomicReference<String> theLast,
+        final Consumer<JsonObject> theOnChange) {
+        while(true) {
+            try {
+                Thread.sleep(2000L);
+            } catch (final InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if(theAnchor.isDisposed() || theDisplay.isDisposed()) {
+                return;
+            }
+            theDisplay.asyncExec(() -> {
+                if(theAnchor.isDisposed()) {
+                    return;
+                }
+                final String palette = pagePalette(theAnchor).toString();
+                if(palette.equals(theLast.get())) {
+                    return;
+                }
+                theLast.set(palette);
+                if(!theAnchor.isDisposed()) {
+                    theOnChange.accept(JsonParser.parseString(palette).getAsJsonObject());
+                }
+            });
+        }
     }
 
     /**
@@ -108,6 +124,131 @@ final class ThemeSupport {
      * @return palette JSON ready to push to the page
      */
     static JsonObject pagePalette(final Control theAnchor) {
+        final BaseColors base = themedColors(theAnchor);
+        final Palette palette = new Palette(base);
+        final JsonObject json = new JsonObject();
+        json.addProperty("theme", palette.dark ? "dark" : "light");
+        json.addProperty("bg", toHex(palette.bg));
+        json.addProperty("panel", toHex(palette.panel));
+        json.addProperty("panel2", toHex(palette.panel2));
+        json.addProperty("text", toHex(palette.fg));
+        json.addProperty("muted", toHex(palette.muted));
+        json.addProperty("accent", toHex(palette.accent));
+        json.addProperty("user", toHex(palette.user));
+        json.addProperty("answer", toHex(palette.answer));
+        json.addProperty("error", toHex(palette.error));
+        json.addProperty("line", toHex(palette.line));
+        json.addProperty("chip", toHex(palette.chip));
+        json.addProperty("code", toHex(palette.code));
+        return json;
+    }
+
+    /** Themed background and foreground of an anchor, as plain RGB. */
+    private static final class BaseColors {
+
+        private final RGB background;
+
+        private final RGB foreground;
+
+        /**
+         * @param theBackground themed background
+         * @param theForeground themed foreground
+         */
+        BaseColors(final RGB theBackground, final RGB theForeground) {
+            background = theBackground;
+            foreground = theForeground;
+        }
+    }
+
+    /** All page colors derived from the base pair. */
+    private static final class Palette {
+
+        private final boolean dark;
+
+        private final RGB bg;
+
+        private final RGB fg;
+
+        private final RGB accent;
+
+        private final RGB panel;
+
+        private final RGB panel2;
+
+        private final RGB line;
+
+        private final RGB muted;
+
+        private final RGB user;
+
+        private final RGB answer;
+
+        private final RGB error;
+
+        private final RGB chip;
+
+        private final RGB code;
+
+        /**
+         * @param theBase themed base pair
+         */
+        Palette(final BaseColors theBase) {
+            bg = theBase.background;
+            fg = theBase.foreground;
+            dark = luminance(bg) < 128;
+            final RGB toward = dark ? new RGB(255, 255, 255) : new RGB(0, 0, 0);
+            accent = dark ? new RGB(93, 138, 189) : new RGB(42, 100, 158);
+            panel = mix(bg, toward, dark ? 0.06 : 0.10);
+            panel2 = mix(bg, toward, dark ? 0.12 : 0.18);
+            line = mix(bg, fg, 0.28);
+            muted = mix(fg, bg, 0.45);
+            user = mix(bg, accent, dark ? 0.35 : 0.22);
+            answer = panel;
+            error = mix(bg, new RGB(200, 90, 90), dark ? 0.28 : 0.35);
+            chip = mix(bg, accent, 0.18);
+            code = mix(bg, toward, dark ? 0.18 : 0.06);
+        }
+
+        /**
+         * @param theColor color to weigh
+         * @return perceived brightness of the color
+         */
+        private static double luminance(final RGB theColor) {
+            return (theColor.red * 299D + theColor.green * 587D + theColor.blue * 114D) / 1000D;
+        }
+
+        /**
+         * @param theBase starting color
+         * @param theTarget color to move toward
+         * @param theFactor share of the target color
+         * @return the blended color, channels clamped to the widget range
+         */
+        private static RGB mix(final RGB theBase, final RGB theTarget, final double theFactor) {
+            final double rest = 1.0D - theFactor;
+            return new RGB(
+                clamp((int)Math.round(theBase.red * rest + theTarget.red * theFactor)),
+                clamp((int)Math.round(theBase.green * rest + theTarget.green * theFactor)),
+                clamp((int)Math.round(theBase.blue * rest + theTarget.blue * theFactor)));
+        }
+
+        /**
+         * @param theValue channel value
+         * @return the value inside the 0..255 widget range
+         */
+        private static int clamp(final int theValue) {
+            return Math.max(0, Math.min(255, theValue));
+        }
+    }
+
+    /**
+     * Walks the ancestor chain of the anchor to the first control whose
+     * colors differ from the neutral widget defaults.
+     *
+     * @param theAnchor control whose themed background and foreground carry
+     *            the workbench theme
+     * @return the themed pair, falling back to the system widget colors
+     */
+    private static BaseColors themedColors(final Control theAnchor) {
         final Display display = theAnchor.getDisplay();
         final RGB neutralBackground = display
             .getSystemColor(SWT.COLOR_WIDGET_BACKGROUND).getRGB();
@@ -134,53 +275,7 @@ final class ThemeSupport {
             : display.getSystemColor(SWT.COLOR_WIDGET_BACKGROUND);
         final Color foreground = themedForeground != null ? themedForeground
             : display.getSystemColor(SWT.COLOR_WIDGET_FOREGROUND);
-        final RGB bg = background.getRGB();
-        final RGB fg = foreground.getRGB();
-        final boolean dark = luminance(bg) < 128;
-
-        final RGB accent = dark ? new RGB(93, 138, 189) : new RGB(42, 100, 158);
-        final RGB toward = dark ? new RGB(255, 255, 255) : new RGB(0, 0, 0);
-        final RGB panel = mix(bg, toward, dark ? 0.06 : 0.10);
-        final RGB panel2 = mix(bg, toward, dark ? 0.12 : 0.18);
-        final RGB line = mix(bg, fg, 0.28);
-        final RGB muted = mix(fg, bg, 0.45);
-        final RGB user = mix(bg, accent, dark ? 0.35 : 0.22);
-        final RGB answer = panel;
-        final RGB error = mix(bg, new RGB(200, 90, 90), dark ? 0.28 : 0.35);
-        final RGB chip = mix(bg, accent, 0.18);
-        final RGB code = mix(bg, toward, dark ? 0.18 : 0.06);
-
-        final JsonObject palette = new JsonObject();
-        palette.addProperty("theme", dark ? "dark" : "light");
-        palette.addProperty("bg", toHex(bg));
-        palette.addProperty("panel", toHex(panel));
-        palette.addProperty("panel2", toHex(panel2));
-        palette.addProperty("text", toHex(fg));
-        palette.addProperty("muted", toHex(muted));
-        palette.addProperty("accent", toHex(accent));
-        palette.addProperty("user", toHex(user));
-        palette.addProperty("answer", toHex(answer));
-        palette.addProperty("error", toHex(error));
-        palette.addProperty("line", toHex(line));
-        palette.addProperty("chip", toHex(chip));
-        palette.addProperty("code", toHex(code));
-        return palette;
-    }
-
-    private static double luminance(final RGB theColor) {
-        return (theColor.red * 299D + theColor.green * 587D + theColor.blue * 114D) / 1000D;
-    }
-
-    private static RGB mix(final RGB theBase, final RGB theTarget, final double theFactor) {
-        final double rest = 1.0D - theFactor;
-        return new RGB(
-            clamp((int)Math.round(theBase.red * rest + theTarget.red * theFactor)),
-            clamp((int)Math.round(theBase.green * rest + theTarget.green * theFactor)),
-            clamp((int)Math.round(theBase.blue * rest + theTarget.blue * theFactor)));
-    }
-
-    private static int clamp(final int theValue) {
-        return Math.max(0, Math.min(255, theValue));
+        return new BaseColors(background.getRGB(), foreground.getRGB());
     }
 
     private static String toHex(final RGB theColor) {

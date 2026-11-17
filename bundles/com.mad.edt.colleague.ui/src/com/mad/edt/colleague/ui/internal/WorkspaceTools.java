@@ -175,16 +175,7 @@ public final class WorkspaceTools {
                     continue;
                 }
                 try {
-                    final List<IResource> matches = new ArrayList<>();
-                    project.accept(resource -> {
-                        if(resource.getType() == IResource.FILE
-                            && resource.getProjectRelativePath().toPortableString()
-                                .toLowerCase(Locale.ROOT).contains(needle)) {
-                            matches.add(resource);
-                        }
-                        return matches.size() < 5_000;
-                    });
-                    for(final IResource match : matches) {
+                    for(final IResource match : collectMatches(project, needle)) {
                         total++;
                         if(shown < 80) {
                             listing.append(project.getName()).append('/')
@@ -203,6 +194,27 @@ public final class WorkspaceTools {
             }
             listing.append("... total matches: ").append(total);
             return listing.toString();
+        }
+
+        /**
+         * @param theProject open project to walk
+         * @param theNeedle lower-cased path substring
+         * @return the files of the project whose path contains the needle,
+         *         the walk giving up after five thousand matches
+         * @throws CoreException when the project cannot be walked
+         */
+        private static List<IResource> collectMatches(final IProject theProject,
+            final String theNeedle) throws CoreException {
+            final List<IResource> matches = new ArrayList<>();
+            theProject.accept(resource -> {
+                if(resource.getType() == IResource.FILE
+                    && resource.getProjectRelativePath().toPortableString()
+                        .toLowerCase(Locale.ROOT).contains(theNeedle)) {
+                    matches.add(resource);
+                }
+                return matches.size() < 5_000;
+            });
+            return matches;
         }
     }
 

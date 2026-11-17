@@ -33,30 +33,47 @@ public final class Frontmatter {
      * @return parsed header fields and the body after the closing fence
      */
     public static Frontmatter split(final String theRaw) {
-        final Map<String, String> parsed = new LinkedHashMap<>();
         String text = theRaw == null ? "" : theRaw;
         if(!text.isEmpty() && text.charAt(0) == BYTE_ORDER_MARK) {
             text = text.substring(1);
         }
         text = text.replace("\r\n", "\n");
-        String rest = text;
-        if(text.startsWith(FENCE + "\n")) {
-            final int closing = text.indexOf("\n" + FENCE, FENCE.length() + 1);
-            if(closing > 0) {
-                final String header = text.substring(FENCE.length() + 1, closing);
-                final int bodyStart = text.indexOf('\n', closing + FENCE.length() + 1);
-                rest = bodyStart < 0 ? "" : text.substring(bodyStart + 1);
-                for(final String line : header.split("\n")) {
-                    final int colon = line.indexOf(':');
-                    if(colon <= 0) {
-                        continue;
-                    }
-                    parsed.put(line.substring(0, colon).trim(),
-                        line.substring(colon + 1).trim());
-                }
-            }
+        final HeaderSplit split = splitHeader(text);
+        return new Frontmatter(split.fields(), split.rest().strip());
+    }
+
+    /**
+     * Cuts the fenced header off the normalized text and parses its fields.
+     *
+     * @param theText text without BOM, LF-only line endings
+     * @return the header fields and the text after the closing fence
+     */
+    private static HeaderSplit splitHeader(final String theText) {
+        final Map<String, String> parsed = new LinkedHashMap<>();
+        String rest = theText;
+        if(!theText.startsWith(FENCE + "\n")) {
+            return new HeaderSplit(parsed, rest);
         }
-        return new Frontmatter(parsed, rest.strip());
+        final int closing = theText.indexOf("\n" + FENCE, FENCE.length() + 1);
+        if(closing <= 0) {
+            return new HeaderSplit(parsed, rest);
+        }
+        final String header = theText.substring(FENCE.length() + 1, closing);
+        final int bodyStart = theText.indexOf('\n', closing + FENCE.length() + 1);
+        rest = bodyStart < 0 ? "" : theText.substring(bodyStart + 1);
+        for(final String line : header.split("\n")) {
+            final int colon = line.indexOf(':');
+            if(colon <= 0) {
+                continue;
+            }
+            parsed.put(line.substring(0, colon).trim(),
+                line.substring(colon + 1).trim());
+        }
+        return new HeaderSplit(parsed, rest);
+    }
+
+    /** Header fields of a fenced block and the text that follows it. */
+    private record HeaderSplit(Map<String, String> fields, String rest) {
     }
 
     /** @return unmodifiable map of header keys to trimmed values */

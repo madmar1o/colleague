@@ -86,16 +86,28 @@ public final class EditScript {
             return new ParseResult(null, "Missing \"path\": name the file to edit.");
         }
         JsonElement edits = root.get("edits");
-        if (edits == null || !edits.isJsonArray()) {
-            return new ParseResult(null, "Missing \"edits\": give a list of search/replace blocks.");
+        if (edits == null || !edits.isJsonArray() || edits.getAsJsonArray().isEmpty()) {
+            return new ParseResult(null, "Missing \"edits\": give a non-empty list of search/replace blocks.");
         }
-        JsonArray editList = edits.getAsJsonArray();
-        if (editList.isEmpty()) {
-            return new ParseResult(null, "\"edits\" is empty: nothing to change.");
+        ParseResult parsedBlocks = parseBlocks(edits.getAsJsonArray());
+        if (parsedBlocks.getScript() == null) {
+            return parsedBlocks;
         }
+        return new ParseResult(
+            new EditScript(root.get("path").getAsString(), parsedBlocks.getScript().getBlocks()),
+            null);
+    }
+
+    /**
+     * @param theEditList the edits array of the request
+     * @return a script carrying only the blocks when every block is well
+     *         shaped, otherwise a result with a null script and the refusal
+     *         message naming the offending block
+     */
+    private static ParseResult parseBlocks(final JsonArray theEditList) {
         List<EditBlock> blocks = new ArrayList<>();
-        for (int index = 0; index < editList.size(); index++) {
-            JsonElement element = editList.get(index);
+        for (int index = 0; index < theEditList.size(); index++) {
+            JsonElement element = theEditList.get(index);
             if (!element.isJsonObject()) {
                 return new ParseResult(null, EDIT_BLOCK_PREFIX + (index + 1) + " is not a JSON object.");
             }
@@ -111,7 +123,7 @@ public final class EditScript {
             blocks.add(new EditBlock(block.get(SEARCH).getAsString(),
                 block.get(REPLACE).getAsString()));
         }
-        return new ParseResult(new EditScript(root.get("path").getAsString(), blocks), null);
+        return new ParseResult(new EditScript("", blocks), null);
     }
 
     private static boolean isNonEmptyString(final JsonElement theElement) {

@@ -636,26 +636,80 @@ public class ColleagueView extends ViewPart {
             showNoContactsNotice();
             return;
         }
-        ContactsPanel.Contact preferred = null;
-        // a pair remembered from a previous session wins while it still
-        // exists among the available contacts; a stale pair (removed model)
-        // falls back to the provider default-model choice below
+        ourDefaultContactCache = choosePreferredContact(theAvailable);
+        // no auto-open on cold start any more: the agents page is where the
+        // view lands, and a chat begins only when the user picks an agent
+        maybeRunSelfTest();
+    }
+
+    /**
+     * Picks the contact to cache as the default one: a pair remembered from a
+     * previous session wins while it still exists among the available contacts;
+     * a stale pair (removed model) falls back to the provider default-model
+     * choice - the default provider's own default model, since reading the
+     * model off the built-in local provider instead made the preference follow
+     * a provider the user may not even have as default, so the first model of
+     * the right provider won by listing order.
+     *
+     * @param theAvailable contacts the provider list produced
+     * @return the contact to cache, never null for a non-empty list
+     */
+    private static ContactsPanel.Contact choosePreferredContact(
+        final List<ContactsPanel.Contact> theAvailable) {
         final String lastProvider = com.mad.edt.colleague.llm.ProviderStore.lastUsedProvider();
         final String lastModel = com.mad.edt.colleague.llm.ProviderStore.lastUsedModel();
-        if(!lastProvider.isEmpty() && !lastModel.isEmpty()) {
-            for(final ContactsPanel.Contact contact : theAvailable) {
-                if(contact.getProviderId().equals(lastProvider)
-                    && contact.getModel().equals(lastModel)) {
-                    preferred = contact;
-                    break;
-                }
+        final ContactsPanel.Contact remembered =
+            findRememberedContact(theAvailable, lastProvider, lastModel);
+        final ContactsPanel.Contact preferred = findDefaultContact(theAvailable, remembered);
+        return preferred == null ? theAvailable.get(0) : preferred;
+    }
+
+    /**
+     * @param theAvailable contacts the provider list produced
+     * @param theLastProvider provider remembered from a previous session
+     * @param theLastModel model remembered from a previous session
+     * @return the contact matching the remembered pair, null when the pair is
+     *         empty or no longer among the available contacts
+     */
+    private static ContactsPanel.Contact findRememberedContact(
+        final List<ContactsPanel.Contact> theAvailable, final String theLastProvider,
+        final String theLastModel) {
+        if(theLastProvider.isEmpty() || theLastModel.isEmpty()) {
+            return null;
+        }
+        for(final ContactsPanel.Contact contact : theAvailable) {
+            if(matchesPair(contact, theLastProvider, theLastModel)) {
+                return contact;
             }
         }
+        return null;
+    }
+
+    /**
+     * @param theContact contact to test
+     * @param theProviderId provider of the pair
+     * @param theModel model of the pair
+     * @return whether the contact carries exactly this provider-model pair
+     */
+    private static boolean matchesPair(final ContactsPanel.Contact theContact,
+        final String theProviderId, final String theModel) {
+        return theContact.getProviderId().equals(theProviderId)
+            && theContact.getModel().equals(theModel);
+    }
+
+    /**
+     * Applies the provider default-model choice over the remembered contact:
+     * the default contact is the default provider's own default model.
+     *
+     * @param theAvailable contacts the provider list produced
+     * @param theRemembered contact matching the remembered pair, possibly null
+     * @return the contact of the default choice, null when the default
+     *         provider has no contacts at all
+     */
+    private static ContactsPanel.Contact findDefaultContact(
+        final List<ContactsPanel.Contact> theAvailable, final ContactsPanel.Contact theRemembered) {
+        ContactsPanel.Contact preferred = theRemembered;
         final String defaultId = LLMSettings.getDefaultProviderId();
-        // the default contact is the default provider's own default model:
-        // reading the model off the built-in local provider instead made the
-        // preference follow a provider the user may not even have as default,
-        // so the first model of the right provider won by listing order
         final com.mad.edt.colleague.llm.ProviderConfig defaultConfig =
             LLMSettings.getConfig(defaultId);
         final String configured = defaultConfig == null ? null : defaultConfig.getDefaultModel();
@@ -671,13 +725,7 @@ public class ColleagueView extends ViewPart {
                 break;
             }
         }
-        if(preferred == null) {
-            preferred = theAvailable.get(0);
-        }
-        ourDefaultContactCache = preferred;
-        // no auto-open on cold start any more: the agents page is where the
-        // view lands, and a chat begins only when the user picks an agent
-        maybeRunSelfTest();
+        return preferred;
     }
 
     private void showNoContactsNotice() {

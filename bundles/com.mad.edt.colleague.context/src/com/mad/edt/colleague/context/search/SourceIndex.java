@@ -99,35 +99,8 @@ public final class SourceIndex {
         ourIndexing = true;
         final List<Entry> collected = new ArrayList<>();
         try {
-            ResourcesPlugin.getWorkspace().getRoot().accept((final IResource resource) -> {
-                if(theMonitor != null && theMonitor.isCanceled()) {
-                    return false;
-                }
-                if(collected.size() >= MAX_ENTRIES) {
-                    return false;
-                }
-                if(resource.getType() != IResource.FILE) {
-                    return true;
-                }
-                final IFile file = (IFile)resource;
-                final String name = file.getName().toLowerCase(Locale.ROOT);
-                final Path location = file.getLocation() == null ? null
-                    : file.getLocation().toFile().toPath();
-                if(location == null || !Files.isReadable(location)) {
-                    return false;
-                }
-                final long size;
-                try {
-                    size = Files.size(location);
-                } catch (final IOException ex) {
-                    return false;
-                }
-                if(!isIndexable(name, size)) {
-                    return false;
-                }
-                collected.add(new Entry(location, file.getProjectRelativePath().toPortableString()));
-                return false;
-            });
+            ResourcesPlugin.getWorkspace().getRoot().accept(
+                (final IResource resource) -> visit(resource, theMonitor, collected));
         } catch (final CoreException ex) {
             // keep whatever was collected before the failure
         } finally {
@@ -135,6 +108,51 @@ public final class SourceIndex {
         }
         replace(collected);
         return collected.size();
+    }
+
+    /**
+     * One node of the workspace walk.
+     *
+     * @param theMonitor progress monitor, may be {@code null}
+     * @param theCollected entries gathered so far
+     * @return {@code false} to stop the walk, {@code true} to descend
+     */
+    private static boolean visit(final IResource theResource, final IProgressMonitor theMonitor,
+        final List<Entry> theCollected) {
+        if(theMonitor != null && theMonitor.isCanceled()) {
+            return false;
+        }
+        if(theCollected.size() >= MAX_ENTRIES) {
+            return false;
+        }
+        if(theResource.getType() != IResource.FILE) {
+            return true;
+        }
+        addIfIndexable((IFile)theResource, theCollected);
+        return false;
+    }
+
+    /**
+     * @param theFile workspace file to consider
+     * @param theCollected entries gathered so far, the entry is added here
+     */
+    private static void addIfIndexable(final IFile theFile, final List<Entry> theCollected) {
+        final String name = theFile.getName().toLowerCase(Locale.ROOT);
+        final Path location = theFile.getLocation() == null ? null
+            : theFile.getLocation().toFile().toPath();
+        if(location == null || !Files.isReadable(location)) {
+            return;
+        }
+        final long size;
+        try {
+            size = Files.size(location);
+        } catch (final IOException ex) {
+            return;
+        }
+        if(!isIndexable(name, size)) {
+            return;
+        }
+        theCollected.add(new Entry(location, theFile.getProjectRelativePath().toPortableString()));
     }
 
     /**

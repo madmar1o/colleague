@@ -105,25 +105,52 @@ public final class PlanTool implements IToolExecutor {
         if(items == null || !items.isJsonArray() || items.getAsJsonArray().isEmpty()) {
             return ITEMS_ERROR;
         }
-        final List<Step> plan = new ArrayList<>();
-        for(final JsonElement entry : items.getAsJsonArray()) {
-            final String content = entry.isJsonObject() ? text(entry.getAsJsonObject(), CONTENT) : null;
-            if(content == null || content.isBlank()) {
-                return "ERROR: every step needs a non-empty content";
-            }
-            final String rawStatus = text(entry.getAsJsonObject(), "status");
-            Status status = Status.PENDING;
-            if(rawStatus != null && !rawStatus.isBlank()) {
-                status = toStatus(rawStatus);
-                if(status == null) {
-                    return "ERROR: unknown status '" + rawStatus
-                        + "' (accepted: pending, active, done)";
-                }
-            }
-            plan.add(new Step(content.trim(), status));
+        final List<Step> plan;
+        try {
+            plan = parseSteps(items.getAsJsonArray());
+        } catch (final IllegalArgumentException ex) {
+            return ex.getMessage();
         }
         board.replace(plan);
         return board.render();
+    }
+
+    /**
+     * @param theItems items array of the request
+     * @return the steps
+     * @throws IllegalArgumentException when a step was rejected, the message
+     *             is the reason the model is shown
+     */
+    private static List<Step> parseSteps(final JsonArray theItems) {
+        final List<Step> plan = new ArrayList<>();
+        for(final JsonElement entry : theItems) {
+            plan.add(parseStep(entry));
+        }
+        return plan;
+    }
+
+    /**
+     * @param theEntry one element of the items array
+     * @return the step
+     * @throws IllegalArgumentException when it lacks content or carries an
+     *             unknown status
+     */
+    private static Step parseStep(final JsonElement theEntry) {
+        final String content = theEntry.isJsonObject()
+            ? text(theEntry.getAsJsonObject(), CONTENT) : null;
+        if(content == null || content.isBlank()) {
+            throw new IllegalArgumentException("ERROR: every step needs a non-empty content");
+        }
+        final String rawStatus = text(theEntry.getAsJsonObject(), "status");
+        Status status = Status.PENDING;
+        if(rawStatus != null && !rawStatus.isBlank()) {
+            status = toStatus(rawStatus);
+            if(status == null) {
+                throw new IllegalArgumentException("ERROR: unknown status '" + rawStatus
+                    + "' (accepted: pending, active, done)");
+            }
+        }
+        return new Step(content.trim(), status);
     }
 
     private static Status toStatus(final String theRaw) {

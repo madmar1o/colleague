@@ -198,70 +198,17 @@ public final class ActiveEditorWatcher {
         final String path = file.getProjectRelativePath().toPortableString();
         ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric path=" + path);
 
-        // Try to get document via IDocumentProvider adapter
-        final IDocumentProvider provider = theEditor.getAdapter(IDocumentProvider.class);
-        if (provider == null) {
-            ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric - editor doesn't adapt to IDocumentProvider");
-            ourContext.clear();
-            return;
-        }
-        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric providerClass=" + provider.getClass().getName());
         try {
-            final org.eclipse.jface.text.IDocument doc = provider.getDocument(input);
-            if (doc == null) {
-                ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric - provider returned null document");
+            final String text = readDocumentText(theEditor, input);
+            if (text == null) {
                 ourContext.clear();
                 return;
             }
-            final String text = doc.get();
-            ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric docLength=" + text.length());
-
-            // Try to get caret/selection line via editor input's getSelection() (1C-specific)
-            int caretLine = 1;
-            try {
-                final java.lang.reflect.Method getSelection = input.getClass().getMethod("getSelection");
-                final Object sel = getSelection.invoke(input);
-                if (sel instanceof ISelection) {
-                    ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric has ISelection from input");
-                    if (sel instanceof TextSelection) {
-                        final TextSelection textSel = (TextSelection) sel;
-                        caretLine = textSel.getStartLine() + 1;
-                        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from input TextSelection=" + caretLine);
-                    }
-                }
-            } catch (final Exception ignored) {
-                // not a 1C input with getSelection()
-            }
-
+            int caretLine = caretLineFromInputSelection(input);
             // Fallback: Try to get caret line via ITextViewer or ISelectionProvider on editor
             if (caretLine == 1) {
-                final ITextViewer viewer = theEditor.getAdapter(ITextViewer.class);
-                if (viewer != null) {
-                    ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric has ITextViewer");
-                    final org.eclipse.swt.custom.StyledText textWidget = viewer.getTextWidget();
-                    if (textWidget != null) {
-                        caretLine = textWidget.getLineAtOffset(textWidget.getCaretOffset()) + 1;
-                        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from StyledText=" + caretLine);
-                    }
-                } else {
-                    ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric no ITextViewer, trying ISelectionProvider");
-                    // Try selection provider
-                    final ISelectionProvider selProvider = theEditor.getAdapter(ISelectionProvider.class);
-                    if (selProvider != null) {
-                        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric has ISelectionProvider");
-                        final ISelection sel = selProvider.getSelection();
-                        if (sel instanceof TextSelection) {
-                            caretLine = ((TextSelection) sel).getStartLine() + 1;
-                            ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from TextSelection=" + caretLine);
-                        } else {
-                            ColleagueLog.warn("[colleague] ActiveEditorWatcher: snapshotGeneric selection is not TextSelection: " + sel);
-                        }
-                    } else {
-                        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric no ISelectionProvider");
-                    }
-                }
+                caretLine = caretLineFromEditor(theEditor);
             }
-
             ourContext.show(path, caretLine, text);
             ColleagueLog.warn("[colleague] ActiveEditorWatcher: snapshotGeneric OK path=" + path + " line=" + caretLine + " chars=" + text.length());
         } catch (final Exception ex) {
@@ -269,6 +216,97 @@ public final class ActiveEditorWatcher {
             ColleagueLog.error("[colleague] unexpected failure", ex);
             ourContext.clear();
         }
+    }
+
+    /**
+     * Reads the document behind the editor through its IDocumentProvider
+     * adapter.
+     *
+     * @param theEditor non-ITextEditor editor part
+     * @param theInput input of the editor
+     * @return the document text, {@code null} when the editor does not adapt
+     *         to a document provider or the provider returns no document
+     */
+    private String readDocumentText(final IEditorPart theEditor, final IEditorInput theInput) {
+        // Try to get document via IDocumentProvider adapter
+        final IDocumentProvider provider = theEditor.getAdapter(IDocumentProvider.class);
+        if (provider == null) {
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric - editor doesn't adapt to IDocumentProvider");
+            return null;
+        }
+        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric providerClass=" + provider.getClass().getName());
+        final org.eclipse.jface.text.IDocument doc = provider.getDocument(theInput);
+        if (doc == null) {
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric - provider returned null document");
+            return null;
+        }
+        final String text = doc.get();
+        ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric docLength=" + text.length());
+        return text;
+    }
+
+    /**
+     * Asks the 1C input itself for its selection, the way DtEditorProxyInput
+     * exposes it.
+     *
+     * @param theInput editor input, may be a 1C proxy input
+     * @return the 1-based caret line, 1 when the input has no TextSelection
+     */
+    private int caretLineFromInputSelection(final IEditorInput theInput) {
+        // Try to get caret/selection line via editor input's getSelection() (1C-specific)
+        int caretLine = 1;
+        try {
+            final java.lang.reflect.Method getSelection = theInput.getClass().getMethod("getSelection");
+            final Object sel = getSelection.invoke(theInput);
+            if (sel instanceof ISelection) {
+                ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric has ISelection from input");
+                if (sel instanceof TextSelection) {
+                    final TextSelection textSel = (TextSelection) sel;
+                    caretLine = textSel.getStartLine() + 1;
+                    ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from input TextSelection=" + caretLine);
+                }
+            }
+        } catch (final Exception ignored) {
+            // not a 1C input with getSelection()
+        }
+        return caretLine;
+    }
+
+    /**
+     * Asks the editor's ITextViewer or ISelectionProvider adapter for the
+     * caret line.
+     *
+     * @param theEditor non-ITextEditor editor part
+     * @return the 1-based caret line, 1 when neither adapter answers
+     */
+    private int caretLineFromEditor(final IEditorPart theEditor) {
+        int caretLine = 1;
+        final ITextViewer viewer = theEditor.getAdapter(ITextViewer.class);
+        if (viewer != null) {
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric has ITextViewer");
+            final org.eclipse.swt.custom.StyledText textWidget = viewer.getTextWidget();
+            if (textWidget != null) {
+                caretLine = textWidget.getLineAtOffset(textWidget.getCaretOffset()) + 1;
+                ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from StyledText=" + caretLine);
+            }
+        } else {
+            ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric no ITextViewer, trying ISelectionProvider");
+            // Try selection provider
+            final ISelectionProvider selProvider = theEditor.getAdapter(ISelectionProvider.class);
+            if (selProvider != null) {
+                ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric has ISelectionProvider");
+                final ISelection sel = selProvider.getSelection();
+                if (sel instanceof TextSelection) {
+                    caretLine = ((TextSelection) sel).getStartLine() + 1;
+                    ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric caretLine from TextSelection=" + caretLine);
+                } else {
+                    ColleagueLog.warn("[colleague] ActiveEditorWatcher: snapshotGeneric selection is not TextSelection: " + sel);
+                }
+            } else {
+                ColleagueLog.info("[colleague] ActiveEditorWatcher: snapshotGeneric no ISelectionProvider");
+            }
+        }
+        return caretLine;
     }
 
     /**

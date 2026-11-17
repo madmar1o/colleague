@@ -367,29 +367,14 @@ public final class QdrantClient {
         final List<JsonObject> payloads = new ArrayList<>();
         String offset = null;
         while(true) {
-            final JsonObject body = new JsonObject();
-            body.addProperty("limit", Integer.valueOf(SCROLL_PAGE_LIMIT));
-            body.addProperty("with_vector", Boolean.FALSE);
-            final JsonArray fields = new JsonArray();
-            for(final String field : theFields) {
-                fields.add(field);
-            }
-            body.add("with_payload", fields);
-            if(offset != null) {
-                body.addProperty("offset", offset);
-            }
             final JsonObject result =
-                call("POST", COLLECTIONS_PATH + theCollection + "/points/scroll", body);
+                call("POST", COLLECTIONS_PATH + theCollection + "/points/scroll",
+                    scrollBody(offset, theFields));
             final JsonObject page = result.getAsJsonObject(RESULT);
             if(page == null || !page.has(POINTS)) {
                 break;
             }
-            int pagePoints = 0;
-            for(final com.google.gson.JsonElement element : page.getAsJsonArray(POINTS)) {
-                final JsonObject payload = element.getAsJsonObject().getAsJsonObject(PAYLOAD);
-                payloads.add(payload == null ? new JsonObject() : payload);
-                pagePoints++;
-            }
+            final int pagePoints = appendPage(payloads, page);
             final com.google.gson.JsonElement next = page.get("next_page_offset");
             if(next == null || next.isJsonNull() || pagePoints == 0) {
                 break;
@@ -400,12 +385,48 @@ public final class QdrantClient {
     }
 
     /**
+     * @param theOffset walk offset, {@code null} for the first page
+     * @param theFields payload fields to carry back
+     * @return the request body of one scroll page
+     */
+    private static JsonObject scrollBody(final String theOffset, final List<String> theFields) {
+        final JsonObject body = new JsonObject();
+        body.addProperty("limit", Integer.valueOf(SCROLL_PAGE_LIMIT));
+        body.addProperty("with_vector", Boolean.FALSE);
+        final JsonArray fields = new JsonArray();
+        for(final String field : theFields) {
+            fields.add(field);
+        }
+        body.add("with_payload", fields);
+        if(theOffset != null) {
+            body.addProperty("offset", theOffset);
+        }
+        return body;
+    }
+
+    /**
+     * @param thePayloads collected payloads, the page ones are appended
+     * @param thePage one scroll page answer
+     * @return points the page carried
+     */
+    private static int appendPage(final List<JsonObject> thePayloads, final JsonObject thePage) {
+        int pagePoints = 0;
+        for(final com.google.gson.JsonElement element : thePage.getAsJsonArray(POINTS)) {
+            final JsonObject payload = element.getAsJsonObject().getAsJsonObject(PAYLOAD);
+            thePayloads.add(payload == null ? new JsonObject() : payload);
+            pagePoints++;
+        }
+        return pagePoints;
+    }
+
+    /**
      * Number of stored points, for progress reporting and health checks.
      *
      * @param theCollection collection name
      * @return point count, {@code -1} when unknown
      */
-    public long count(final String theCollection) {        try {
+    public long count(final String theCollection) {
+        try {
             final JsonObject body = new JsonObject();
             body.addProperty("exact", Boolean.TRUE);
             final JsonObject result =

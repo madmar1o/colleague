@@ -120,6 +120,9 @@ public final class ChatPanel {
     /** Browser event kind carrying the finished answer payload. */
     private static final String PUSH_ANSWER = "answer";
 
+    /** Line that separates the answer body from its trailing stats line. */
+    private static final String STATS_SEPARATOR = "\n--- ";
+
     /** Live panels, kept in sync when the process-wide edit mode changes. */
     private static final List<ChatPanel> OUR_PANELS =
         new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -890,107 +893,140 @@ public final class ChatPanel {
                 if(ourRoot.isDisposed()) {
                     return;
                 }
-                final String question = abortProof
-                    ? "proof: write a very long detailed essay about typical configuration"
-                        + " architecture problems, at least two thousand words"
-                    : "proof: please answer with one word";
-                final String script =
+                injectComposer(proofQuestion(abortProof));
+                ColleagueLog.info("[colleague] bridge: page-side gesture injected");
+                if(!abortProof) {
+                    scheduleLayoutProbe();
+                }
+                if(abortProof) {
+                    scheduleAbortProof();
+                }
+            });
+        }
+
+        /**
+         * @param theAbortProof whether the long essay question is asked
+         * @return the question the injected composer submits
+         */
+        private static String proofQuestion(final boolean theAbortProof) {
+            return theAbortProof
+                ? "proof: write a very long detailed essay about typical configuration"
+                    + " architecture problems, at least two thousand words"
+                : "proof: please answer with one word";
+        }
+
+        /**
+         * Types the question into the page composer through the bridge, the
+         * way a real user gesture would.
+         *
+         * @param theQuestion question to type
+         */
+        private void injectComposer(final String theQuestion) {
+            ourBridge.executeScript(
+                "var q=document.getElementById('q');"
+                + "if(q && !q.value){q.value='" + theQuestion + "';"
+                + "q.dispatchEvent(new Event('input'));"
+                + "var f=document.getElementById('composer');"
+                + "if(f.requestSubmit){f.requestSubmit();}else{"
+                + "f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}}");
+        }
+
+        /**
+         * Schedules the layout regression probe: the one-word answer produces
+         * exactly the narrow bubble where the absolutely positioned time line
+         * used to hang out of the bubble and cover the avatar; measure every
+         * incoming bubble and report through the bridge so the log shows the
+         * geometry numbers.
+         */
+        private void scheduleLayoutProbe() {
+            Display.getDefault().timerExec(35000, () -> {
+                if(ourRoot.isDisposed() || ourBridge == null) {
+                    return;
+                }
+                ColleagueLog.info("[colleague] layout probe: measuring bubbles");
+                ourBridge.executeScript(
+                    "var out=[];"
+                    + "document.querySelectorAll('.row.in .bubble')"
+                    + ".forEach(function(b){"
+                    + "var m=b.querySelector('.meta');"
+                    + "var av=b.parentNode.querySelector('.smallavatar');"
+                    + "if(!m||!av){return;}"
+                    + "var mr=m.getBoundingClientRect(),"
+                    + "br=b.getBoundingClientRect(),"
+                    + "ar=av.getBoundingClientRect();"
+                    + "out.push('bw='+Math.round(br.width)"
+                    + "+' metaLeft='+Math.round(mr.left)"
+                    + "+' bubbleLeft='+Math.round(br.left)"
+                    + "+' avatarRight='+Math.round(ar.right)"
+                    + "+' avatarOverlapsMeta='"
+                    + "+String(ar.right>mr.left));});"
+                    + "apiCall('diag',{txt:out.join(' | ')});");
+            });
+        }
+
+        /**
+         * Schedules the autonomous proof of the stop path: six seconds into a
+         * long generation the panel dispatches the very stop request the page
+         * button would send, then measures how quickly the provider loop
+         * notices it.
+         */
+        private void scheduleAbortProof() {
+            Display.getDefault().timerExec(6000, () -> {
+                if(ourRoot.isDisposed()) {
+                    return;
+                }
+                ColleagueLog.info("[colleague] abort proof: dispatching stop");
+                handleBridge("abort", new JsonObject());
+            });
+            Display.getDefault().timerExec(8000, () -> {
+                if(ourRoot.isDisposed()) {
+                    return;
+                }
+                // ESC twice while the turn is still wrapping up: the page
+                // must route both presses and the panel must flip mode
+                ColleagueLog.info("[colleague] abort proof: injecting ESC pair");
+                injectEscape();
+            });
+            Display.getDefault().timerExec(8600, () -> {
+                if(ourRoot.isDisposed()) {
+                    return;
+                }
+                injectEscape();
+            });
+            Display.getDefault().timerExec(9500, () -> {
+                if(ourRoot.isDisposed()) {
+                    return;
+                }
+                // second question through the page composer while the workbench
+                // is still busy: proves the input is not locked after a stop
+                ColleagueLog.info("[colleague] abort proof: injecting second question");
+                ourBridge.executeScript(
                     "var q=document.getElementById('q');"
-                    + "if(q && !q.value){q.value='" + question + "';"
+                    + "q.value='proof2: answer with one word';"
                     + "q.dispatchEvent(new Event('input'));"
                     + "var f=document.getElementById('composer');"
                     + "if(f.requestSubmit){f.requestSubmit();}else{"
-                    + "f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}}";
-                ourBridge.executeScript(script);
-                ColleagueLog.info("[colleague] bridge: page-side gesture injected");
-                if(!abortProof) {
-                    // layout regression probe: the question above produces a one-word
-                    // answer, i.e. exactly the narrow bubble where the absolutely
-                    // positioned time line used to hang out of the bubble and cover
-                    // the avatar; measure every incoming bubble and report through
-                    // the bridge so the log shows the geometry numbers
-                    Display.getDefault().timerExec(35000, () -> {
-                        if(ourRoot.isDisposed() || ourBridge == null) {
-                            return;
-                        }
-                        ColleagueLog.info("[colleague] layout probe: measuring bubbles");
-                        ourBridge.executeScript(
-                            "var out=[];"
-                            + "document.querySelectorAll('.row.in .bubble')"
-                            + ".forEach(function(b){"
-                            + "var m=b.querySelector('.meta');"
-                            + "var av=b.parentNode.querySelector('.smallavatar');"
-                            + "if(!m||!av){return;}"
-                            + "var mr=m.getBoundingClientRect(),"
-                            + "br=b.getBoundingClientRect(),"
-                            + "ar=av.getBoundingClientRect();"
-                            + "out.push('bw='+Math.round(br.width)"
-                            + "+' metaLeft='+Math.round(mr.left)"
-                            + "+' bubbleLeft='+Math.round(br.left)"
-                            + "+' avatarRight='+Math.round(ar.right)"
-                            + "+' avatarOverlapsMeta='"
-                            + "+String(ar.right>mr.left));});"
-                            + "apiCall('diag',{txt:out.join(' | ')});");
-                    });
-                }
-                if(abortProof) {
-                    // autonomous proof of the stop path: six seconds into a long
-                    // generation the panel dispatches the very stop request the
-                    // page button would send, then measures how quickly the
-                    // provider loop notices it
-                    Display.getDefault().timerExec(6000, () -> {
-                        if(ourRoot.isDisposed()) {
-                            return;
-                        }
-                        ColleagueLog.info("[colleague] abort proof: dispatching stop");
-                        handleBridge("abort", new JsonObject());
-                    });
-                    Display.getDefault().timerExec(8000, () -> {
-                        if(ourRoot.isDisposed()) {
-                            return;
-                        }
-                        // ESC twice while the turn is still wrapping up: the page
-                        // must route both presses and the panel must flip mode
-                        ColleagueLog.info("[colleague] abort proof: injecting ESC pair");
-                        ourBridge.executeScript(
-                            "document.dispatchEvent(new KeyboardEvent('keydown',"
-                            + "{key:'Escape',bubbles:true}));");
-                    });
-                    Display.getDefault().timerExec(8600, () -> {
-                        if(ourRoot.isDisposed()) {
-                            return;
-                        }
-                        ourBridge.executeScript(
-                            "document.dispatchEvent(new KeyboardEvent('keydown',"
-                            + "{key:'Escape',bubbles:true}));");
-                    });
-                    Display.getDefault().timerExec(9500, () -> {
-                        if(ourRoot.isDisposed()) {
-                            return;
-                        }
-                        // second question through the page composer while the workbench
-                        // is still busy: proves the input is not locked after a stop
-                        ColleagueLog.info("[colleague] abort proof: injecting second question");
-                        ourBridge.executeScript(
-                            "var q=document.getElementById('q');"
-                            + "q.value='proof2: answer with one word';"
-                            + "q.dispatchEvent(new Event('input'));"
-                            + "var f=document.getElementById('composer');"
-                            + "if(f.requestSubmit){f.requestSubmit();}else{"
-                            + "f.dispatchEvent(new Event('submit',{cancelable:true,"
-                            + "bubbles:true}));}");
-                    });
-                    Display.getDefault().timerExec(15000, () -> {
-                        if(ourRoot.isDisposed()) {
-                            return;
-                        }
-                        // stop the second turn too: it runs through the agent loop,
-                        // so this exercises cancellation between agent steps
-                        ColleagueLog.info("[colleague] abort proof: stopping second turn");
-                        handleBridge("abort", new JsonObject());
-                    });
-                }
+                    + "f.dispatchEvent(new Event('submit',{cancelable:true,"
+                    + "bubbles:true}));}");
             });
+            Display.getDefault().timerExec(15000, () -> {
+                if(ourRoot.isDisposed()) {
+                    return;
+                }
+                // stop the second turn too: it runs through the agent loop,
+                // so this exercises cancellation between agent steps
+                ColleagueLog.info("[colleague] abort proof: stopping second turn");
+                handleBridge("abort", new JsonObject());
+            });
+        }
+
+        /**
+         * Dispatches one Escape keydown on the page document.
+         */
+        private void injectEscape() {
+            ourBridge.executeScript(
+                "document.dispatchEvent(new KeyboardEvent('keydown',"
+                + "{key:'Escape',bubbles:true}));");
         }
 
         /**
@@ -1033,58 +1069,84 @@ public final class ChatPanel {
             busyOn.addProperty("busy", Boolean.TRUE);
             pushNow("busy", busyOn);
             setStatus("Агент: продолжает прерванный ход...");
-            final IJobFunction continueBody = (final IProgressMonitor monitor) -> {
-                GeneratorGate.GLOBAL.enter();
-                try {
-                    ourTurns.attachWorker(turn, Thread.currentThread());
-                    final String answer = runAgent("", "", turn.cancellation(), conversation);
-                    final int split = answer.lastIndexOf("\n--- ");
-                    final String body = split > 0 ? answer.substring(0, split).strip() : answer;
-                    final String stats = split > 0 ? answer.substring(split + 1).strip() : "";
-                    ourLastAnswer = body;
-                    if(!body.isEmpty() && ourTurns.isCurrent(turn)) {
-                        final JsonObject payload = new JsonObject();
-                        payload.addProperty("text", body);
-                        payload.addProperty("time", timeLabel());
-                        // the continuation may spend the new budget too: the page
-                        // gets another offer over the newly open history
-                        payload.addProperty("resumable",
-                            Boolean.valueOf(!ourInterruptedConversation.isEmpty()));
-                        pushNow(PUSH_ANSWER, payload);
-                    }
-                    setStatus(stats);
-                    // the exchange is complete and already in the session's
-                    // memory: hand it to the durable store before the turn ends,
-                    // so a crash or restart right after an answer loses nothing
-                    persistTranscript();
-                    return Status.OK_STATUS;
-                } catch (final Exception ex) {
-                    if(!ourTurns.isAborted() && ourTurns.isCurrent(turn)) {
-                        final JsonObject payload = new JsonObject();
-                        payload.addProperty("text", String.valueOf(ex.getMessage()));
-                        payload.addProperty("time", timeLabel());
-                        pushNow("error", payload);
-                    }
-                    return Status.OK_STATUS;
-                } finally {
-                    GeneratorGate.GLOBAL.leave();
-                    if(Thread.currentThread().isInterrupted()) {
-                        // the stop interrupt belongs to this turn only: clear its
-                        // status so it cannot leak into the next pooled worker run
-                        Thread.interrupted();
-                    }
-                    ourBusy = false;
-                    Display.getDefault().asyncExec(() -> {
-                        if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
-                            final JsonObject busyOff = new JsonObject();
-                            busyOff.addProperty("busy", Boolean.FALSE);
-                            pushNow("busy", busyOff);
-                        }
-                    });
-                }
-            };
+            final IJobFunction continueBody = (final IProgressMonitor monitor) ->
+                runContinueTurn(turn, conversation);
             ourQuestionJob = Job.create("Colleague: continue turn", continueBody);
             ourQuestionJob.schedule();
+        }
+
+        /**
+         * Runs one continued turn on a worker thread: the carried history
+         * goes through the same edit-mode wiring, the answer is presented on
+         * the page and the busy state is always released.
+         *
+         * @param theTurn turn owning the generator and the cancellation latch
+         * @param theConversation the carried history to resume
+         * @return job status, always OK: an aborted or stale turn leaves the
+         *         panel alone and a current one reports through the page
+         */
+        private IStatus runContinueTurn(
+            final TurnController.Turn theTurn, final List<ChatMessage> theConversation) {
+            GeneratorGate.GLOBAL.enter();
+            try {
+                ourTurns.attachWorker(theTurn, Thread.currentThread());
+                final String answer = runAgent("", "", theTurn.cancellation(), theConversation);
+                presentContinueAnswer(answer, theTurn);
+                final int split = answer.lastIndexOf(STATS_SEPARATOR);
+                setStatus(split > 0 ? answer.substring(split + 1).strip() : "");
+                // the exchange is complete and already in the session's
+                // memory: hand it to the durable store before the turn ends,
+                // so a crash or restart right after an answer loses nothing
+                persistTranscript();
+                return Status.OK_STATUS;
+            } catch (final Exception ex) {
+                if(!ourTurns.isAborted() && ourTurns.isCurrent(theTurn)) {
+                    final JsonObject payload = new JsonObject();
+                    payload.addProperty("text", String.valueOf(ex.getMessage()));
+                    payload.addProperty("time", timeLabel());
+                    pushNow("error", payload);
+                }
+                return Status.OK_STATUS;
+            } finally {
+                GeneratorGate.GLOBAL.leave();
+                if(Thread.currentThread().isInterrupted()) {
+                    // the stop interrupt belongs to this turn only: clear its
+                    // status so it cannot leak into the next pooled worker run
+                    Thread.interrupted();
+                }
+                ourBusy = false;
+                Display.getDefault().asyncExec(() -> {
+                    if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
+                        final JsonObject busyOff = new JsonObject();
+                        busyOff.addProperty("busy", Boolean.FALSE);
+                        pushNow("busy", busyOff);
+                    }
+                });
+            }
+        }
+
+        /**
+         * Splits the continued answer from its stats line and shows the body
+         * on the page; the continuation may spend the new budget too, so the
+         * page gets another offer over the newly open history.
+         *
+         * @param theAnswer answer with its trailing stats line
+         * @param theTurn turn the answer belongs to
+         */
+        private void presentContinueAnswer(final String theAnswer,
+            final TurnController.Turn theTurn) {
+            final int split = theAnswer.lastIndexOf(STATS_SEPARATOR);
+            final String body = split > 0 ? theAnswer.substring(0, split).strip() : theAnswer;
+            ourLastAnswer = body;
+            if(body.isEmpty() || !ourTurns.isCurrent(theTurn)) {
+                return;
+            }
+            final JsonObject payload = new JsonObject();
+            payload.addProperty("text", body);
+            payload.addProperty("time", timeLabel());
+            payload.addProperty("resumable",
+                Boolean.valueOf(!ourInterruptedConversation.isEmpty()));
+            pushNow(PUSH_ANSWER, payload);
         }
 
     }
@@ -1411,11 +1473,7 @@ public final class ChatPanel {
         // a slash line naming a loaded command is expanded into its prompt
         // template before the model sees it; the chat bubble keeps showing
         // what the user actually typed, an unknown slash line stays text
-        final SlashCommands commands =
-            ourCommandSupplier == null ? null : ourCommandSupplier.get();
-        final SlashCommands.Invocation invocation =
-            commands == null ? null : commands.match(question);
-        final String prompt = invocation == null ? question : invocation.prompt();
+        final String prompt = promptFor(question);
         // a fresh question replaces the exchange, so an interrupted agent
         // turn cannot be picked back up afterwards and its carried history
         // must not leak into the next answer's continuation offer
@@ -1425,25 +1483,9 @@ public final class ChatPanel {
         final boolean editMode = AgentMode.isOn() && ourToolSupplier != null;
         final boolean browser = ourBridge != null && ourBridge.isReady();
         if(browser) {
-            final JsonObject user = new JsonObject();
-            user.addProperty("text", question);
-            user.addProperty("time", timeLabel());
-            pushNow("user", user);
-            final JsonObject busy = new JsonObject();
-            busy.addProperty("busy", Boolean.TRUE);
-            pushNow("busy", busy);
+            echoOnPage(question);
         } else {
-            if(!context.isEmpty()) {
-                appendLine("Вы: " + question + "  [к вопросу прикреплён контекст проекта, "
-                    + context.length() + " символов, остаётся в диалоге до «Нового диалога»]");
-            } else if(editMode) {
-                appendLine("Вы: " + question + "  [режим правки: агент с инструментами проекта]");
-            } else {
-                appendLine("Вы: " + question + "  [контекст проекта: автоматический поиск]");
-            }
-            if(ourQuestion != null && !ourQuestion.isDisposed()) {
-                ourQuestion.setText("");
-            }
+            echoInTextEditor(question, context, editMode);
         }
         ourBusy = true;
         final TurnController.Turn turn = ourTurns.startTurn();
@@ -1455,130 +1497,271 @@ public final class ChatPanel {
         final StreamBatcher deltaBatcher = new StreamBatcher();
         final StreamBatcher thinkingBatcher = new StreamBatcher();
 
-        final IJobFunction questionBody = (final IProgressMonitor monitor) -> {
-            // the turn owns the generator from context gathering to the last
-            // streamed chunk: a background embedding pass interleaving in
-            // between swaps the single resident model and every step of this
-            // turn pays for loading it back
-            GeneratorGate.GLOBAL.enter();
-            try {
-                ourTurns.attachWorker(turn, Thread.currentThread());
-                final String effectiveContext = context.isEmpty() && ourAutoContextSupplier != null
-                    ? applyOrEmpty(ourAutoContextSupplier, prompt) : context;
-                ColleagueLog.info("[colleague] autocontext: " + effectiveContext.length()
-                    + " chars for question [" + question.replace('\n', ' ') + "]");
-                final String answer;
-                if(editMode) {
-                    answer = runAgent(prompt,
-                        ContextBudget.trimMiddle(effectiveContext, AGENT_CONTEXT_MAX_CHARS),
-                        turn.cancellation());
-                } else {
-                    answer = ourSession.ask(ourModel, effectiveContext, prompt,
-                        browser ? chunk -> feedDelta(chunk, deltaBatcher)
-                            : chunk -> { },
-                        browser ? chunk -> feedDelta(chunk, thinkingBatcher,
-                            "thinking")
-                            : chunk -> { },
-                        turn.cancellation());
-                }
-                if(browser) {
-                    // the model call returned: flush the stream tails the
-                    // batch timer never released, in production order and
-                    // ahead of the answer event, so the page closes the
-                    // reasoning block before it paints the final bubble
-                    pushTail(thinkingBatcher, "thinking");
-                    pushTail(deltaBatcher, "delta");
-                }
-                final int split = answer.lastIndexOf("\n--- ");
-                final String body = split > 0 ? answer.substring(0, split).strip() : answer;
-                final String baseStats = split > 0 ? answer.substring(split + 1).strip() : "";
-                // the runtime cuts the oldest prompt text in silence when the
-                // window runs out: only the stop reason says so, and without
-                // this note the user reads a shortened answer as a full one
-                final String stats = ourSession.wasLastTurnTruncated()
-                    ? (baseStats.isEmpty()
-                        ? "Контекст обрезан рантаймом, ответ неполный"
-                        : baseStats + " — контекст обрезан рантаймом, ответ неполный")
-                    : baseStats;
-                ourLastAnswer = body;
-                if(turn.cancellation().isCancelled()) {
-                    ColleagueLog.info("[colleague] cancelled turn observed: partial "
-                        + body.length() + " chars, stop->unwind latency "
-                        + ourTurns.stopLatencyMs() + " ms");
-                }
-                if(!body.isEmpty() && ourTurns.isCurrent(turn)) {
-                    if(browser) {
-                        final JsonObject payload = new JsonObject();
-                        payload.addProperty("text", body);
-                        payload.addProperty("time", timeLabel());
-                        // a spent agent budget hands over its open history:
-                        // the page turns this flag into a continue button
-                        payload.addProperty("resumable",
-                            Boolean.valueOf(!ourInterruptedConversation.isEmpty()));
-                        // pushed from this worker on purpose: the bridge
-                        // queue is the delivery order, and an asyncExec hop
-                        // here could overtake the streamed batches already
-                        // queued ahead of the answer
-                        pushNow(PUSH_ANSWER, payload);
-                    } else {
-                        Display.getDefault().asyncExec(
-                            () -> appendLine("Colleague: " + body));
-                    }
-                    if(ourAnswerListener != null) {
-                        Display.getDefault().asyncExec(
-                            () -> ourAnswerListener.accept(body));
-                    }
-                }
-                setStatus(stats);
-                // the exchange is complete and already in the session's
-                // memory: hand it to the durable store before the turn ends,
-                // so a crash or restart right after an answer loses nothing
-                persistTranscript();
-                return Status.OK_STATUS;
-            } catch (final Exception ex) {
-                final boolean aborted = ourTurns.isAborted();
-                if(aborted) {
-                    ColleagueLog.info("[colleague] cancelled turn unwound with error: "
-                        + ex.getMessage() + ", stop->unwind latency "
-                        + ourTurns.stopLatencyMs() + " ms");
-                }
-                if(!aborted && ourTurns.isCurrent(turn)) {
-                    Display.getDefault().asyncExec(() -> {
-                        if(browser) {
-                            final JsonObject payload = new JsonObject();
-                            payload.addProperty("text", String.valueOf(ex.getMessage()));
-                            payload.addProperty("time", timeLabel());
-                            pushNow("error", payload);
-                        } else {
-                            appendLine("Ошибка: " + ex.getMessage());
-                        }
-                    });
-                    return new Status(IStatus.ERROR, ColleagueUIPlugin.PLUGIN_ID,
-                        "assistant call failed", ex);
-                }
-                return Status.OK_STATUS;
-            } finally {
-                GeneratorGate.GLOBAL.leave();
-                if(Thread.currentThread().isInterrupted()) {
-                    // the stop interrupt belongs to this turn only: clear its
-                    // status so it cannot leak into the next pooled worker run
-                    Thread.interrupted();
-                }
-                ourBusy = false;
-                Display.getDefault().asyncExec(() -> {
-                    if(ourAskButton != null && !ourAskButton.isDisposed()) {
-                        ourAskButton.setEnabled(true);
-                    }
-                    if(ourBridge != null && ourBridge.isReady()) {
-                        final JsonObject busy = new JsonObject();
-                        busy.addProperty("busy", Boolean.FALSE);
-                        pushNow("busy", busy);
-                    }
-                });
-            }
-        };
+        final IJobFunction questionBody = (final IProgressMonitor monitor) ->
+            runQuestionTurn(turn, question, prompt, context, editMode, browser,
+                new StreamBatchers(deltaBatcher, thinkingBatcher));
         ourQuestionJob = Job.create("Colleague: question", questionBody);
         ourQuestionJob.schedule();
+    }
+
+    /**
+     * Expands a slash line naming a loaded command into its prompt template;
+     * an unknown slash line stays plain text.
+     *
+     * @param theQuestion trimmed text as the user typed it
+     * @return text the model will see
+     */
+    private String promptFor(final String theQuestion) {
+        final SlashCommands commands =
+            ourCommandSupplier == null ? null : ourCommandSupplier.get();
+        final SlashCommands.Invocation invocation =
+            commands == null ? null : commands.match(theQuestion);
+        return invocation == null ? theQuestion : invocation.prompt();
+    }
+
+    /**
+     * Shows the question and the busy state on the chat page.
+     *
+     * @param theQuestion text as the user typed it
+     */
+    private void echoOnPage(final String theQuestion) {
+        final JsonObject user = new JsonObject();
+        user.addProperty("text", theQuestion);
+        user.addProperty("time", timeLabel());
+        pushNow("user", user);
+        final JsonObject busy = new JsonObject();
+        busy.addProperty("busy", Boolean.TRUE);
+        pushNow("busy", busy);
+    }
+
+    /**
+     * Shows the question in the fallback text view and clears the composer.
+     *
+     * @param theQuestion text as the user typed it
+     * @param theContext context attached to the question, possibly empty
+     * @param theEditMode whether the agent-with-tools path is taken
+     */
+    private void echoInTextEditor(final String theQuestion, final String theContext,
+        final boolean theEditMode) {
+        echoQuestion(theQuestion, theContext, theEditMode);
+        if(ourQuestion != null && !ourQuestion.isDisposed()) {
+            ourQuestion.setText("");
+        }
+    }
+
+    /**
+     * Runs one question turn on a worker thread: gathers context, asks the
+     * generator, presents the answer and always releases the busy state.
+     *
+     * @param theTurn turn owning the generator and the cancellation latch
+     * @param theQuestion text as the user typed it, for the log line
+     * @param thePrompt text after slash-command expansion, for the model
+     * @param theContext context attached to the question, possibly empty
+     * @param theEditMode whether the agent-with-tools path is taken
+     * @param theBrowser whether the chat page receives the events
+     * @param theBatchers stream batchers of the answer and the reasoning stream
+     * @return job status, an error only when the turn is still current
+     */
+    private IStatus runQuestionTurn(
+        final TurnController.Turn theTurn, final String theQuestion, final String thePrompt,
+        final String theContext, final boolean theEditMode, final boolean theBrowser,
+        final StreamBatchers theBatchers) {
+        // the turn owns the generator from context gathering to the last
+        // streamed chunk: a background embedding pass interleaving in
+        // between swaps the single resident model and every step of this
+        // turn pays for loading it back
+        GeneratorGate.GLOBAL.enter();
+        try {
+            ourTurns.attachWorker(theTurn, Thread.currentThread());
+            final String effectiveContext =
+                theContext.isEmpty() && ourAutoContextSupplier != null
+                    ? applyOrEmpty(ourAutoContextSupplier, thePrompt) : theContext;
+            ColleagueLog.info("[colleague] autocontext: " + effectiveContext.length()
+                + " chars for question [" + theQuestion.replace('\n', ' ') + "]");
+            final String answer = theEditMode
+                ? runAgent(thePrompt,
+                    ContextBudget.trimMiddle(effectiveContext, AGENT_CONTEXT_MAX_CHARS),
+                    theTurn.cancellation())
+                : obtainAnswer(thePrompt, effectiveContext, theTurn, theBrowser,
+                    theBatchers);
+            if(theBrowser) {
+                // the model call returned: flush the stream tails the
+                // batch timer never released, in production order and
+                // ahead of the answer event, so the page closes the
+                // reasoning block before it paints the final bubble
+                pushTail(theBatchers.thinking(), "thinking");
+                pushTail(theBatchers.delta(), "delta");
+            }
+            final String stats = presentAnswer(answer, theTurn, theBrowser);
+            setStatus(stats);
+            // the exchange is complete and already in the session's
+            // memory: hand it to the durable store before the turn ends,
+            // so a crash or restart right after an answer loses nothing
+            persistTranscript();
+            return Status.OK_STATUS;
+        } catch (final Exception ex) {
+            return handleQuestionFailure(ex, theTurn, theBrowser);
+        } finally {
+            finishQuestionTurn(theBrowser);
+        }
+    }
+
+    /** Stream batchers of one question turn: answer stream and reasoning stream. */
+    private record StreamBatchers(StreamBatcher delta, StreamBatcher thinking) {
+    }
+
+    /**
+     * Asks the generator for one answer, streaming through the batchers when
+     * the chat page is connected.
+     *
+     * @param thePrompt prompt text after slash-command expansion
+     * @param theContext context for the question
+     * @param theTurn turn owning the cancellation latch
+     * @param theBrowser whether streams go to the chat page
+     * @param theBatchers stream batchers of the answer and the reasoning stream
+     * @return the answer with its stats line
+     */
+    private String obtainAnswer(final String thePrompt, final String theContext,
+        final TurnController.Turn theTurn, final boolean theBrowser,
+        final StreamBatchers theBatchers)
+        throws com.mad.edt.colleague.llm.LLMException {
+        final Consumer<String> onDelta = theBrowser
+            ? chunk -> feedDelta(chunk, theBatchers.delta()) : chunk -> { };
+        final Consumer<String> onThinking = theBrowser
+            ? chunk -> feedDelta(chunk, theBatchers.thinking(), "thinking") : chunk -> { };
+        return ourSession.ask(ourModel, theContext, thePrompt, onDelta, onThinking,
+            theTurn.cancellation());
+    }
+
+    /**
+     * Splits the answer from its stats line, remembers the body and shows it
+     * on the page or in the fallback text view.
+     *
+     * @param theAnswer answer with its trailing stats line
+     * @param theTurn turn the answer belongs to
+     * @param theBrowser whether the chat page receives the events
+     * @return the stats line to show in the status line
+     */
+    private String presentAnswer(final String theAnswer, final TurnController.Turn theTurn,
+        final boolean theBrowser) {
+        final int split = theAnswer.lastIndexOf(STATS_SEPARATOR);
+        final String body = split > 0 ? theAnswer.substring(0, split).strip() : theAnswer;
+        final String baseStats = split > 0 ? theAnswer.substring(split + 1).strip() : "";
+        // the runtime cuts the oldest prompt text in silence when the
+        // window runs out: only the stop reason says so, and without
+        // this note the user reads a shortened answer as a full one
+        final String stats = ourSession.wasLastTurnTruncated()
+            ? (baseStats.isEmpty()
+                ? "Контекст обрезан рантаймом, ответ неполный"
+                : baseStats + " — контекст обрезан рантаймом, ответ неполный")
+            : baseStats;
+        ourLastAnswer = body;
+        if(theTurn.cancellation().isCancelled()) {
+            ColleagueLog.info("[colleague] cancelled turn observed: partial "
+                + body.length() + " chars, stop->unwind latency "
+                + ourTurns.stopLatencyMs() + " ms");
+        }
+        if(!body.isEmpty() && ourTurns.isCurrent(theTurn)) {
+            if(theBrowser) {
+                final JsonObject payload = new JsonObject();
+                payload.addProperty("text", body);
+                payload.addProperty("time", timeLabel());
+                // a spent agent budget hands over its open history:
+                // the page turns this flag into a continue button
+                payload.addProperty("resumable",
+                    Boolean.valueOf(!ourInterruptedConversation.isEmpty()));
+                // pushed from this worker on purpose: the bridge
+                // queue is the delivery order, and an asyncExec hop
+                // here could overtake the streamed batches already
+                // queued ahead of the answer
+                pushNow(PUSH_ANSWER, payload);
+            } else {
+                Display.getDefault().asyncExec(
+                    () -> appendLine("Colleague: " + body));
+            }
+            if(ourAnswerListener != null) {
+                Display.getDefault().asyncExec(
+                    () -> ourAnswerListener.accept(body));
+            }
+        }
+        return stats;
+    }
+
+    /**
+     * @param theException failure of the model call or of the agent loop
+     * @param theTurn turn the failure belongs to
+     * @param theBrowser whether the chat page receives the events
+     * @return job status, an error only when the turn is still current
+     */
+    private IStatus handleQuestionFailure(final Exception theException,
+        final TurnController.Turn theTurn, final boolean theBrowser) {
+        final boolean aborted = ourTurns.isAborted();
+        if(aborted) {
+            ColleagueLog.info("[colleague] cancelled turn unwound with error: "
+                + theException.getMessage() + ", stop->unwind latency "
+                + ourTurns.stopLatencyMs() + " ms");
+        }
+        if(!aborted && ourTurns.isCurrent(theTurn)) {
+            Display.getDefault().asyncExec(() -> {
+                if(theBrowser) {
+                    final JsonObject payload = new JsonObject();
+                    payload.addProperty("text", String.valueOf(theException.getMessage()));
+                    payload.addProperty("time", timeLabel());
+                    pushNow("error", payload);
+                } else {
+                    appendLine("Ошибка: " + theException.getMessage());
+                }
+            });
+            return new Status(IStatus.ERROR, ColleagueUIPlugin.PLUGIN_ID,
+                "assistant call failed", theException);
+        }
+        return Status.OK_STATUS;
+    }
+
+    /**
+     * Releases the panel after a question turn: leaves the generator gate,
+     * clears the stop interrupt of this worker and re-enables the input.
+     *
+     * @param theBrowser whether the chat page receives the events
+     */
+    private void finishQuestionTurn(final boolean theBrowser) {
+        GeneratorGate.GLOBAL.leave();
+        if(Thread.currentThread().isInterrupted()) {
+            // the stop interrupt belongs to this turn only: clear its
+            // status so it cannot leak into the next pooled worker run
+            Thread.interrupted();
+        }
+        ourBusy = false;
+        Display.getDefault().asyncExec(() -> {
+            if(ourAskButton != null && !ourAskButton.isDisposed()) {
+                ourAskButton.setEnabled(true);
+            }
+            if(theBrowser && ourBridge != null && ourBridge.isReady()) {
+                final JsonObject busy = new JsonObject();
+                busy.addProperty("busy", Boolean.FALSE);
+                pushNow("busy", busy);
+            }
+        });
+    }
+
+    /**
+     * Shows the question in the fallback text view with the note that tells
+     * which path the answer will take.
+     *
+     * @param theQuestion text as the user typed it
+     * @param theContext context attached to the question, possibly empty
+     * @param theEditMode whether the agent-with-tools path is taken
+     */
+    private void echoQuestion(final String theQuestion, final String theContext,
+        final boolean theEditMode) {
+        if(!theContext.isEmpty()) {
+            appendLine("Вы: " + theQuestion + "  [к вопросу прикреплён контекст проекта, "
+                + theContext.length() + " символов, остаётся в диалоге до «Нового диалога»]");
+        } else if(theEditMode) {
+            appendLine("Вы: " + theQuestion + "  [режим правки: агент с инструментами проекта]");
+        } else {
+            appendLine("Вы: " + theQuestion + "  [контекст проекта: автоматический поиск]");
+        }
     }
 
     /**
@@ -1667,83 +1850,10 @@ public final class ChatPanel {
         final CancellationFlag theCancellation, final List<ChatMessage> theConversation)
         throws com.mad.edt.colleague.llm.LLMException {
         final AgentProfile profile = pickedProfile();
-        final ToolPolicy policy = new ToolPolicy().excludeUnused(PRUNE_AFTER_IDLE_RUNS);
-        // the chat mode is the first gate: in plan mode the supplier still
-        // hands over the write-capable set (the legacy isOn flag is true for
-        // it), and allowsIn takes write_file/edit_file back out, so a
-        // planning agent can only observe and lay out steps
         final ChatMode mode = AgentMode.current();
-        final List<IToolExecutor> tools = new ArrayList<>();
-        for(final IToolExecutor tool : ourToolSupplier.get()) {
-            if(policy.allowsIn(mode, tool.getName())
-                && policy.allows(profile, tool.getName())
-                && policy.shouldOffer(ourToolUsage, tool.getName())) {
-                tools.add(tool);
-            }
-        }
-        if(policy.allowsIn(mode, PlanTool.TOOL_ID)
-            && policy.allows(profile, PlanTool.TOOL_ID)
-            && policy.shouldOffer(ourToolUsage, PlanTool.TOOL_ID)) {
-            tools.add(new PlanTool(ourPlanBoard));
-        }
-        if(ourLessonMemory != null && policy.allowsIn(mode, MemoryTool.TOOL_ID)
-            && policy.allows(profile, MemoryTool.TOOL_ID)
-            && policy.shouldOffer(ourToolUsage, MemoryTool.TOOL_ID)) {
-            tools.add(new MemoryTool(ourLessonMemory));
-        }
-        final SkillRegistry skills = ourSkillSupplier == null ? null : ourSkillSupplier.get();
-        if(skills != null && !skills.isEmpty() && policy.allowsIn(mode, SkillTool.TOOL_ID)
-            && policy.allows(profile, SkillTool.TOOL_ID)
-            && policy.shouldOffer(ourToolUsage, SkillTool.TOOL_ID)) {
-            tools.add(new SkillTool(skills));
-        }
-        if(ourMcpCatalog != null) {
-            // remote tools join after the local ones so a built-in name always
-            // wins the collision check, and they reach the subagent delegate
-            // through the same list below
-            final Set<String> reserved = new LinkedHashSet<>();
-            boolean localWrites = false;
-            for(final IToolExecutor tool : tools) {
-                reserved.add(tool.getName());
-                localWrites |= "write_file".equals(tool.getName())
-                    || "edit_file".equals(tool.getName());
-            }
-            for(final IToolExecutor remote
-                : ourMcpCatalog.tools(reserved, this::confirmRemoteCall)) {
-                if(!remote.isParallelSafe() && !localWrites) {
-                    continue; // a read-only run keeps read-only remote tools only
-                }
-                if(policy.allowsIn(mode, remote.getName())
-                    && policy.allows(profile, remote.getName())
-                    && policy.shouldOffer(ourToolUsage, remote.getName())) {
-                    tools.add(remote);
-                }
-            }
-        }
-        if(policy.allowsIn(mode, SubagentTool.TOOL_NAME) && policy.allows(profile, SubagentTool.TOOL_NAME)
-            && policy.shouldOffer(ourToolUsage, SubagentTool.TOOL_NAME)) {
-            // the delegate hears about its finished turn through this panel so
-            // the page shows a card; the listener thread is the worker thread,
-            // delivery to the page goes through asyncExec as everywhere else
-            // the delegate resolves its own profile model inside the tool, so
-            // the parent hands over just the chat's model as the fallback
-            tools.add(new SubagentTool(SubagentSettings
-                .of(ourSession.getProvider(), ourModel, tools, profileCatalog(), 0)
-                .withCancellation(theCancellation).withRegistry(ourSubagents)
-                .withListener((agent, description, result) -> Display.getDefault().asyncExec(() -> {
-                    if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
-                        final JsonObject card = new JsonObject();
-                        card.addProperty("agent", agent);
-                        card.addProperty("description", description);
-                        card.addProperty("result", result);
-                        pushNow(SubagentTool.TOOL_NAME, card);
-                    }
-                }))));
-        }
-        final String model = profile != null && profile.getModelName() != null
-            && !profile.getModelName().isEmpty() ? profile.getModelName() : ourModel;
-        final int maxSteps = profile != null && profile.getMaxSteps() > 0
-            ? profile.getMaxSteps() : AGENT_MAX_STEPS;
+        final List<IToolExecutor> tools = assembleToolsFor(mode, profile, theCancellation);
+        final String model = modelFor(profile);
+        final int maxSteps = maxStepsFor(profile);
         final List<String> offered = new ArrayList<>();
         for(final IToolExecutor tool : tools) {
             offered.add(tool.getName());
@@ -1756,60 +1866,15 @@ public final class ChatPanel {
             tools, model, maxSteps, theCancellation,
             new PageAgentObserver(new LoggingAgentObserver(ourToolUsage),
                 this::pushToolChip, this::setStatus, this::pushTraceBlock));
-        final StringBuilder system = new StringBuilder();
-        if(ourSession.getSystemPrompt() != null && !ourSession.getSystemPrompt().isEmpty()) {
-            system.append(ourSession.getSystemPrompt()).append(' ');
-        }
-        system.append("You can call the provided workspace tools (search_code, list_files,")
-            .append(" read_file, describe_configuration, write_file, edit_file). Call a tool")
-            .append(" only through the tool-call interface: never write a tool command or an")
-            .append(" example of one inside the answer text. For any")
-            .append(" question about the configuration itself - its name, version, what")
-            .append(" objects it has - call describe_configuration first. To change an")
-            .append(" existing file use edit_file: read it first, then copy fragments")
-            .append(" verbatim so each search text is unique. Search the project before")
-            .append(" answering code questions; quote paths and line numbers. Every change")
-            .append(" is confirmed by the user. Keep your approach visible: before a")
-            .append(" multi-step task call update_plan with the steps, and call it again")
-            .append(" each time a step finishes. Answer in the language of the question.");
-        if(profile != null && !profile.getSystem().isEmpty()) {
-            // the profile body speaks for the agent: it arrives as extra
-            // instructions on top of the shared workspace rules
-            system.append(" Profile \"").append(profile.getName()).append("\": ")
-                .append(profile.getSystem());
-        }
-        if(ourLessonMemory != null) {
-            system.append(" When you learn something worth keeping for later sessions on")
-                .append(" this project - a quirk, a rule the user corrected you on, an")
-                .append(" approach that worked - call remember with one short sentence.");
-        }
-        if(ourLessonMemory != null && ourLessonMemory.lessonCount() > 0) {
-            system.append(' ').append(ourLessonMemory.render());
-        }
-        if(skills != null && !skills.isEmpty()) {
-            system.append(new SkillShowcase(skills).catalogSection());
-        }
-        if(policy.allows(profile, SubagentTool.TOOL_NAME) && policy.shouldOffer(ourToolUsage, SubagentTool.TOOL_NAME)) {
-            system.append(" For a bounded research task that needs many searches and")
-                .append(" reads, call subagent with a clear prompt: a delegate works the")
-                .append(" task on its own with read-only tools and returns one final")
-                .append(" answer; it cannot change files.");
-        }
-        String task = theQuestion;
-        if(!theContext.isEmpty()) {
-            task = task + "\n\nProject context found by search:\n" + theContext;
-        }
-        if(hasUnfinishedSteps()) {
-            task = task + "\n\nPlan you left on the board in earlier turns:\n"
-                + ourPlanBoard.render();
-        }
+        final String system = buildSystemFor(profile);
+        final String task = buildTaskFor(theQuestion, theContext);
         final long startedAt = System.nanoTime();
         final AgentAnswer answer;
         try {
             // a carried history already holds the instructions and the task:
             // the loop appends to it instead of opening a fresh exchange
             answer = theConversation == null
-                ? loop.run(system.toString(), task) : loop.run(theConversation);
+                ? loop.run(system, task) : loop.run(theConversation);
         } finally {
             // the run is over whatever the outcome: offered-but-uncalled names
             // age here, and the pruning decision of the next run reads that
@@ -1829,6 +1894,219 @@ public final class ChatPanel {
             "%n--- режим правки: %d шагов, %d вызовов инструментов, %d мс",
             Integer.valueOf(answer.getSteps()), Integer.valueOf(answer.getExecutedToolCalls()),
             Long.valueOf(elapsedMs));
+    }
+
+    /**
+     * Builds the tool list one edit-mode run advertises: the workspace set
+     * filtered by mode and profile, the board, memory and skill tools, the
+     * remote MCP tools and the subagent delegate.
+     *
+     * @param theMode picked chat mode
+     * @param theProfile picked profile, may be {@code null}
+     * @return the tools to hand to the agent loop
+     */
+    private List<IToolExecutor> assembleToolsFor(final ChatMode theMode,
+        final AgentProfile theProfile, final CancellationFlag theCancellation) {
+        final ToolPolicy policy = new ToolPolicy().excludeUnused(PRUNE_AFTER_IDLE_RUNS);
+        // the chat mode is the first gate: in plan mode the supplier still
+        // hands over the write-capable set (the legacy isOn flag is true for
+        // it), and allowsIn takes write_file/edit_file back out, so a
+        // planning agent can only observe and lay out steps
+        final List<IToolExecutor> tools = new ArrayList<>();
+        for(final IToolExecutor tool : ourToolSupplier.get()) {
+            if(policy.allowsIn(theMode, tool.getName())
+                && policy.allows(theProfile, tool.getName())
+                && policy.shouldOffer(ourToolUsage, tool.getName())) {
+                tools.add(tool);
+            }
+        }
+        if(policy.allowsIn(theMode, PlanTool.TOOL_ID)
+            && policy.allows(theProfile, PlanTool.TOOL_ID)
+            && policy.shouldOffer(ourToolUsage, PlanTool.TOOL_ID)) {
+            tools.add(new PlanTool(ourPlanBoard));
+        }
+        if(ourLessonMemory != null && policy.allowsIn(theMode, MemoryTool.TOOL_ID)
+            && policy.allows(theProfile, MemoryTool.TOOL_ID)
+            && policy.shouldOffer(ourToolUsage, MemoryTool.TOOL_ID)) {
+            tools.add(new MemoryTool(ourLessonMemory));
+        }
+        final SkillRegistry skills = ourSkillSupplier == null ? null : ourSkillSupplier.get();
+        if(skills != null && !skills.isEmpty() && policy.allowsIn(theMode, SkillTool.TOOL_ID)
+            && policy.allows(theProfile, SkillTool.TOOL_ID)
+            && policy.shouldOffer(ourToolUsage, SkillTool.TOOL_ID)) {
+            tools.add(new SkillTool(skills));
+        }
+        tools.addAll(remoteToolsFor(theMode, theProfile, tools));
+        if(policy.allowsIn(theMode, SubagentTool.TOOL_NAME)
+            && policy.allows(theProfile, SubagentTool.TOOL_NAME)
+            && policy.shouldOffer(ourToolUsage, SubagentTool.TOOL_NAME)) {
+            tools.add(subagentToolFor(tools, theCancellation));
+        }
+        return tools;
+    }
+
+    /**
+     * Remote tools join after the local ones so a built-in name always wins
+     * the collision check, and they reach the subagent delegate through the
+     * same list.
+     *
+     * @param theMode picked chat mode
+     * @param theProfile picked profile, may be {@code null}
+     * @param theLocalTools tools assembled so far, their names are reserved
+     * @return the remote tools this run may use
+     */
+    private List<IToolExecutor> remoteToolsFor(final ChatMode theMode,
+        final AgentProfile theProfile, final List<IToolExecutor> theLocalTools) {
+        if(ourMcpCatalog == null) {
+            return List.of();
+        }
+        final ToolPolicy policy = new ToolPolicy().excludeUnused(PRUNE_AFTER_IDLE_RUNS);
+        final Set<String> reserved = new LinkedHashSet<>();
+        boolean localWrites = false;
+        for(final IToolExecutor tool : theLocalTools) {
+            reserved.add(tool.getName());
+            localWrites |= "write_file".equals(tool.getName())
+                || "edit_file".equals(tool.getName());
+        }
+        final List<IToolExecutor> remote = new ArrayList<>();
+        for(final IToolExecutor tool
+            : ourMcpCatalog.tools(reserved, this::confirmRemoteCall)) {
+            if(!tool.isParallelSafe() && !localWrites) {
+                continue; // a read-only run keeps read-only remote tools only
+            }
+            if(policy.allowsIn(theMode, tool.getName())
+                && policy.allows(theProfile, tool.getName())
+                && policy.shouldOffer(ourToolUsage, tool.getName())) {
+                remote.add(tool);
+            }
+        }
+        return remote;
+    }
+
+    /**
+     * @param theTools the tool list the delegate may pass on
+     * @return the subagent delegate tool
+     */
+    private SubagentTool subagentToolFor(
+        final List<IToolExecutor> theTools, final CancellationFlag theCancellation) {
+        // the delegate resolves its own profile model inside the tool, so
+        // the parent hands over just the chat's model as the fallback
+        return new SubagentTool(SubagentSettings
+            .of(ourSession.getProvider(), ourModel, theTools, profileCatalog(), 0)
+            .withCancellation(theCancellation)
+            .withRegistry(ourSubagents)
+            .withListener(this::showSubagentCard));
+    }
+
+    /**
+     * Shows one finished subagent turn as a card on the page. The listener
+     * thread is the worker thread; delivery to the page goes through asyncExec
+     * as everywhere else.
+     *
+     * @param theAgent delegate name
+     * @param theDescription task the delegate was given
+     * @param theResult final answer of the delegate
+     */
+    private void showSubagentCard(final String theAgent, final String theDescription,
+        final String theResult) {
+        Display.getDefault().asyncExec(() -> {
+            if(ourBridge != null && ourBridge.isReady() && !ourRoot.isDisposed()) {
+                final JsonObject card = new JsonObject();
+                card.addProperty("agent", theAgent);
+                card.addProperty("description", theDescription);
+                card.addProperty("result", theResult);
+                pushNow(SubagentTool.TOOL_NAME, card);
+            }
+        });
+    }
+
+    /**
+     * @param theProfile picked profile, may be {@code null}
+     * @return the profile model or the chat model as fallback
+     */
+    private String modelFor(final AgentProfile theProfile) {
+        return theProfile != null && theProfile.getModelName() != null
+            && !theProfile.getModelName().isEmpty() ? theProfile.getModelName() : ourModel;
+    }
+
+    /**
+     * @param theProfile picked profile, may be {@code null}
+     * @return the profile step budget or the panel default
+     */
+    private int maxStepsFor(final AgentProfile theProfile) {
+        return theProfile != null && theProfile.getMaxSteps() > 0
+            ? theProfile.getMaxSteps() : AGENT_MAX_STEPS;
+    }
+
+    /**
+     * Builds the system prompt of one run: the shared workspace rules, the
+     * profile body, the lesson memory, the skill catalog and the subagent
+     * hint, each only when its tool is actually offered.
+     *
+     * @param theProfile picked profile, may be {@code null}
+     * @return the system prompt text
+     */
+    private String buildSystemFor(final AgentProfile theProfile) {
+        final ToolPolicy policy = new ToolPolicy().excludeUnused(PRUNE_AFTER_IDLE_RUNS);
+        final StringBuilder system = new StringBuilder();
+        if(ourSession.getSystemPrompt() != null && !ourSession.getSystemPrompt().isEmpty()) {
+            system.append(ourSession.getSystemPrompt()).append(' ');
+        }
+        system.append("You can call the provided workspace tools (search_code, list_files,")
+            .append(" read_file, describe_configuration, write_file, edit_file). Call a tool")
+            .append(" only through the tool-call interface: never write a tool command or an")
+            .append(" example of one inside the answer text. For any")
+            .append(" question about the configuration itself - its name, version, what")
+            .append(" objects it has - call describe_configuration first. To change an")
+            .append(" existing file use edit_file: read it first, then copy fragments")
+            .append(" verbatim so each search text is unique. Search the project before")
+            .append(" answering code questions; quote paths and line numbers. Every change")
+            .append(" is confirmed by the user. Keep your approach visible: before a")
+            .append(" multi-step task call update_plan with the steps, and call it again")
+            .append(" each time a step finishes. Answer in the language of the question.");
+        if(theProfile != null && !theProfile.getSystem().isEmpty()) {
+            // the profile body speaks for the agent: it arrives as extra
+            // instructions on top of the shared workspace rules
+            system.append(" Profile \"").append(theProfile.getName()).append("\": ")
+                .append(theProfile.getSystem());
+        }
+        if(ourLessonMemory != null) {
+            system.append(" When you learn something worth keeping for later sessions on")
+                .append(" this project - a quirk, a rule the user corrected you on, an")
+                .append(" approach that worked - call remember with one short sentence.");
+        }
+        if(ourLessonMemory != null && ourLessonMemory.lessonCount() > 0) {
+            system.append(' ').append(ourLessonMemory.render());
+        }
+        final SkillRegistry skills = ourSkillSupplier == null ? null : ourSkillSupplier.get();
+        if(skills != null && !skills.isEmpty()) {
+            system.append(new SkillShowcase(skills).catalogSection());
+        }
+        if(policy.allows(theProfile, SubagentTool.TOOL_NAME)
+            && policy.shouldOffer(ourToolUsage, SubagentTool.TOOL_NAME)) {
+            system.append(" For a bounded research task that needs many searches and")
+                .append(" reads, call subagent with a clear prompt: a delegate works the")
+                .append(" task on its own with read-only tools and returns one final")
+                .append(" answer; it cannot change files.");
+        }
+        return system.toString();
+    }
+
+    /**
+     * @param theQuestion question text
+     * @param theContext gathered context, possibly empty
+     * @return the task text: the question plus context and the plan board
+     */
+    private String buildTaskFor(final String theQuestion, final String theContext) {
+        String task = theQuestion;
+        if(!theContext.isEmpty()) {
+            task = task + "\n\nProject context found by search:\n" + theContext;
+        }
+        if(hasUnfinishedSteps()) {
+            task = task + "\n\nPlan you left on the board in earlier turns:\n"
+                + ourPlanBoard.render();
+        }
+        return task;
     }
 
     /**

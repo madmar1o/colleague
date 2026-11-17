@@ -226,7 +226,7 @@ public final class ContactsPanel {
         ourRoot.setLayout(new GridLayout(1, false));
         createBrowser();
         if(ourBridge == null) {
-            createFallback(theParent);
+            createFallback();
         }
     }
 
@@ -509,6 +509,23 @@ public final class ContactsPanel {
      * @param theArguments draft fields: name, command, url
      */
     private void testMcp(final JsonObject theArguments) {
+        final McpServerConfig probe = buildProbeConfig(theArguments);
+        Job.create("Colleague: MCP server test", (monitor) -> {
+            pushProbeResult(probeResult(probe));
+            return Status.OK_STATUS;
+        }).schedule();
+    }
+
+    /**
+     * Turns the draft fields of the settings form into a throwaway server
+     * configuration for the probe: an empty name becomes "probe", a url wins
+     * over the command line, and the command is split into executable plus
+     * arguments.
+     *
+     * @param theArguments draft fields: name, command, url
+     * @return configuration the probe will connect with
+     */
+    private static McpServerConfig buildProbeConfig(final JsonObject theArguments) {
         final String name = BridgeBrowser.optString(theArguments, "name");
         final String command = BridgeBrowser.optString(theArguments, COMMAND);
         final String url = BridgeBrowser.optString(theArguments, "url");
@@ -518,33 +535,49 @@ public final class ContactsPanel {
                 parts.add(part);
             }
         }
-        final McpServerConfig probe = new McpServerConfig(
+        return new McpServerConfig(
             name.isEmpty() ? "probe" : name,
             url.isEmpty() ? parts : null, url.isEmpty() ? null : url, true);
-        Job.create("Colleague: MCP server test", (monitor) -> {
-            final JsonObject result = new JsonObject();
-            try (McpClient client = new McpClient(probe)) {
-                final JsonArray tools = new JsonArray();
-                for(final McpToolInfo tool : client.discover()) {
-                    final JsonObject item = new JsonObject();
-                    item.addProperty("name", tool.name());
-                    item.addProperty("readOnly", Boolean.valueOf(tool.readOnly()));
-                    tools.add(item);
-                }
-                result.add("tools", tools);
-                result.addProperty("ok", Boolean.TRUE);
-            } catch (final Exception ex) {
-                result.addProperty("ok", Boolean.FALSE);
-                result.addProperty(ERROR, ex.getMessage() == null
-                    ? ex.getClass().getSimpleName() : ex.getMessage());
+    }
+
+    /**
+     * Runs the handshake against the probe configuration and lists its tools
+     * off the UI thread.
+     *
+     * @param theProbe server configuration to connect to
+     * @return page payload: ok plus tools, or ok=false plus error
+     */
+    private static JsonObject probeResult(final McpServerConfig theProbe) {
+        final JsonObject result = new JsonObject();
+        try (McpClient client = new McpClient(theProbe)) {
+            final JsonArray tools = new JsonArray();
+            for(final McpToolInfo tool : client.discover()) {
+                final JsonObject item = new JsonObject();
+                item.addProperty("name", tool.name());
+                item.addProperty("readOnly", Boolean.valueOf(tool.readOnly()));
+                tools.add(item);
             }
-            Display.getDefault().asyncExec(() -> {
-                if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
-                    ourBridge.push("mcpTestResult", result);
-                }
-            });
-            return Status.OK_STATUS;
-        }).schedule();
+            result.add("tools", tools);
+            result.addProperty("ok", Boolean.TRUE);
+        } catch (final Exception ex) {
+            result.addProperty("ok", Boolean.FALSE);
+            result.addProperty(ERROR, ex.getMessage() == null
+                ? ex.getClass().getSimpleName() : ex.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * Hands the probe result back to the settings page.
+     *
+     * @param theResult payload produced by the probe
+     */
+    private void pushProbeResult(final JsonObject theResult) {
+        Display.getDefault().asyncExec(() -> {
+            if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
+                ourBridge.push("mcpTestResult", theResult);
+            }
+        });
     }
 
     /** Pushes the stored MCP servers so the settings table can redraw itself. */
@@ -644,7 +677,7 @@ public final class ContactsPanel {
     }
 
     /** Plain tree layout used when no browser backend is available. */
-    private void createFallback(final Composite theParent) {
+    private void createFallback() {
         final Composite header = new Composite(ourRoot, SWT.NONE);
         header.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
         final GridLayout headerLayout = new GridLayout(2, false);

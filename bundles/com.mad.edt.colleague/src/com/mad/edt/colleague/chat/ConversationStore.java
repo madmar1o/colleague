@@ -202,14 +202,7 @@ public final class ConversationStore {
             }
             Files.writeString(temporary,
                 GSON.toJson(composeDocument()), StandardCharsets.UTF_8);
-            try {
-                Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
-            } catch (final AtomicMoveNotSupportedException ex) {
-                // a file system without atomic renames still gets the whole
-                // document in one replace: better than losing the transcript
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-            }
+            moveIntoPlace(temporary);
         } catch (final IOException ex) {
             // persistence is the first thing to give up, the in-memory
             // transcripts stay: losing the disk must not lose the session
@@ -220,6 +213,23 @@ public final class ConversationStore {
             } catch (final IOException ignored) {
                 // the leftover temp file costs a little disk, nothing else
             }
+        }
+    }
+
+    /**
+     * Replaces the stored document with the written temp file.
+     *
+     * @param theTemporary path of the written temp file
+     * @throws IOException when the file system refuses both moves
+     */
+    private void moveIntoPlace(final Path theTemporary) throws IOException {
+        try {
+            Files.move(theTemporary, file, StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING);
+        } catch (final AtomicMoveNotSupportedException ex) {
+            // a file system without atomic renames still gets the whole
+            // document in one replace: better than losing the transcript
+            Files.move(theTemporary, file, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

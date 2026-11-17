@@ -180,22 +180,10 @@ public final class SubagentTool implements IToolExecutor {
         final String name = theAgent == null || theAgent.isBlank()
             ? "delegate" : theAgent.trim();
         final AgentProfile profile = profileNamed(name);
-        final String delegateModel = profile != null && profile.getModelName() != null
-            && !profile.getModelName().isEmpty() ? profile.getModelName() : model;
-        final int steps = profile != null && profile.getMaxSteps() > 0
-            ? profile.getMaxSteps() : SUBAGENT_MAX_STEPS;
+        final String delegateModel = delegateModelFor(profile);
+        final int steps = stepsFor(profile);
 
-        final List<IToolExecutor> delegateTools = new ArrayList<>();
-        final ToolPolicy policy = new ToolPolicy();
-        for(final IToolExecutor tool : parentTools) {
-            // the read-only subset of the parent: a writer is refused by name,
-            // and anything that mutates other state (the plan board, lesson
-            // memory) is not parallel-safe and stays with the parent
-            if(tool.isParallelSafe() && !policy.isWriteTool(tool.getName())
-                && policy.allows(profile, tool.getName())) {
-                delegateTools.add(tool);
-            }
-        }
+        final List<IToolExecutor> delegateTools = delegateToolsFor(profile);
         // the nested level still sees the tool so the model gets a clear
         // refusal about the depth instead of an unknown-tool error
         delegateTools.add(new SubagentTool(provider, delegateModel, parentTools, profiles,
@@ -222,6 +210,44 @@ public final class SubagentTool implements IToolExecutor {
             announce(name, theDescription, failure);
             return failure;
         }
+    }
+
+    /**
+     * @param theProfile delegate profile, may be {@code null}
+     * @return the model of the profile, or the model of this tool
+     */
+    private String delegateModelFor(final AgentProfile theProfile) {
+        return theProfile != null && theProfile.getModelName() != null
+            && !theProfile.getModelName().isEmpty() ? theProfile.getModelName() : model;
+    }
+
+    /**
+     * @param theProfile delegate profile, may be {@code null}
+     * @return the step budget of the profile, or the default budget
+     */
+    private static int stepsFor(final AgentProfile theProfile) {
+        return theProfile != null && theProfile.getMaxSteps() > 0
+            ? theProfile.getMaxSteps() : SUBAGENT_MAX_STEPS;
+    }
+
+    /**
+     * The read-only subset of the parent: a writer is refused by name, and
+     * anything that mutates other state (the plan board, lesson memory) is
+     * not parallel-safe and stays with the parent.
+     *
+     * @param theProfile delegate profile deciding the policy
+     * @return tools the delegate may call
+     */
+    private List<IToolExecutor> delegateToolsFor(final AgentProfile theProfile) {
+        final List<IToolExecutor> delegateTools = new ArrayList<>();
+        final ToolPolicy policy = new ToolPolicy();
+        for(final IToolExecutor tool : parentTools) {
+            if(tool.isParallelSafe() && !policy.isWriteTool(tool.getName())
+                && policy.allows(theProfile, tool.getName())) {
+                delegateTools.add(tool);
+            }
+        }
+        return delegateTools;
     }
 
     /**

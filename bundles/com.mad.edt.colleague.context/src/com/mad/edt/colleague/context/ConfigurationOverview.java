@@ -75,20 +75,7 @@ public final class ConfigurationOverview {
             return;
         }
         out.append("EDT project \"").append(theProject.getName()).append("\".\n");
-        final String[] identity = readConfigurationIdentity(configuration.resolve("Configuration.mdo"));
-        out.append("Configuration name in the metadata: ")
-            .append(identity[0] == null ? "(unknown)" : identity[0]);
-        if(identity[1] != null) {
-            out.append(" (presented to users as \"").append(identity[1]).append("\"");
-            if(identity[2] != null) {
-                out.append(", version ").append(identity[2]);
-            }
-            if(identity[3] != null) {
-                out.append(", vendor ").append(identity[3]);
-            }
-            out.append(')');
-        }
-        out.append(".\n");
+        appendIdentityLine(out, readConfigurationIdentity(configuration.resolve("Configuration.mdo")));
         final Path[] folders;
         try {
             folders = listDirectories(src);
@@ -97,34 +84,71 @@ public final class ConfigurationOverview {
         }
         out.append("Metadata objects by kind (src folder of the EDT export):\n");
         for(final Path folder : folders) {
-            final String folderName = folder.getFileName().toString();
-            if("Configuration".equals(folderName)) {
-                continue;
-            }
-            final List<Path> mdoFiles = collectMetadataFiles(folder);
-            if(mdoFiles.isEmpty()) {
-                continue;
-            }
-            out.append("  ").append(folderName).append(": ").append(mdoFiles.size());
-            if(EXAMPLE_FOLDERS.contains(folderName)) {
-                final List<String> names = new ArrayList<>();
-                for(final Path mdo : mdoFiles) {
-                    final String name = readNameOf(mdo);
-                    if(name != null && !name.isEmpty()) {
-                        names.add(name);
-                    }
-                    if(names.size() >= EXAMPLES_PER_FOLDER) {
-                        break;
-                    }
-                }
-                if(!names.isEmpty()) {
-                    out.append(", examples: ").append(String.join(", ", names));
-                }
-            }
-            out.append('\n');
+            appendKindFolder(out, folder);
         }
         out.append("BSL module sources live inside the same kind folders next to ")
             .append("the .mdo metadata files.\n");
+    }
+
+    /**
+     * @param out answer being built
+     * @param theIdentity name, ru presentation, version, vendor of the configuration
+     */
+    private static void appendIdentityLine(final StringBuilder out, final String[] theIdentity) {
+        out.append("Configuration name in the metadata: ")
+            .append(theIdentity[0] == null ? "(unknown)" : theIdentity[0]);
+        if(theIdentity[1] != null) {
+            out.append(" (presented to users as \"").append(theIdentity[1]).append("\"");
+            if(theIdentity[2] != null) {
+                out.append(", version ").append(theIdentity[2]);
+            }
+            if(theIdentity[3] != null) {
+                out.append(", vendor ").append(theIdentity[3]);
+            }
+            out.append(')');
+        }
+        out.append(".\n");
+    }
+
+    /**
+     * @param out answer being built
+     * @param theFolder one kind folder of the EDT export
+     */
+    private static void appendKindFolder(final StringBuilder out, final Path theFolder) {
+        final String folderName = theFolder.getFileName().toString();
+        if("Configuration".equals(folderName)) {
+            return;
+        }
+        final List<Path> mdoFiles = collectMetadataFiles(theFolder);
+        if(mdoFiles.isEmpty()) {
+            return;
+        }
+        out.append("  ").append(folderName).append(": ").append(mdoFiles.size());
+        if(EXAMPLE_FOLDERS.contains(folderName)) {
+            final String names = exampleNames(mdoFiles);
+            if(!names.isEmpty()) {
+                out.append(", examples: ").append(names);
+            }
+        }
+        out.append('\n');
+    }
+
+    /**
+     * @param theMdoFiles metadata files of one kind folder
+     * @return up to {@code EXAMPLES_PER_FOLDER} object names, comma joined
+     */
+    private static String exampleNames(final List<Path> theMdoFiles) {
+        final List<String> names = new ArrayList<>();
+        for(final Path mdo : theMdoFiles) {
+            final String name = readNameOf(mdo);
+            if(name != null && !name.isEmpty()) {
+                names.add(name);
+            }
+            if(names.size() >= EXAMPLES_PER_FOLDER) {
+                break;
+            }
+        }
+        return String.join(", ", names);
     }
 
     private static Path[] listDirectories(final Path theSrc) throws IOException {
