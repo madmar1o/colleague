@@ -30,6 +30,11 @@ class PageCommandHandlerTest {
     private static final String ABORT = "abort";
     private static final String CONTINUE_TURN = "continueTurn";
     private static final String OPEN_SETTINGS = "openSettings";
+    private static final String SEND = "send";
+    private static final String COPY = "copy";
+    private static final String BACK = "back";
+    // argument names repeated across the argument fixtures
+    private static final String ARG_TEXT = "text";
 
     /** records every action the dispatcher triggers */
     private static final class RecordingActions implements Actions {
@@ -73,7 +78,7 @@ class PageCommandHandlerTest {
 
         @Override
         public void back() {
-            calls.add("back");
+            calls.add(BACK);
         }
 
         @Override
@@ -135,26 +140,26 @@ class PageCommandHandlerTest {
         final RecordingActions actions = new RecordingActions();
         final PageCommandHandler handler = handlerWith(actions);
         handler.handle(BRIDGE_READY, args());
-        handler.handle("send", args("text", "hello"));
+        handler.handle(SEND, args(ARG_TEXT, "hello"));
         handler.handle(NEW_CHAT, args());
         handler.handle(TOGGLE_EDIT, args());
-        handler.handle("copy", args("text", "clip me"));
+        handler.handle(COPY, args(ARG_TEXT, "clip me"));
         handler.handle(ATTACH_FILE, args());
-        handler.handle("back", args());
+        handler.handle(BACK, args());
         handler.handle("esc", args());
         handler.handle(ABORT, args());
         assertEquals(List.of(BRIDGE_READY, "send|hello", NEW_CHAT, TOGGLE_EDIT,
-            "copy|clip me", ATTACH_FILE, "back", "escape", ABORT), actions.calls);
+            "copy|clip me", ATTACH_FILE, BACK, "escape", ABORT), actions.calls);
     }
 
     @Test
     void unknownMethodsIgnored() {
         final RecordingActions actions = new RecordingActions();
         final PageCommandHandler handler = handlerWith(actions);
-        handler.handle("teleport", args("text", "x"));
+        handler.handle("teleport", args(ARG_TEXT, "x"));
         handler.handle("", args());
         handler.handle(null, args());
-        handler.handle("send", null);
+        handler.handle(SEND, null);
         assertEquals(List.of(SEND_PREFIX), actions.calls);
     }
 
@@ -234,8 +239,8 @@ class PageCommandHandlerTest {
     void missingArgumentArrivesAsEmptyText() {
         final RecordingActions actions = new RecordingActions();
         final PageCommandHandler handler = handlerWith(actions);
-        handler.handle("send", args());
-        handler.handle("copy", args());
+        handler.handle(SEND, args());
+        handler.handle(COPY, args());
         assertEquals(List.of(SEND_PREFIX, "copy|"), actions.calls);
     }
 }
