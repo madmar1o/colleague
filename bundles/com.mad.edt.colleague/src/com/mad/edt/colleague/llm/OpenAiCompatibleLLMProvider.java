@@ -18,6 +18,14 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
 
     private static final int PING_TIMEOUT_MS = 10_000;
 
+    /** OpenAI-compatible chat chunk and request field names. */
+    private static final String MODEL = "model";
+    private static final String FINISH_REASON = "finish_reason";
+    private static final String CONTENT = "content";
+    private static final String TOOL_CALLS = "tool_calls";
+    private static final String FUNCTION = "function";
+    private static final String ARGUMENTS = "arguments";
+
     /**
      * @param theConfig endpoint configuration; base URL ends with the API
      *        version segment, e.g. {@code https://host/v1}
@@ -76,8 +84,8 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
         try {
             postJsonStream("/chat/completions", buildBody(theRequest, true),
                 getConfig().getReadTimeoutMs(), theRequest.getCancellation(), chunk -> {
-                if(chunk.has("model")) {
-                    modelName[0] = textOrNull(chunk, "model");
+                if(chunk.has(MODEL)) {
+                    modelName[0] = textOrNull(chunk, MODEL);
                 }
                 final JsonObject usage = chunk.getAsJsonObject("usage");
                 if(usage != null) {
@@ -90,14 +98,14 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
                 }
                 choiceLoop: for(final JsonElement element : choices) {
                     final JsonObject choice = element.getAsJsonObject();
-                    if(choice.has("finish_reason") && !choice.get("finish_reason").isJsonNull()) {
-                        finishReason[0] = textOrNull(choice, "finish_reason");
+                    if(choice.has(FINISH_REASON) && !choice.get(FINISH_REASON).isJsonNull()) {
+                        finishReason[0] = textOrNull(choice, FINISH_REASON);
                     }
                     final JsonObject delta = choice.getAsJsonObject("delta");
                     if(delta == null) {
                         continue choiceLoop;
                     }
-                    final String piece = textOrNull(delta, "content");
+                    final String piece = textOrNull(delta, CONTENT);
                     if(piece != null && !piece.isEmpty()) {
                         content.append(piece);
                         theOnContent.accept(piece);
@@ -111,7 +119,7 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
                         thinking.append(thought);
                         theOnThinking.accept(thought);
                     }
-                    final JsonArray calls = delta.getAsJsonArray("tool_calls");
+                    final JsonArray calls = delta.getAsJsonArray(TOOL_CALLS);
                     if(calls == null) {
                         continue choiceLoop;
                     }
@@ -119,7 +127,7 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
                         final JsonObject call = callElement.getAsJsonObject();
                         final int position = call.has("index")
                             ? call.get("index").getAsInt() : Integer.valueOf(callParts.size());
-                        final JsonObject function = call.getAsJsonObject("function");
+                        final JsonObject function = call.getAsJsonObject(FUNCTION);
                         final String[] parts = callParts.computeIfAbsent(
                             Integer.valueOf(position), key -> new String[2]);
                         if(call.has("id") && !call.get("id").isJsonNull()) {
@@ -129,7 +137,7 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
                             if(textOrNull(function, "name") != null) {
                                 parts[1] = textOrNull(function, "name");
                             }
-                            final String argumentPiece = textOrNull(function, "arguments");
+                            final String argumentPiece = textOrNull(function, ARGUMENTS);
                             if(argumentPiece != null) {
                                 callArguments.computeIfAbsent(Integer.valueOf(position),
                                     key -> new StringBuilder()).append(argumentPiece);
@@ -158,7 +166,7 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
     private JsonObject buildBody(final ChatRequest theRequest, final boolean theStreaming)
         throws LLMException {
         final JsonObject body = new JsonObject();
-        body.addProperty("model", resolveModel(theRequest.getModel()));
+        body.addProperty(MODEL, resolveModel(theRequest.getModel()));
         body.addProperty("stream", Boolean.valueOf(theStreaming));
         if(theRequest.getTemperature() != null) {
             body.addProperty("temperature", theRequest.getTemperature().doubleValue());
@@ -184,18 +192,18 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
                 for(final ToolCall call : message.getToolCalls()) {
                     final JsonObject function = new JsonObject();
                     function.addProperty("name", call.getName());
-                    function.addProperty("arguments", call.getArgumentsJson());
+                    function.addProperty(ARGUMENTS, call.getArgumentsJson());
                     final JsonObject wrapper = new JsonObject();
                     wrapper.addProperty("id", call.getId() != null ? call.getId() : "call_" + index);
-                    wrapper.addProperty("type", "function");
-                    wrapper.add("function", function);
+                    wrapper.addProperty("type", FUNCTION);
+                    wrapper.add(FUNCTION, function);
                     calls.add(wrapper);
                     index++;
                 }
-                entry.add("tool_calls", calls);
-                entry.add("content", com.google.gson.JsonNull.INSTANCE);
+                entry.add(TOOL_CALLS, calls);
+                entry.add(CONTENT, com.google.gson.JsonNull.INSTANCE);
             } else {
-                entry.addProperty("content", message.getContent());
+                entry.addProperty(CONTENT, message.getContent());
                 if(message.getToolCallId() != null) {
                     entry.addProperty("tool_call_id", message.getToolCallId());
                 }
@@ -214,10 +222,10 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
         final JsonArray choices = theResponse.getAsJsonArray("choices");
         if(choices != null && !choices.isEmpty()) {
             final JsonObject choice = choices.get(0).getAsJsonObject();
-            finishReason = textOrNull(choice, "finish_reason");
+            finishReason = textOrNull(choice, FINISH_REASON);
             final JsonObject message = choice.getAsJsonObject("message");
             if(message != null) {
-                content = textOrNull(message, "content");
+                content = textOrNull(message, CONTENT);
                 if(content == null) {
                     content = "";
                 }
@@ -225,7 +233,7 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
                 if(thinking == null) {
                     thinking = textOrNull(message, "reasoning");
                 }
-                calls = parseToolCalls(message.getAsJsonArray("tool_calls"));
+                calls = parseToolCalls(message.getAsJsonArray(TOOL_CALLS));
             }
         }
 
@@ -237,7 +245,7 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
             completionTokens = intOrZero(usage, "completion_tokens");
         }
 
-        return new ChatResult(content, thinking, textOrNull(theResponse, "model"),
+        return new ChatResult(content, thinking, textOrNull(theResponse, MODEL),
             finishReason, promptTokens, completionTokens, calls);
     }
 
@@ -274,7 +282,7 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
         }
         for(final JsonElement element : theCalls) {
             final JsonObject call = element.getAsJsonObject();
-            final JsonObject function = call.getAsJsonObject("function");
+            final JsonObject function = call.getAsJsonObject(FUNCTION);
             if(function == null) {
                 continue;
             }
@@ -282,7 +290,7 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
             if(name == null) {
                 continue;
             }
-            final String arguments = textOrNull(function, "arguments");
+            final String arguments = textOrNull(function, ARGUMENTS);
             calls.add(new ToolCall(textOrNull(call, "id"), name,
                 arguments == null ? "{}" : arguments));
         }

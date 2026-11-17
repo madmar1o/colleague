@@ -114,6 +114,9 @@ public final class ChatPanel {
     /** Same physical ESC seen through both channels counts once inside this pause. */
     private static final long ESC_DEDUP_MS = 300L;
 
+    /** Browser event kind carrying the finished answer payload. */
+    private static final String PUSH_ANSWER = "answer";
+
     /** Live panels, kept in sync when the process-wide edit mode changes. */
     private static final List<ChatPanel> OUR_PANELS =
         new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -1044,7 +1047,7 @@ public final class ChatPanel {
                         // gets another offer over the newly open history
                         payload.addProperty("resumable",
                             Boolean.valueOf(!ourInterruptedConversation.isEmpty()));
-                        pushNow("answer", payload);
+                        pushNow(PUSH_ANSWER, payload);
                     }
                     setStatus(stats);
                     // the exchange is complete and already in the session's
@@ -1274,7 +1277,7 @@ public final class ChatPanel {
                 items.add(item);
             } else if(ChatMessage.ROLE_ASSISTANT.equals(message.getRole())) {
                 final JsonObject item = new JsonObject();
-                item.addProperty("kind", "answer");
+                item.addProperty("kind", PUSH_ANSWER);
                 item.addProperty("text", message.getContent());
                 items.add(item);
             }
@@ -1513,7 +1516,7 @@ public final class ChatPanel {
                         // queue is the delivery order, and an asyncExec hop
                         // here could overtake the streamed batches already
                         // queued ahead of the answer
-                        pushNow("answer", payload);
+                        pushNow(PUSH_ANSWER, payload);
                     } else {
                         Display.getDefault().asyncExec(
                             () -> appendLine("Colleague: " + body));
@@ -1675,20 +1678,20 @@ public final class ChatPanel {
                 tools.add(tool);
             }
         }
-        if(policy.allowsIn(mode, "update_plan")
-            && policy.allows(profile, "update_plan")
-            && policy.shouldOffer(ourToolUsage, "update_plan")) {
+        if(policy.allowsIn(mode, PlanTool.TOOL_ID)
+            && policy.allows(profile, PlanTool.TOOL_ID)
+            && policy.shouldOffer(ourToolUsage, PlanTool.TOOL_ID)) {
             tools.add(new PlanTool(ourPlanBoard));
         }
-        if(ourLessonMemory != null && policy.allowsIn(mode, "remember")
-            && policy.allows(profile, "remember")
-            && policy.shouldOffer(ourToolUsage, "remember")) {
+        if(ourLessonMemory != null && policy.allowsIn(mode, MemoryTool.TOOL_ID)
+            && policy.allows(profile, MemoryTool.TOOL_ID)
+            && policy.shouldOffer(ourToolUsage, MemoryTool.TOOL_ID)) {
             tools.add(new MemoryTool(ourLessonMemory));
         }
         final SkillRegistry skills = ourSkillSupplier == null ? null : ourSkillSupplier.get();
-        if(skills != null && !skills.isEmpty() && policy.allowsIn(mode, "load_skill")
-            && policy.allows(profile, "load_skill")
-            && policy.shouldOffer(ourToolUsage, "load_skill")) {
+        if(skills != null && !skills.isEmpty() && policy.allowsIn(mode, SkillTool.TOOL_ID)
+            && policy.allows(profile, SkillTool.TOOL_ID)
+            && policy.shouldOffer(ourToolUsage, SkillTool.TOOL_ID)) {
             tools.add(new SkillTool(skills));
         }
         if(ourMcpCatalog != null) {
@@ -1714,8 +1717,8 @@ public final class ChatPanel {
                 }
             }
         }
-        if(policy.allowsIn(mode, "subagent") && policy.allows(profile, "subagent")
-            && policy.shouldOffer(ourToolUsage, "subagent")) {
+        if(policy.allowsIn(mode, SubagentTool.TOOL_NAME) && policy.allows(profile, SubagentTool.TOOL_NAME)
+            && policy.shouldOffer(ourToolUsage, SubagentTool.TOOL_NAME)) {
             // the delegate hears about its finished turn through this panel so
             // the page shows a card; the listener thread is the worker thread,
             // delivery to the page goes through asyncExec as everywhere else
@@ -1730,7 +1733,7 @@ public final class ChatPanel {
                         card.addProperty("agent", agent);
                         card.addProperty("description", description);
                         card.addProperty("result", result);
-                        pushNow("subagent", card);
+                        pushNow(SubagentTool.TOOL_NAME, card);
                     }
                 }))));
         }
@@ -1783,7 +1786,7 @@ public final class ChatPanel {
         if(skills != null && !skills.isEmpty()) {
             system.append(new SkillShowcase(skills).catalogSection());
         }
-        if(policy.allows(profile, "subagent") && policy.shouldOffer(ourToolUsage, "subagent")) {
+        if(policy.allows(profile, SubagentTool.TOOL_NAME) && policy.shouldOffer(ourToolUsage, SubagentTool.TOOL_NAME)) {
             system.append(" For a bounded research task that needs many searches and")
                 .append(" reads, call subagent with a clear prompt: a delegate works the")
                 .append(" task on its own with read-only tools and returns one final")

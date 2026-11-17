@@ -26,6 +26,9 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 public final class MetadataTools {
 
+    /** Argument field name of the metadata search tool. */
+    private static final String QUERY = "query";
+
     /**
      * One EDT project whose metadata tree the tools may read: the project
      * name is what the model sees in paths, the folder is the {@code src}
@@ -587,7 +590,7 @@ public final class MetadataTools {
         @Override
         public ToolSpec getSpec() {
             final JsonObject properties = new JsonObject();
-            properties.add("query", stringProperty("query",
+            properties.add(QUERY, stringProperty(QUERY,
                 "object name or its part as the user says it, e.g. Валюты or Заказ"));
             properties.add("kind", stringProperty("kind",
                 "optional metadata kind: Catalog, Document, InformationRegister, ..."));
@@ -597,13 +600,13 @@ public final class MetadataTools {
                     + " presentation and the workspace-relative .mdo path, exact names first."
                     + " Call this before read_file whenever the question names a metadata"
                     + " object instead of a source line.",
-                schema(properties, "query"));
+                schema(properties, QUERY));
         }
 
         @Override
         public String execute(final String theArgumentsJson) {
             final JsonObject arguments = parseArguments(theArgumentsJson);
-            final String query = stringArgument(arguments, "query");
+            final String query = stringArgument(arguments, QUERY);
             if(query == null || query.isBlank()) {
                 return "ERROR: pass a non-empty query";
             }

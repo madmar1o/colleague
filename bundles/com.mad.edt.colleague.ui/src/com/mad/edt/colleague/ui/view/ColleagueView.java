@@ -91,6 +91,9 @@ public class ColleagueView extends ViewPart {
     /** Cap on semantic passes so dead endpoints cannot keep the loop alive forever. */
     private static final int SEMANTIC_MAX_PASSES = 4;
 
+    /** Directory name of the agent definitions and the page id for it. */
+    private static final String AGENTS_DIR = "agents";
+
     private static final String SYSTEM_PROMPT =
         "You are a helpful assistant embedded in an IDE for the 1C:Enterprise platform."
             + " Answer concisely in the language of the question.";
@@ -479,7 +482,7 @@ public class ColleagueView extends ViewPart {
                 ? -1 : ourTabFolder.getItemCount();
             ColleagueLog.info("[colleague] mobile page -> " + PageSwitchNote.describe(
                 thePage == ourTabsArea ? "chat tabs"
-                    : thePage == ourAgentsArea ? "agents" : "contacts",
+                    : thePage == ourAgentsArea ? AGENTS_DIR : "contacts",
                 theCause, tabs, theDetail)
                 + " stack=" + ourMobileStack.getSize() + " page=" + thePage.getSize());
         }
@@ -816,7 +819,7 @@ public class ColleagueView extends ViewPart {
             final List<AgentProfile> merged;
             try {
                 merged = AgentCatalog.load(personalAgentsDirectory(),
-                    colleagueDirectory("agents"));
+                    colleagueDirectory(AGENTS_DIR));
             } catch (final java.io.IOException ex) {
                 ColleagueLog.error("[colleague] agents directories unreadable: "
                     + ex.getMessage());
@@ -837,7 +840,7 @@ public class ColleagueView extends ViewPart {
      *         simply contributes no profiles to the merge
      */
     private static java.io.File personalAgentsDirectory() {
-        return Paths.get(System.getProperty("user.home"), ".colleague", "agents")
+        return Paths.get(System.getProperty("user.home"), ".colleague", AGENTS_DIR)
             .toFile();
     }
 
@@ -866,7 +869,7 @@ public class ColleagueView extends ViewPart {
             return personalAgentsDirectory();
         }
         if("project".equals(theLevel)) {
-            return colleagueDirectoryForWriting("agents");
+            return colleagueDirectoryForWriting(AGENTS_DIR);
         }
         return null;
     }
@@ -900,7 +903,7 @@ public class ColleagueView extends ViewPart {
      * next start.
      */
     private void seedDefaultAgent() {
-        final java.io.File dir = colleagueDirectoryForWriting("agents");
+        final java.io.File dir = colleagueDirectoryForWriting(AGENTS_DIR);
         if(dir == null) {
             return;
         }

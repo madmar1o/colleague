@@ -20,6 +20,9 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 public final class SkillTool implements IToolExecutor {
 
+    /** Tool id the skill loader is addressed by. */
+    public static final String TOOL_ID = "load_skill";
+
     /** Budget of supporting file names listed per skill. */
     private static final int FILE_LIST_BUDGET = 10;
 
@@ -39,7 +42,7 @@ public final class SkillTool implements IToolExecutor {
 
     @Override
     public String getName() {
-        return "load_skill";
+        return TOOL_ID;
     }
 
     /** @return tool declaration named load_skill with one string parameter id */

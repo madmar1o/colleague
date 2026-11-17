@@ -35,6 +35,10 @@ import com.mad.edt.colleague.context.ProjectContext;
  */
 public final class ActiveEditorWatcher {
 
+    /** Exact log lines that repeat across the three editor-activation paths. */
+    private static final String XTEXT_ADAPTER_LOG = "[colleague] ActiveEditorWatcher: XtextEditor adapter=";
+    private static final String ITEXT_ADAPTER_LOG = "[colleague] ActiveEditorWatcher: ITextEditor adapter=";
+
     private final ActiveEditorContext ourContext = new ActiveEditorContext();
 
     /**
@@ -55,7 +59,7 @@ public final class ActiveEditorWatcher {
             ColleagueLog.info("[colleague] ActiveEditorWatcher: initial active editorClass=" + active.getClass().getName());
             // Try XtextEditor first (1C EDT editors are Xtext-based)
             final XtextEditor xtextEditor = active.getAdapter(XtextEditor.class);
-            ColleagueLog.info("[colleague] ActiveEditorWatcher: XtextEditor adapter=" + xtextEditor);
+            ColleagueLog.info(XTEXT_ADAPTER_LOG + xtextEditor);
             if(xtextEditor != null) {
                 snapshotXtext(xtextEditor);
                 return;
@@ -64,7 +68,7 @@ public final class ActiveEditorWatcher {
                 snapshot((ITextEditor)active);
             } else {
                 final ITextEditor adapted = active.getAdapter(ITextEditor.class);
-                ColleagueLog.info("[colleague] ActiveEditorWatcher: ITextEditor adapter=" + adapted);
+                ColleagueLog.info(ITEXT_ADAPTER_LOG + adapted);
                 if(adapted != null) {
                     snapshot(adapted);
                 } else {
@@ -318,7 +322,7 @@ public final class ActiveEditorWatcher {
             ColleagueLog.info("[colleague] ActiveEditorWatcher: partActivated editorClass=" + editor.getClass().getName());
             // Try XtextEditor first (1C EDT editors are Xtext-based)
             final XtextEditor xtextEditor = editor.getAdapter(XtextEditor.class);
-            ColleagueLog.info("[colleague] ActiveEditorWatcher: XtextEditor adapter=" + xtextEditor);
+            ColleagueLog.info(XTEXT_ADAPTER_LOG + xtextEditor);
             if(xtextEditor != null) {
                 snapshotXtext(xtextEditor);
                 return;
@@ -329,7 +333,7 @@ public final class ActiveEditorWatcher {
             }
             // Try to adapt to ITextEditor (some editors support this)
             final ITextEditor adapted = editor.getAdapter(ITextEditor.class);
-            ColleagueLog.info("[colleague] ActiveEditorWatcher: ITextEditor adapter=" + adapted);
+            ColleagueLog.info(ITEXT_ADAPTER_LOG + adapted);
             if(adapted != null) {
                 snapshot(adapted);
                 return;
@@ -361,7 +365,7 @@ public final class ActiveEditorWatcher {
             ColleagueLog.info("[colleague] ActiveEditorWatcher: partInputChanged editorClass=" + editor.getClass().getName());
             // Try XtextEditor first (1C EDT editors are Xtext-based)
             final XtextEditor xtextEditor = editor.getAdapter(XtextEditor.class);
-            ColleagueLog.info("[colleague] ActiveEditorWatcher: XtextEditor adapter=" + xtextEditor);
+            ColleagueLog.info(XTEXT_ADAPTER_LOG + xtextEditor);
             if(xtextEditor != null) {
                 snapshotXtext(xtextEditor);
                 return;
@@ -370,7 +374,7 @@ public final class ActiveEditorWatcher {
                 snapshot((ITextEditor)editor);
             } else {
                 final ITextEditor adapted = editor.getAdapter(ITextEditor.class);
-                ColleagueLog.info("[colleague] ActiveEditorWatcher: ITextEditor adapter=" + adapted);
+                ColleagueLog.info(ITEXT_ADAPTER_LOG + adapted);
                 if(adapted != null) {
                     snapshot(adapted);
                 } else {

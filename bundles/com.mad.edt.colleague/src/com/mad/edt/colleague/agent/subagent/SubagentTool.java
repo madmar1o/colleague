@@ -31,7 +31,11 @@ public final class SubagentTool implements IToolExecutor {
     /** Round-trips a delegate gets unless its profile asks for another number. */
     public static final int SUBAGENT_MAX_STEPS = 4;
 
-    private static final String TOOL_NAME = "subagent";
+    /** Tool id the delegate spawner is addressed by. */
+    public static final String TOOL_NAME = "subagent";
+    /** Argument field names the subagent tool declares and reads back. */
+    private static final String DESCRIPTION = "description";
+    private static final String PROMPT = "prompt";
 
     /**
      * Hears about one finished delegate turn so the chat page can show a card
@@ -123,13 +127,13 @@ public final class SubagentTool implements IToolExecutor {
     public ToolSpec getSpec() {
         final JsonObject properties = new JsonObject();
         properties.add("agent", stringProperty("profile name of the delegate, optional"));
-        properties.add("description", stringProperty("what the delegate is asked to do"));
-        properties.add("prompt", stringProperty("task text the delegate works on"));
+        properties.add(DESCRIPTION, stringProperty("what the delegate is asked to do"));
+        properties.add(PROMPT, stringProperty("task text the delegate works on"));
         final JsonObject schema = new JsonObject();
         schema.addProperty("type", "object");
         schema.add("properties", properties);
         final JsonArray required = new JsonArray();
-        required.add("prompt");
+        required.add(PROMPT);
         schema.add("required", required);
         return new ToolSpec(TOOL_NAME,
             "Hand a bounded research task to a nested read-only agent. The delegate"
@@ -140,8 +144,8 @@ public final class SubagentTool implements IToolExecutor {
     @Override
     public String execute(final String theArgumentsJson) {
         final JsonObject arguments = parse(theArgumentsJson);
-        return run(textOf(arguments, "agent"), textOf(arguments, "description"),
-            textOf(arguments, "prompt"));
+        return run(textOf(arguments, "agent"), textOf(arguments, DESCRIPTION),
+            textOf(arguments, PROMPT));
     }
 
     /**
@@ -326,7 +330,7 @@ public final class SubagentTool implements IToolExecutor {
     private static JsonObject stringProperty(final String theDescription) {
         final JsonObject property = new JsonObject();
         property.addProperty("type", "string");
-        property.addProperty("description", theDescription);
+        property.addProperty(DESCRIPTION, theDescription);
         return property;
     }
 }

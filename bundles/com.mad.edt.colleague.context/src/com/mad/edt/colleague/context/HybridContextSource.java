@@ -32,6 +32,9 @@ public final class HybridContextSource implements ContextSource {
     /** Lowest cosine similarity a chunk needs to be quoted. */
     public static final double MIN_SIMILARITY = 0.30;
 
+    /** Prefix marking a file entry in the keyword search answer text. */
+    private static final String FILE_PREFIX = "File: ";
+
     private final ContextSource keyword;
     private final Supplier<VectorIndex> semanticIndex;
     private volatile String lastSemanticError = "";
@@ -110,7 +113,7 @@ public final class HybridContextSource implements ContextSource {
         if(text.length() > CHUNK_TEXT_CHARS) {
             text = text.substring(0, CHUNK_TEXT_CHARS) + "...";
         }
-        return "File: " + theHit.path() + " (lines " + theHit.startLine() + '-'
+        return FILE_PREFIX + theHit.path() + " (lines " + theHit.startLine() + '-'
             + theHit.endLine() + ", similarity "
             + String.format(Locale.ROOT, "%.2f", Double.valueOf(theHit.score())) + ")\n" + text
             + "\n\n";
@@ -123,12 +126,12 @@ public final class HybridContextSource implements ContextSource {
     private static Set<String> quotedPaths(final String theKeywordText) {
         final Set<String> paths = new HashSet<>();
         for(final String line : theKeywordText.split("\n")) {
-            if(line.startsWith("File: ")) {
+            if(line.startsWith(FILE_PREFIX)) {
                 int end = line.indexOf(" (line ");
                 if(end < 0) {
                     end = line.length();
                 }
-                paths.add(line.substring("File: ".length(), end));
+                paths.add(line.substring(FILE_PREFIX.length(), end));
             }
         }
         return paths;

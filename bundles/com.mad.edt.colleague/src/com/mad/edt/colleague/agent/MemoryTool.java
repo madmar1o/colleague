@@ -13,6 +13,9 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 public final class MemoryTool implements IToolExecutor {
 
+    /** Tool id the lesson memory is addressed by. */
+    public static final String TOOL_ID = "remember";
+
     private final AgentMemory memory;
 
     /**
@@ -24,7 +27,7 @@ public final class MemoryTool implements IToolExecutor {
 
     @Override
     public String getName() {
-        return "remember";
+        return TOOL_ID;
     }
 
     @Override

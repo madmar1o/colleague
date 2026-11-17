@@ -22,6 +22,8 @@ public final class McpSettings {
 
     private static final String NODE_ID = "com.mad.edt.colleague.mcp";
     private static final String KEY_SERVERS = "servers.json";
+    /** Persistence field name marking a server entry as active. */
+    private static final String ENABLED = "enabled";
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
@@ -106,7 +108,7 @@ public final class McpSettings {
     private static JsonObject toJson(final McpServerConfig theConfig) {
         final JsonObject json = new JsonObject();
         json.addProperty("name", theConfig.getName());
-        json.addProperty("enabled", Boolean.valueOf(theConfig.isEnabled()));
+        json.addProperty(ENABLED, Boolean.valueOf(theConfig.isEnabled()));
         if (theConfig.isHttp()) {
             json.addProperty("url", theConfig.getUrl());
         } else {
@@ -127,7 +129,7 @@ public final class McpSettings {
         final JsonElement url = theJson.get("url");
         if (url != null && !url.isJsonNull() && !url.getAsString().isEmpty()) {
             return new McpServerConfig(name.getAsString(), null, url.getAsString(),
-                theJson.has("enabled") && theJson.get("enabled").getAsBoolean());
+                theJson.has(ENABLED) && theJson.get(ENABLED).getAsBoolean());
         }
         final JsonElement command = theJson.get("command");
         if (command == null || !command.isJsonArray() || command.getAsJsonArray().isEmpty()) {
@@ -138,6 +140,6 @@ public final class McpSettings {
             parts.add(part.getAsString());
         }
         return new McpServerConfig(name.getAsString(), parts, null,
-            theJson.has("enabled") && theJson.get("enabled").getAsBoolean());
+            theJson.has(ENABLED) && theJson.get(ENABLED).getAsBoolean());
     }
 }

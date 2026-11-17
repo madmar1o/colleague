@@ -47,6 +47,12 @@ import com.mad.edt.colleague.mcp.McpToolInfo;
  */
 public final class ContactsPanel {
 
+    /** Contact key separator and the bridge payload field names. */
+    private static final String ID_SEPARATOR = "\u0000";
+    private static final String ERROR = "error";
+    private static final String COMMAND = "command";
+    private static final String ENABLED = "enabled";
+
     /** A selectable chat contact: provider, model and the agent speaking them. */
     public static final class Contact {
 
@@ -106,8 +112,8 @@ public final class ContactsPanel {
          *         own conversation even when two of them share one model
          */
         public String getKey() {
-            return ourProviderId + "\u0000" + ourModel
-                + (ourAgentName.isEmpty() ? "" : "\u0000" + ourAgentName);
+            return ourProviderId + ID_SEPARATOR + ourModel
+                + (ourAgentName.isEmpty() ? "" : ID_SEPARATOR + ourAgentName);
         }
     }
 
@@ -362,7 +368,7 @@ public final class ContactsPanel {
         if(url.isEmpty()) {
             final JsonObject result = new JsonObject();
             result.addProperty("ok", Boolean.FALSE);
-            result.addProperty("error", "не задан адрес сервиса");
+            result.addProperty(ERROR, "не задан адрес сервиса");
             ourBridge.push("testResult", result);
             return;
         }
@@ -385,7 +391,7 @@ public final class ContactsPanel {
                 result.addProperty("ok", Boolean.TRUE);
             } catch (final Exception ex) {
                 result.addProperty("ok", Boolean.FALSE);
-                result.addProperty("error", ex.getMessage() == null
+                result.addProperty(ERROR, ex.getMessage() == null
                     ? ex.getClass().getSimpleName() : ex.getMessage());
             }
             Display.getDefault().asyncExec(() -> {
@@ -411,7 +417,7 @@ public final class ContactsPanel {
             pushSaved(false, "нужны идентификатор и адрес сервиса");
             return;
         }
-        if(id.contains("\u0000") || id.contains("/")) {
+        if(id.contains(ID_SEPARATOR) || id.contains("/")) {
             pushSaved(false, "некорректный идентификатор");
             return;
         }
@@ -454,7 +460,7 @@ public final class ContactsPanel {
      */
     private void saveMcp(final JsonObject theArguments) {
         final String name = BridgeBrowser.optString(theArguments, "name");
-        final String command = BridgeBrowser.optString(theArguments, "command");
+        final String command = BridgeBrowser.optString(theArguments, COMMAND);
         final String url = BridgeBrowser.optString(theArguments, "url");
         if(!name.matches("[a-z0-9_]{1,40}")) {
             pushSaved(false, "имя сервера — только строчные латинские буквы,"
@@ -475,8 +481,8 @@ public final class ContactsPanel {
                 parts.add(part);
             }
         }
-        final boolean enabled = !theArguments.has("enabled")
-            || theArguments.get("enabled").getAsBoolean();
+        final boolean enabled = !theArguments.has(ENABLED)
+            || theArguments.get(ENABLED).getAsBoolean();
         McpSettings.upsert(new McpServerConfig(name,
             url.isEmpty() ? parts : null, url.isEmpty() ? null : url, enabled));
         pushSaved(true, "");
@@ -504,7 +510,7 @@ public final class ContactsPanel {
      */
     private void testMcp(final JsonObject theArguments) {
         final String name = BridgeBrowser.optString(theArguments, "name");
-        final String command = BridgeBrowser.optString(theArguments, "command");
+        final String command = BridgeBrowser.optString(theArguments, COMMAND);
         final String url = BridgeBrowser.optString(theArguments, "url");
         final List<String> parts = new ArrayList<>();
         for(final String part : command.trim().split("\\s+")) {
@@ -529,7 +535,7 @@ public final class ContactsPanel {
                 result.addProperty("ok", Boolean.TRUE);
             } catch (final Exception ex) {
                 result.addProperty("ok", Boolean.FALSE);
-                result.addProperty("error", ex.getMessage() == null
+                result.addProperty(ERROR, ex.getMessage() == null
                     ? ex.getClass().getSimpleName() : ex.getMessage());
             }
             Display.getDefault().asyncExec(() -> {
@@ -556,9 +562,9 @@ public final class ContactsPanel {
         for(final McpServerConfig server : McpSettings.loadServers()) {
             final JsonObject item = new JsonObject();
             item.addProperty("name", server.getName());
-            item.addProperty("enabled", Boolean.valueOf(server.isEnabled()));
+            item.addProperty(ENABLED, Boolean.valueOf(server.isEnabled()));
             item.addProperty("url", server.getUrl() == null ? "" : server.getUrl());
-            item.addProperty("command", server.getCommand() == null
+            item.addProperty(COMMAND, server.getCommand() == null
                 ? "" : String.join(" ", server.getCommand()));
             servers.add(item);
         }
@@ -568,7 +574,7 @@ public final class ContactsPanel {
     private void pushSaved(final boolean theOk, final String theError) {
         final JsonObject payload = new JsonObject();
         payload.addProperty("ok", Boolean.valueOf(theOk));
-        payload.addProperty("error", theError);
+        payload.addProperty(ERROR, theError);
         ourBridge.push("saved", payload);
     }
 
@@ -609,7 +615,7 @@ public final class ContactsPanel {
             item.addProperty("baseUrl", ok ? String.valueOf(entry[2]) : "");
             item.addProperty("ok", Boolean.valueOf(ok));
             if(!ok) {
-                item.addProperty("error", String.valueOf(entry[2]));
+                item.addProperty(ERROR, String.valueOf(entry[2]));
             }
             item.addProperty("default", Boolean.valueOf(id.equals(defaultId)));
             final JsonArray models = new JsonArray();

@@ -17,6 +17,11 @@ import com.google.gson.JsonSyntaxException;
  */
 public final class EditScript {
 
+    /** Edit block field names and the parse error prefix. */
+    private static final String SEARCH = "search";
+    private static final String REPLACE = "replace";
+    private static final String EDIT_BLOCK_PREFIX = "Edit block ";
+
     /**
      * Either the parsed script or a message that tells the model what to fix.
      */
@@ -63,7 +68,7 @@ public final class EditScript {
     /**
      * Parses the JSON object of a tool call into a script.
      *
-     * @param theJson text like {@code {"path":"a.bsl","edits":[{"search":"x","replace":"y"}]}}
+     * @param theJson text like {@code {"path":"a.bsl","edits":[{SEARCH:"x",REPLACE:"y"}]}}
      * @return the script or a field-level refusal message
      */
     public static ParseResult parse(final String theJson) {
@@ -92,19 +97,19 @@ public final class EditScript {
         for (int index = 0; index < editList.size(); index++) {
             JsonElement element = editList.get(index);
             if (!element.isJsonObject()) {
-                return new ParseResult(null, "Edit block " + (index + 1) + " is not a JSON object.");
+                return new ParseResult(null, EDIT_BLOCK_PREFIX + (index + 1) + " is not a JSON object.");
             }
             JsonObject block = element.getAsJsonObject();
-            if (!block.has("search") || !block.get("search").isJsonPrimitive()) {
-                return new ParseResult(null, "Edit block " + (index + 1)
+            if (!block.has(SEARCH) || !block.get(SEARCH).isJsonPrimitive()) {
+                return new ParseResult(null, EDIT_BLOCK_PREFIX + (index + 1)
                     + " is missing the \"search\" text: copy the exact fragment to replace.");
             }
-            if (!block.has("replace") || !block.get("replace").isJsonPrimitive()) {
-                return new ParseResult(null, "Edit block " + (index + 1)
+            if (!block.has(REPLACE) || !block.get(REPLACE).isJsonPrimitive()) {
+                return new ParseResult(null, EDIT_BLOCK_PREFIX + (index + 1)
                     + " is missing the \"replace\" text: give the new text to put in its place.");
             }
-            blocks.add(new EditBlock(block.get("search").getAsString(),
-                block.get("replace").getAsString()));
+            blocks.add(new EditBlock(block.get(SEARCH).getAsString(),
+                block.get(REPLACE).getAsString()));
         }
         return new ParseResult(new EditScript(root.get("path").getAsString(), blocks), null);
     }

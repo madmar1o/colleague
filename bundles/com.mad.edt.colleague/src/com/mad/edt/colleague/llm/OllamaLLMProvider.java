@@ -28,6 +28,10 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
      * the model, never guessed from the model name.
      */
     private static final String THINKING_CAPABILITY = "thinking";
+    /** Ollama chat payload field names. */
+    private static final String CONTENT = "content";
+    private static final String TOOL_CALLS = "tool_calls";
+    private static final String MODEL = "model";
 
     /** Capability name the runtime reports for a prompt-completing model. */
     private static final String COMPLETION_CAPABILITY = "completion";
@@ -103,14 +107,14 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
         List<ToolCall> calls = List.of();
         final JsonObject message = response.getAsJsonObject("message");
         if(message != null) {
-            content = textOrNull(message, "content");
+            content = textOrNull(message, CONTENT);
             if(content == null) {
                 content = "";
             }
-            thinking = textOrNull(message, "thinking");
-            calls = parseToolCalls(message.getAsJsonArray("tool_calls"));
+            thinking = textOrNull(message, THINKING_CAPABILITY);
+            calls = parseToolCalls(message.getAsJsonArray(TOOL_CALLS));
         }
-        return new ChatResult(content, thinking, textOrNull(response, "model"),
+        return new ChatResult(content, thinking, textOrNull(response, MODEL),
             textOrNull(response, "done_reason"),
             intOrZero(response, "prompt_eval_count"), intOrZero(response, "eval_count"), calls);
     }
@@ -158,23 +162,23 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
                 theRequest.getCancellation(), event -> {
             final JsonObject message = event.getAsJsonObject("message");
             if(message != null) {
-                final String thought = textOrNull(message, "thinking");
+                final String thought = textOrNull(message, THINKING_CAPABILITY);
                 if(thought != null && !thought.isEmpty()) {
                     thinking.append(thought);
                     theOnThinking.accept(thought);
                 }
-                final String chunk = textOrNull(message, "content");
+                final String chunk = textOrNull(message, CONTENT);
                 if(chunk != null && !chunk.isEmpty()) {
                     content.append(chunk);
                     theOnContent.accept(chunk);
                 }
-                final JsonArray calls = message.getAsJsonArray("tool_calls");
+                final JsonArray calls = message.getAsJsonArray(TOOL_CALLS);
                 if(calls != null && !calls.isEmpty()) {
                     lastToolCalls.addAll(calls);
                 }
             }
-            if(event.has("model")) {
-                modelName[0] = textOrNull(event, "model");
+            if(event.has(MODEL)) {
+                modelName[0] = textOrNull(event, MODEL);
             }
             if(event.get("done") != null && event.get("done").getAsBoolean()) {
                 doneReason[0] = textOrNull(event, "done_reason");
@@ -196,7 +200,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
     @Override
     public void warmModel(final String theModel) throws LLMException {
         final JsonObject body = new JsonObject();
-        body.addProperty("model", resolveModel(theModel));
+        body.addProperty(MODEL, resolveModel(theModel));
         // buffered answer, one JSON document: the point is the load itself,
         // not the generation, so the request carries no prompt at all
         body.addProperty("stream", Boolean.FALSE);
@@ -272,7 +276,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
      */
     private Set<String> readCapabilities(final String theModel) {
         final JsonObject body = new JsonObject();
-        body.addProperty("model", theModel);
+        body.addProperty(MODEL, theModel);
         try {
             final JsonObject answer = postJson("/api/show", body, PING_TIMEOUT_MS);
             final JsonArray reported = answer.getAsJsonArray("capabilities");
@@ -305,7 +309,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
             return false;
         }
         final String message = theError.getMessage();
-        return message != null && message.toLowerCase(Locale.ROOT).contains("thinking");
+        return message != null && message.toLowerCase(Locale.ROOT).contains(THINKING_CAPABILITY);
     }
 
     /**
@@ -412,7 +416,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
     private static int estimatedPromptTokens(final JsonArray theMessages) {
         int characters = 0;
         for(final JsonElement entry : theMessages) {
-            final String content = textOrNull(entry.getAsJsonObject(), "content");
+            final String content = textOrNull(entry.getAsJsonObject(), CONTENT);
             if(content != null) {
                 characters += content.length();
             }
@@ -423,7 +427,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
     private JsonObject buildBody(final ChatRequest theRequest, final boolean theStreaming,
         final Boolean theThink) throws LLMException {
         final JsonObject body = new JsonObject();
-        body.addProperty("model", resolveModel(theRequest.getModel()));
+        body.addProperty(MODEL, resolveModel(theRequest.getModel()));
         body.addProperty("stream", Boolean.valueOf(theStreaming));
         appendKeepAlive(body);
         if(theThink != null) {
@@ -457,10 +461,10 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
                     wrapper.add("function", function);
                     calls.add(wrapper);
                 }
-                entry.add("tool_calls", calls);
-                entry.addProperty("content", message.getContent());
+                entry.add(TOOL_CALLS, calls);
+                entry.addProperty(CONTENT, message.getContent());
             } else {
-                entry.addProperty("content", message.getContent());
+                entry.addProperty(CONTENT, message.getContent());
                 if(message.getToolCallId() != null) {
                     entry.addProperty("tool_call_id", message.getToolCallId());
                 }
