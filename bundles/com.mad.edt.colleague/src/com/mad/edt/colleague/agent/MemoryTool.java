@@ -46,7 +46,7 @@ public final class MemoryTool implements IToolExecutor {
         schema.addProperty("type", "object");
         schema.add("properties", properties);
 
-        return new ToolSpec("remember",
+        return new ToolSpec(TOOL_ID,
             "Store one short lesson for later sessions on this project:"
                 + " a quirk you discovered, an approach that worked or failed,"
                 + " a rule the user corrected you on. One sentence, no code.", schema);

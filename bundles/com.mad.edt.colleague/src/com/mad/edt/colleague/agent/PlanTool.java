@@ -83,7 +83,7 @@ public final class PlanTool implements IToolExecutor {
         topRequired.add(ITEMS);
         schema.add("required", topRequired);
 
-        return new ToolSpec("update_plan",
+        return new ToolSpec(TOOL_ID,
             "Replace your whole visible task plan with this list. Give every"
                 + " unfinished task one status: pending, active (exactly one"
                 + " at a time) or done. Call it before starting a multi-step"

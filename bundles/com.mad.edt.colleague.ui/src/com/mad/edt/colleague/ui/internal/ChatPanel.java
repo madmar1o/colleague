@@ -114,6 +114,9 @@ public final class ChatPanel {
     /** Same physical ESC seen through both channels counts once inside this pause. */
     private static final long ESC_DEDUP_MS = 300L;
 
+    /** System property that switches the browser page into selftest layout. */
+    private static final String SELFTEST_PROPERTY = "colleague.browser.selftest";
+
     /** Browser event kind carrying the finished answer payload. */
     private static final String PUSH_ANSWER = "answer";
 
@@ -626,7 +629,7 @@ public final class ChatPanel {
 
     /** Logs where the chat browser sits on screen and who receives SWT input. */
     private void traceGeometry() {
-        if(!Boolean.getBoolean("colleague.browser.selftest")) {
+        if(!Boolean.getBoolean(SELFTEST_PROPERTY)) {
             return;
         }
         final Control control = ourBridge.getControl();
@@ -736,7 +739,7 @@ public final class ChatPanel {
 
         @Override
         public void send(final String theText) {
-            if(Boolean.getBoolean("colleague.browser.selftest")) {
+            if(Boolean.getBoolean(SELFTEST_PROPERTY)) {
                 ColleagueLog.info("[colleague] bridge: page reached the panel's "
                     + "input handler");
             }
@@ -853,7 +856,7 @@ public final class ChatPanel {
             // always: they are the only window into what happened inside the
             // embedded webview when the page goes blank. The selftest layout
             // measurements stay gated to keep normal runs quiet.
-            if(Boolean.getBoolean("colleague.browser.selftest")
+            if(Boolean.getBoolean(SELFTEST_PROPERTY)
                 || theText.startsWith("js-") || theText.startsWith("census:")
                 || theText.startsWith("order:")) {
                 ColleagueLog.info("[colleague] page diag: " + theText);
@@ -877,7 +880,7 @@ public final class ChatPanel {
          * then arrives back in Java through the page's call channel.
          */
         private void schedulePageSendProof() {
-            if(!Boolean.getBoolean("colleague.browser.selftest") || ourBridge == null
+            if(!Boolean.getBoolean(SELFTEST_PROPERTY) || ourBridge == null
                 || ourPageProofDone) {
                 return;
             }

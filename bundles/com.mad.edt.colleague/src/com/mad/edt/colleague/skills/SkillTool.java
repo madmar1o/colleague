@@ -60,7 +60,7 @@ public final class SkillTool implements IToolExecutor {
         final JsonArray required = new JsonArray();
         required.add("id");
         schema.add("required", required);
-        return new ToolSpec("load_skill",
+        return new ToolSpec(TOOL_ID,
             "Fetch the full instructions of one skill by name plus its supporting"
                 + " file list. Call this before following any skill listed in"
                 + " available_skills.", schema);
