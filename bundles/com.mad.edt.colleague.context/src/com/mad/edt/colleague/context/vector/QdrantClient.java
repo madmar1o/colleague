@@ -366,20 +366,25 @@ public final class QdrantClient {
         final List<String> theFields) throws QdrantException {
         final List<JsonObject> payloads = new ArrayList<>();
         String offset = null;
-        while(true) {
+        boolean morePages = true;
+        // single loop exit: the store handing over no offset (or an empty
+        // page) closes the walk through the while condition
+        while(morePages) {
             final JsonObject result =
                 call("POST", COLLECTIONS_PATH + theCollection + "/points/scroll",
                     scrollBody(offset, theFields));
             final JsonObject page = result.getAsJsonObject(RESULT);
             if(page == null || !page.has(POINTS)) {
-                break;
+                morePages = false;
+            } else {
+                final int pagePoints = appendPage(payloads, page);
+                final com.google.gson.JsonElement next = page.get("next_page_offset");
+                if(next == null || next.isJsonNull() || pagePoints == 0) {
+                    morePages = false;
+                } else {
+                    offset = next.getAsString();
+                }
             }
-            final int pagePoints = appendPage(payloads, page);
-            final com.google.gson.JsonElement next = page.get("next_page_offset");
-            if(next == null || next.isJsonNull() || pagePoints == 0) {
-                break;
-            }
-            offset = next.getAsString();
         }
         return payloads;
     }

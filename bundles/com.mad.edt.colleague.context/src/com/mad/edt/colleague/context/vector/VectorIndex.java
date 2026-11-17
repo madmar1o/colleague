@@ -522,15 +522,12 @@ public class VectorIndex {
                 if(!path.isEmpty()) {
                     legacyPaths.add(path);
                 }
-                continue;
+            } else if(!hash.isEmpty()) {
+                if(!states.containsKey(location)) {
+                    adopted++;
+                }
+                states.put(location, new FileState(hash));
             }
-            if(hash.isEmpty()) {
-                continue;
-            }
-            if(!states.containsKey(location)) {
-                adopted++;
-            }
-            states.put(location, new FileState(hash));
         }
         for(final String path : legacyPaths) {
             try {

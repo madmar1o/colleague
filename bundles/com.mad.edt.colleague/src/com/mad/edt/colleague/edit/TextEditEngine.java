@@ -102,24 +102,21 @@ public final class TextEditEngine {
                     current = replace;
                     applied++;
                 }
-                continue;
+            } else if (!search.equals(replace)) {
+                int first = current.indexOf(search);
+                if (first < 0) {
+                    return Result.refused("Edit refused at block " + (index + 1)
+                        + ": the fragment was not found in the file. Check that it is copied"
+                        + " exactly from the current file content.");
+                }
+                if (current.indexOf(search, first + 1) >= 0) {
+                    return Result.refused("Edit refused at block " + (index + 1)
+                        + ": the fragment was found more than once. Include more surrounding"
+                        + " lines so the fragment is unique.");
+                }
+                current = current.substring(0, first) + replace + current.substring(first + search.length());
+                applied++;
             }
-            if (search.equals(replace)) {
-                continue;
-            }
-            int first = current.indexOf(search);
-            if (first < 0) {
-                return Result.refused("Edit refused at block " + (index + 1)
-                    + ": the fragment was not found in the file. Check that it is copied"
-                    + " exactly from the current file content.");
-            }
-            if (current.indexOf(search, first + 1) >= 0) {
-                return Result.refused("Edit refused at block " + (index + 1)
-                    + ": the fragment was found more than once. Include more surrounding"
-                    + " lines so the fragment is unique.");
-            }
-            current = current.substring(0, first) + replace + current.substring(first + search.length());
-            applied++;
         }
         return Result.ok(current, applied, !current.equals(original));
     }

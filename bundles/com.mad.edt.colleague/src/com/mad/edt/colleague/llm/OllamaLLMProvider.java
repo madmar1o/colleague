@@ -567,23 +567,19 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
         for(final JsonElement element : theCalls) {
             final JsonObject call = element.getAsJsonObject();
             final JsonObject function = call.getAsJsonObject("function");
-            if(function == null) {
-                continue;
+            final String name = function == null ? null : textOrNull(function, "name");
+            if(name != null) {
+                final JsonElement arguments = function.get("arguments");
+                final String argumentsJson;
+                if(arguments == null || arguments.isJsonNull()) {
+                    argumentsJson = "{}";
+                } else if(arguments.isJsonPrimitive()) {
+                    argumentsJson = arguments.getAsString();
+                } else {
+                    argumentsJson = arguments.toString();
+                }
+                calls.add(new ToolCall(textOrNull(call, "id"), name, argumentsJson));
             }
-            final JsonElement arguments = function.get("arguments");
-            final String argumentsJson;
-            if(arguments == null || arguments.isJsonNull()) {
-                argumentsJson = "{}";
-            } else if(arguments.isJsonPrimitive()) {
-                argumentsJson = arguments.getAsString();
-            } else {
-                argumentsJson = arguments.toString();
-            }
-            final String name = textOrNull(function, "name");
-            if(name == null) {
-                continue;
-            }
-            calls.add(new ToolCall(textOrNull(call, "id"), name, argumentsJson));
         }
         return calls;
     }

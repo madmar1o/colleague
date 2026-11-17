@@ -328,16 +328,20 @@ public final class WebBridge implements PageTransport {
     private String pollEvents() {
         final long deadline = System.currentTimeMillis() + POLL_WAIT_MS;
         synchronized(ourEvents) {
-            while(ourEvents.isEmpty() && ourOpen) {
+            boolean timedOut = false;
+            // single loop exit: the deadline and the interrupt flag close the
+            // wait through the while condition instead of breaking twice
+            while(!timedOut && ourEvents.isEmpty() && ourOpen) {
                 final long left = deadline - System.currentTimeMillis();
                 if(left <= 0) {
-                    break;
-                }
-                try {
-                    ourEvents.wait(left);
-                } catch (final InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                    break;
+                    timedOut = true;
+                } else {
+                    try {
+                        ourEvents.wait(left);
+                    } catch (final InterruptedException ex) {
+                        Thread.currentThread().interrupt();
+                        timedOut = true;
+                    }
                 }
             }
             return BridgePushDelivery.renderBatch(drainLocked());

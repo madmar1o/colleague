@@ -714,15 +714,14 @@ public class ColleagueView extends ViewPart {
             LLMSettings.getConfig(defaultId);
         final String configured = defaultConfig == null ? null : defaultConfig.getDefaultModel();
         for(final ContactsPanel.Contact contact : theAvailable) {
-            if(!contact.getProviderId().equals(defaultId)) {
-                continue;
-            }
-            if(preferred == null) {
-                preferred = contact;
-            }
-            if(contact.getModel().equals(configured)) {
-                preferred = contact;
-                break;
+            if(contact.getProviderId().equals(defaultId)) {
+                if(preferred == null) {
+                    preferred = contact;
+                }
+                if(contact.getModel().equals(configured)) {
+                    preferred = contact;
+                    break;
+                }
             }
         }
         return preferred;
@@ -1003,15 +1002,14 @@ public class ColleagueView extends ViewPart {
      */
     private java.io.File colleagueDirectory(final String theName) {
         for(final IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
-            if(!project.isOpen()) {
-                continue;
+            if(project.isOpen()) {
+                final java.io.File dir = project.getLocation()
+                    .append(".colleague/" + theName).toFile();
+                if(dir.isDirectory()) {
+                    return dir;
+                }
+                break; // the first open project decides, closed ones never host it
             }
-            final java.io.File dir = project.getLocation()
-                .append(".colleague/" + theName).toFile();
-            if(dir.isDirectory()) {
-                return dir;
-            }
-            break;
         }
         return null;
     }

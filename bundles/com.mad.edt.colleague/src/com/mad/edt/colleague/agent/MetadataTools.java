@@ -123,16 +123,20 @@ public final class MetadataTools {
         candidates.sort(Comparator.comparingInt((Path candidate) -> rank(candidate, needle)));
         final List<Hit> hits = new ArrayList<>();
         int reads = 0;
-        for(final Path candidate : candidates) {
+        boolean budgetOpen = true;
+        // single loop exit: hit and read budgets close the walk through the
+        // while condition, non-matching heads are filtered in place
+        for(int step = 0; budgetOpen && step < candidates.size(); step++) {
+            final Path candidate = candidates.get(step);
             if(hits.size() >= MAX_HITS || reads >= MAX_HEAD_READS) {
-                break;
+                budgetOpen = false;
+            } else {
+                reads++;
+                final Head head = readHead(candidate);
+                if(head.name != null && headMatches(head, needle, kindNeedle)) {
+                    hits.add(new Hit(head.kind, head.name, head.synonymRu, candidate));
+                }
             }
-            reads++;
-            final Head head = readHead(candidate);
-            if(head.name == null || !headMatches(head, needle, kindNeedle)) {
-                continue;
-            }
-            hits.add(new Hit(head.kind, head.name, head.synonymRu, candidate));
         }
         return hits;
     }
@@ -509,18 +513,16 @@ public final class MetadataTools {
             }
             if(theText.startsWith("<?", at)) {
                 index = skipPast(theText, at + 2, "?>");
-                continue;
-            }
-            if(theText.startsWith("<!", at)) {
+            } else if(theText.startsWith("<!", at)) {
                 index = skipPast(theText, at + 2, ">");
-                continue;
+            } else {
+                final int close = theText.indexOf('>', at);
+                if(close < 0) {
+                    return null;
+                }
+                final String name = localName(theText.substring(at + 1, close));
+                return name.isEmpty() ? null : name;
             }
-            final int close = theText.indexOf('>', at);
-            if(close < 0) {
-                return null;
-            }
-            final String name = localName(theText.substring(at + 1, close));
-            return name.isEmpty() ? null : name;
         }
         return null;
     }

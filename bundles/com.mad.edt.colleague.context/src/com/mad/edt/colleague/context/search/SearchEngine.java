@@ -183,37 +183,38 @@ public final class SearchEngine {
         int visitedFiles = 0;
         boolean cutByTime = false;
         boolean cutByBytes = false;
-        for(final Integer position : theOrder) {
+        int step = 0;
+        // single loop exit: the while condition carries the time and read
+        // budgets, the body itself never breaks or continues; the checks run
+        // before the read exactly as the straight-line walk did
+        while(step < theOrder.length && !cutByTime && !cutByBytes) {
             visitedFiles++;
             if(clock.nanoTime() > theDeadline) {
                 cutByTime = true;
-                break;
-            }
-            if(readBytes >= readBudgetBytes) {
+            } else if(readBytes >= readBudgetBytes) {
                 cutByBytes = true;
-                break;
+            } else {
+                final int index = theOrder[step].intValue();
+                final SourceIndex.Entry entry = theIndex.get(index);
+                final long size = fileSize(entry);
+                if(size >= 0L && size <= maxFileBytes) {
+                    readBytes += size;
+                    Hit hit = null;
+                    try {
+                        hit = scanFile(entry, theNameScores[index], theQuery);
+                    } catch (final IOException ex) {
+                        // unreadable file, skip
+                    }
+                    if(hit != null) {
+                        scannedFiles++;
+                        theTop.offer(hit);
+                        if(theTop.size() > maxResults) {
+                            theTop.poll();
+                        }
+                    }
+                }
             }
-            final int index = position.intValue();
-            final SourceIndex.Entry entry = theIndex.get(index);
-            final long size = fileSize(entry);
-            if(size < 0L || size > maxFileBytes) {
-                continue;
-            }
-            readBytes += size;
-            Hit hit = null;
-            try {
-                hit = scanFile(entry, theNameScores[index], theQuery);
-            } catch (final IOException ex) {
-                // unreadable file, skip
-            }
-            if(hit == null) {
-                continue;
-            }
-            scannedFiles++;
-            theTop.offer(hit);
-            if(theTop.size() > maxResults) {
-                theTop.poll();
-            }
+            step++;
         }
         return new ScanTally(scannedFiles, visitedFiles, cutByTime, cutByBytes);
     }

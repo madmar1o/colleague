@@ -361,16 +361,12 @@ public class OpenAiCompatibleLLMProvider extends AbstractHttpLLMProvider {
         for(final JsonElement element : theCalls) {
             final JsonObject call = element.getAsJsonObject();
             final JsonObject function = call.getAsJsonObject(FUNCTION);
-            if(function == null) {
-                continue;
+            final String name = function == null ? null : textOrNull(function, "name");
+            if(name != null) {
+                final String arguments = textOrNull(function, ARGUMENTS);
+                calls.add(new ToolCall(textOrNull(call, "id"), name,
+                    arguments == null ? "{}" : arguments));
             }
-            final String name = textOrNull(function, "name");
-            if(name == null) {
-                continue;
-            }
-            final String arguments = textOrNull(function, ARGUMENTS);
-            calls.add(new ToolCall(textOrNull(call, "id"), name,
-                arguments == null ? "{}" : arguments));
         }
         return calls;
     }

@@ -94,21 +94,17 @@ public final class ConversationStore {
             return loaded;
         }
         for(final JsonElement element : stored.getAsJsonArray()) {
-            if(!element.isJsonObject()) {
-                continue;
+            if(element.isJsonObject()) {
+                final JsonObject entry = element.getAsJsonObject();
+                final String role = text(entry, "role");
+                final String content = text(entry, "content");
+                // rows written by earlier builds may carry a blank turn: skip it
+                // on the way out, an old file heals itself without a migration
+                if(role != null && content != null
+                    && (ChatMessage.ROLE_SYSTEM.equals(role) || !content.isBlank())) {
+                    loaded.add(replay(role, content));
+                }
             }
-            final JsonObject entry = element.getAsJsonObject();
-            final String role = text(entry, "role");
-            final String content = text(entry, "content");
-            if(role == null || content == null) {
-                continue;
-            }
-            // rows written by earlier builds may carry a blank turn: skip it
-            // on the way out, an old file heals itself without a migration
-            if(!ChatMessage.ROLE_SYSTEM.equals(role) && content.isBlank()) {
-                continue;
-            }
-            loaded.add(replay(role, content));
         }
         return loaded;
     }

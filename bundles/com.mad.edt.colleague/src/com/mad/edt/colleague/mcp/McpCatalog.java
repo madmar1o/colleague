@@ -143,17 +143,14 @@ public final class McpCatalog {
         final Set<String> theTaken, final McpToolAdapter.Confirmation theConfirmation,
         final List<IToolExecutor> theTools) {
         for (final McpToolInfo tool : discoverQuietly(theConfig)) {
-            if (theTaken.contains(tool.name())) {
-                continue; // a remote tool never shadows a built-in one
-            }
             final String advertised = McpToolAdapter.NAME_PREFIX
                 + McpToolAdapter.safe(theConfig.getName()) + "_"
                 + McpToolAdapter.safe(tool.name());
-            if (theTaken.contains(advertised)) {
-                continue;
+            // a remote tool never shadows a built-in one or another adapter
+            if (!theTaken.contains(tool.name()) && !theTaken.contains(advertised)) {
+                theTaken.add(advertised);
+                theTools.add(new McpToolAdapter(theConfig.getName(), theBridge, tool, theConfirmation));
             }
-            theTaken.add(advertised);
-            theTools.add(new McpToolAdapter(theConfig.getName(), theBridge, tool, theConfirmation));
         }
     }
 

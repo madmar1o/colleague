@@ -79,15 +79,21 @@ public final class HybridContextSource implements ContextSource {
         }
         final Set<String> quotedPaths = quotedPaths(keywordText);
         final StringBuilder semantic = new StringBuilder();
-        for(final ModuleHit hit : hits) {
-            if(quotedPaths.contains(hit.path())) {
-                continue;
+        int hitIndex = 0;
+        boolean budgetOpen = true;
+        // single loop exit: quoted paths are filtered in place, the char
+        // budget closes the walk through the while condition
+        while(hitIndex < hits.size() && budgetOpen) {
+            final ModuleHit hit = hits.get(hitIndex);
+            if(!quotedPaths.contains(hit.path())) {
+                final String block = block(hit);
+                if(semantic.length() + block.length() > SEMANTIC_CHAR_BUDGET) {
+                    budgetOpen = false;
+                } else {
+                    semantic.append(block);
+                }
             }
-            final String block = block(hit);
-            if(semantic.length() + block.length() > SEMANTIC_CHAR_BUDGET) {
-                break;
-            }
-            semantic.append(block);
+            hitIndex++;
         }
         if(semantic.length() == 0) {
             return keywordText;
