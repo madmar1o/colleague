@@ -31,6 +31,9 @@ class PlanToolTest {
         assertFalse(tool.isParallelSafe());
     }
 
+    // java:S6126 kept suppressed: the expected value has no trailing newline,
+    // a text block would append one and change the byte-exact assertion.
+    @SuppressWarnings("java:S6126")
     @Test
     void replacesThePlanAndReturnsTheRenderedBoard() {
         final PlanBoard board = new PlanBoard();

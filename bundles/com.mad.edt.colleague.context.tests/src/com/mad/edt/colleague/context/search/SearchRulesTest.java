@@ -130,9 +130,13 @@ class SearchRulesTest {
         final List<String> blocks = List.of("AAAA\n\n", "BBBB\n\n", "CCCC\n\n");
         SnippetRenderer.render(blocks, 12, out, 1, 3, true, false);
         // two blocks fit into 12 characters, the third does not
-        assertEquals("AAAA\n\nBBBB\n\n"
-            + "Scanned 1 of 3 indexed files (scan cut by 8s time budget). "
-            + "Refine the query or the file filter.\n", out.toString());
+        assertEquals("""
+            AAAA
+
+            BBBB
+
+            Scanned 1 of 3 indexed files (scan cut by 8s time budget). Refine the query or the file filter.
+            """, out.toString());
         out.setLength(0);
         SnippetRenderer.render(blocks, 60, out, 2, 3, false, true);
         assertEquals(ALL_BLOCKS

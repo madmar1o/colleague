@@ -121,6 +121,9 @@ class AgentProfileWriterTest {
             loaded.stream().map(AgentProfile::getName).toList());
     }
 
+    // java:S6126 kept suppressed: the fixture pins CRLF line endings,
+    // a text block cannot express carriage returns.
+    @SuppressWarnings("java:S6126")
     @Test
     @DisplayName("a ready profile text lands as a file the loader reads back")
     void readyTextLandsAsAReadableProfile(@TempDir final Path theRoot) throws IOException {

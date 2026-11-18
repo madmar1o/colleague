@@ -26,6 +26,9 @@ class EditorActionPromptsTest {
         generateHandler = new GenerateMethodHandler();
     }
 
+    // java:S6126 kept suppressed: the selected-code fixture has no trailing
+    // newline, a text block would append one and change the byte-exact value.
+    @SuppressWarnings("java:S6126")
     @Test
     void explainSelectionBuildsPromptWithSelectedCode() {
         final String selectedCode = "Функция ТолькоЦифры(Строка)\n"
@@ -39,6 +42,9 @@ class EditorActionPromptsTest {
         assertTrue(prompt.contains(selectedCode.trim()));
     }
 
+    // java:S6126 kept suppressed: the fixture carries escaped quotes and has no
+    // trailing newline; a text block would change the byte-exact value.
+    @SuppressWarnings("java:S6126")
     @Test
     void generateMethodBuildsPromptWithSelectedCode() {
         final String selectedCode = "Строка = \"123\";\n"

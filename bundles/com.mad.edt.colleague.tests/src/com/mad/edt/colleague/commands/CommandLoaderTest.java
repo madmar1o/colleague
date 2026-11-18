@@ -24,8 +24,14 @@ class CommandLoaderTest {
     @DisplayName("the template body carries the placeholder for user arguments")
     void parsesTemplateAndArguments(@TempDir final Path theRoot) throws IOException {
         Files.writeString(theRoot.resolve("review.md"),
-            "---\ndescription: review a change\nagent: fixer\n---\n"
-                + "Review this change: $ARGUMENTS\nName the risks first.\n",
+            """
+            ---
+            description: review a change
+            agent: fixer
+            ---
+            Review this change: $ARGUMENTS
+            Name the risks first.
+            """,
             StandardCharsets.UTF_8);
 
         final List<CommandDefinition> loaded = new CommandLoader().loadAll(theRoot.toFile());

@@ -202,31 +202,44 @@ class McpClientHandshakeTest {
                     if(line.isBlank()) {
                         continue;
                     }
-                    String method = between(line, "\\"method\\":\\"", "\\"");
-                    String id = between(line, "\\"id\\":", ",");
+                    String method = between(line, q("method") + c(58) + c(34), c(34));
+                    String id = between(line, q("id") + c(58), c(44));
                     String result;
                     if("initialize".equals(method)) {
-                        result = "{\\"protocolVersion\\":\\"2024-11-05\\",\\"capabilities\\":{},"
-                            + "\\"serverInfo\\":{\\"name\\":\\"stdio-fake\\"}}";
+                        result = "{" + q("protocolVersion") + c(58) + q("2024-11-05") + ","
+                            + q("capabilities") + c(58) + "{},"
+                            + q("serverInfo") + c(58) + "{" + q("name") + c(58) + q("stdio-fake") + "}}";
                     } else if("tools/list".equals(method)) {
-                        result = "{\\"tools\\":[{\\"name\\":\\"echo\\","
-                            + "\\"description\\":\\"stdio echo\\","
-                            + "\\"inputSchema\\":{\\"type\\":\\"object\\"}}]}";
+                        result = "{" + q("tools") + c(58) + "[{" + q("name") + c(58) + q("echo") + ","
+                            + q("description") + c(58) + q("stdio echo") + ","
+                            + q("inputSchema") + c(58) + "{" + q("type") + c(58) + q("object") + "}}]}";
                     } else if("tools/call".equals(method)) {
-                        result = "{\\"content\\":[{\\"type\\":\\"text\\","
-                            + "\\"text\\":\\"stdio echo ok\\"}],\\"isError\\":false}";
+                        result = "{" + q("content") + c(58) + "[{" + q("type") + c(58) + q("text") + ","
+                            + q("text") + c(58) + q("stdio echo ok") + "}],"
+                            + q("isError") + c(58) + "false}";
                     } else if("notifications/initialized".equals(method)) {
                         continue;
                     } else {
-                        writeLine(out, "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":" + id
-                            + ",\\"error\\":{\\"code\\":-32601,"
-                            + "\\"message\\":\\"unknown method\\"}}");
+                        writeLine(out, response(id)
+                            + q("error") + c(58) + "{" + q("code") + c(58) + "-32601,"
+                            + q("message") + c(58) + q("unknown method") + "}}");
                         continue;
                     }
-                    writeLine(out, "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":" + id
-                        + ",\\"result\\":" + result + "}");
+                    writeLine(out, response(id) + q("result") + c(58) + result + "}");
                 }
                 out.flush();
+            }
+
+            private static String q(String value) {
+                return (char) 34 + value + (char) 34;
+            }
+
+            private static String c(int ch) {
+                return "" + (char) ch;
+            }
+
+            private static String response(String id) {
+                return "{" + q("jsonrpc") + c(58) + q("2.0") + "," + q("id") + c(58) + id + ",";
             }
 
             private static String between(String text, String start, String end) {
@@ -241,7 +254,7 @@ class McpClientHandshakeTest {
 
             private static void writeLine(Writer out, String line) throws Exception {
                 out.write(line);
-                out.write('\\n');
+                out.write(System.lineSeparator());
                 out.flush();
             }
         }

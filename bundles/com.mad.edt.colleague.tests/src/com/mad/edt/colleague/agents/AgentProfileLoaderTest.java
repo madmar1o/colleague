@@ -20,8 +20,10 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class AgentProfileLoaderTest {
 
+    // java:S6126 kept suppressed: the expected value has no trailing newline,
+    // a text block would append one and change the byte-exact assertion.
+    @SuppressWarnings("java:S6126")
     @Test
-    @DisplayName("header carries the tool list, the step budget and the mode")
     void parsesToolListAndSteps(@TempDir final Path theRoot) throws IOException {
         Files.writeString(theRoot.resolve("reviewer.md"),
             "---\r\ndescription: review only\r\nmodel: big/model:7\r\n"
@@ -71,6 +73,9 @@ class AgentProfileLoaderTest {
             .loadAll(theRoot.resolve("no-such-dir").toFile()).isEmpty());
     }
 
+    // java:S6126 kept suppressed: the fixture pins CRLF line endings,
+    // a text block cannot express carriage returns.
+    @SuppressWarnings("java:S6126")
     @Test
     @DisplayName("the title header is the display name, the file name stays the id")
     void titleIsTheDisplayNameFileNameStaysTheId(@TempDir final Path theRoot)

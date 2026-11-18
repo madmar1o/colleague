@@ -126,8 +126,14 @@ class SkillShowcaseTest {
         final File skillDir = theRoot.resolve("quiet").toFile();
         Assertions.assertTrue(skillDir.mkdirs());
         Files.writeString(new File(skillDir, "SKILL.md").toPath(),
-            "---\nname: quiet\ndescription: hidden from the model\n"
-                + "disable-model-invocation: true\n---\nbody\n", StandardCharsets.UTF_8);
+            """
+            ---
+            name: quiet
+            description: hidden from the model
+            disable-model-invocation: true
+            ---
+            body
+            """, StandardCharsets.UTF_8);
 
         final List<SkillDefinition> loaded = new SkillLoader().loadAll(theRoot.toFile());
 

@@ -1523,6 +1523,9 @@ public class ColleagueView extends ViewPart {
         };
     }
 
+    // java:S6126 kept suppressed: the selftest context has no trailing newline,
+    // a text block would append one and change the staged context bytes.
+    @SuppressWarnings("java:S6126")
     private void maybeRunSelfTest() {
         if(!Boolean.getBoolean("colleague.ui.selftest") || ourSelfTestDone) {
             return;
