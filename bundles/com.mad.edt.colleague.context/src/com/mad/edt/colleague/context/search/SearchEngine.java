@@ -189,34 +189,80 @@ public final class SearchEngine {
         // before the read exactly as the straight-line walk did
         while(step < theOrder.length && !cutByTime && !cutByBytes) {
             visitedFiles++;
-            if(clock.nanoTime() > theDeadline) {
+            final int budget = budgetCut(theDeadline, readBytes);
+            if(budget == 0) {
                 cutByTime = true;
-            } else if(readBytes >= readBudgetBytes) {
+            } else if(budget == 1) {
                 cutByBytes = true;
             } else {
-                final int index = theOrder[step].intValue();
-                final SourceIndex.Entry entry = theIndex.get(index);
-                final long size = fileSize(entry);
-                if(size >= 0L && size <= maxFileBytes) {
-                    readBytes += size;
-                    Hit hit = null;
-                    try {
-                        hit = scanFile(entry, theNameScores[index], theQuery);
-                    } catch (final IOException ex) {
-                        // unreadable file, skip
-                    }
-                    if(hit != null) {
-                        scannedFiles++;
-                        theTop.offer(hit);
-                        if(theTop.size() > maxResults) {
-                            theTop.poll();
-                        }
-                    }
+                final int[] foundHit = new int[1];
+                final long read = scanOne(theIndex, theQuery, theOrder, theNameScores,
+                    step, theTop, foundHit);
+                readBytes += read;
+                if(foundHit[0] > 0) {
+                    scannedFiles++;
                 }
             }
             step++;
         }
         return new ScanTally(scannedFiles, visitedFiles, cutByTime, cutByBytes);
+    }
+
+    /**
+     * Decides whether the walk may read the file at the given step.
+     *
+     * @param theDeadline instant the time budget expires
+     * @param theReadBytes bytes already read by the walk
+     * @return 0 when the time budget is spent, 1 when the read budget is
+     *         spent, 2 when the file may be read
+     */
+    private int budgetCut(final long theDeadline, final long theReadBytes) {
+        if(clock.nanoTime() > theDeadline) {
+            return 0;
+        }
+        if(theReadBytes >= readBudgetBytes) {
+            return 1;
+        }
+        return 2;
+    }
+
+    /**
+     * Reads one index entry and offers its hit to the bounded queue.
+     *
+     * @param theIndex index snapshot
+     * @param theQuery tokens of the query
+     * @param theOrder positions of the index, sorted by path score
+     * @param theNameScores path score per index position
+     * @param theStep current position in the order
+     * @param theTop bounded queue of the best hits found
+     * @param theFoundHit single-slot flag, set to 1 when the file produced a
+     *                    hit that entered the queue
+     * @return bytes added by this file (0 when it was skipped or unreadable)
+     */
+    private long scanOne(final List<SourceIndex.Entry> theIndex, final List<String> theQuery,
+        final Integer[] theOrder, final int[] theNameScores, final int theStep,
+        final PriorityQueue<Hit> theTop, final int[] theFoundHit) {
+        final int index = theOrder[theStep].intValue();
+        final SourceIndex.Entry entry = theIndex.get(index);
+        final long size = fileSize(entry);
+        if(size < 0L || size > maxFileBytes) {
+            return 0L;
+        }
+        Hit hit = null;
+        try {
+            hit = scanFile(entry, theNameScores[index], theQuery);
+        } catch (final IOException ex) {
+            // unreadable file, skip
+        }
+        if(hit == null) {
+            return size;
+        }
+        theFoundHit[0] = 1;
+        theTop.offer(hit);
+        if(theTop.size() > maxResults) {
+            theTop.poll();
+        }
+        return size;
     }
 
     /** Scan counters feeding the coverage note of the result. */
