@@ -350,7 +350,7 @@ class AgentLoopEndToEndTest {
         // unattended run must leave the step-by-step evidence behind, not
         // only a passed/failed line
         java.util.logging.Logger.getLogger("com.mad.edt.colleague.e2e")
-            .info(console.toString(StandardCharsets.UTF_8));
+            .info(() -> console.toString(StandardCharsets.UTF_8));
 
         final java.util.function.Supplier<String> trace =
             () -> String.join("\n", recorder.events);
@@ -445,7 +445,7 @@ class AgentLoopEndToEndTest {
                     + " word and nothing else.");
         }
         java.util.logging.Logger.getLogger("com.mad.edt.colleague.e2e")
-            .info(console.toString(StandardCharsets.UTF_8));
+            .info(() -> console.toString(StandardCharsets.UTF_8));
 
         final java.util.function.Supplier<String> trace =
             () -> String.join("\n", recorder.events);

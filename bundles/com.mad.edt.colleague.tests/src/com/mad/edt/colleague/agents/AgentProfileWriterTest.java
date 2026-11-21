@@ -24,7 +24,6 @@ class AgentProfileWriterTest {
 
     // fixture vocabulary: the id and header values the file round-trip asserts
     private static final String REVIEWER = "reviewer";
-    private static final String DESCRIPTION = "d";
     private static final String SYSTEM = "system";
     private static final String READ_FILE = "read_file";
     private static final String SEARCH_CODE = "search_code";

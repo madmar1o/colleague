@@ -5,9 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
@@ -123,7 +121,6 @@ public class ColleagueView extends ViewPart {
 
     /** Conversations keyed by contact; rebuilt when a saved endpoint moves. */
     private final ChatSessionRegistry ourSessions = new ChatSessionRegistry();
-    private final Map<String, ChatPanel> ourPanels = new HashMap<>();
 
     private Composite ourRoot;
     private Composite ourAgentsArea;
@@ -325,7 +322,7 @@ public class ColleagueView extends ViewPart {
         // the whole-project index waits out its grace period as a system job:
         // reindexing competes with the user's builds, so it must not crowd
         // out the first minutes of the session (see StartupDeferral)
-        StartupDeferral.scheduleIndexJob((monitor) -> {
+        StartupDeferral.scheduleIndexJob(monitor -> {
             final int files = ourCodeSearch.reindex(monitor);
             ColleagueLog.info("[colleague] context index ready: " + files + " files");
             if(ourSemantic != null) {
@@ -481,11 +478,18 @@ public class ColleagueView extends ViewPart {
             final int tabs = ourTabFolder == null || ourTabFolder.isDisposed()
                 ? -1 : ourTabFolder.getItemCount();
             ColleagueLog.info("[colleague] mobile page -> " + PageSwitchNote.describe(
-                thePage == ourTabsArea ? "chat tabs"
-                    : thePage == ourAgentsArea ? AGENTS_DIR : "contacts",
+                thePage == ourTabsArea ? "chat tabs" : pageNameOf(thePage),
                 theCause, tabs, theDetail)
                 + " stack=" + ourMobileStack.getSize() + " page=" + thePage.getSize());
         }
+    }
+
+    /**
+     * @param thePage page shown by the mobile switch
+     * @return the short page name used in the switch note
+     */
+    private String pageNameOf(final Composite thePage) {
+        return thePage == ourAgentsArea ? AGENTS_DIR : "contacts";
     }
 
     @Override
@@ -1233,8 +1237,8 @@ public class ColleagueView extends ViewPart {
         final List<CTabItem> stale = new ArrayList<>();
         for(final CTabItem item : ourTabFolder.getItems()) {
             final Object data = item.getData();
-            if(data instanceof ChatPanel) {
-                final ChatSession session = ((ChatPanel)data).getSession();
+            if(data instanceof ChatPanel panel) {
+                final ChatSession session = panel.getSession();
                 if(!ourSessions.isCurrent(session,
                     LLMSettings.getConfig(session.getProvider().getId()))) {
                     stale.add(item);
@@ -1448,7 +1452,7 @@ public class ColleagueView extends ViewPart {
         String overview = ourOverview == null ? "" : ourOverview.get();
         if(overview.isEmpty() && ourOverview != null && !ourOverviewStale) {
             ourOverviewStale = true;
-            Job.create("Colleague: configuration picture", (monitor) -> {
+            Job.create("Colleague: configuration picture", monitor -> {
                 ourOverview.rebuild();
                 ourOverviewStale = false;
                 return Status.OK_STATUS;

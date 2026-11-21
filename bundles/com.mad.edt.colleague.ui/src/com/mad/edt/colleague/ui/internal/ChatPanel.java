@@ -584,11 +584,9 @@ public final class ChatPanel {
         ourRoot = new Composite(theParent, SWT.NONE);
         ourRoot.setLayout(new GridLayout(1, false));
         ourRoot.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
-        ourRoot.addListener(SWT.Dispose, event -> {
-            OUR_PANELS.remove(ChatPanel.this);
-            // the warm-up chain notices the disposed root in its own body and
-            // stops rescheduling, so no stored job reference is needed here
-        });
+        // the warm-up chain notices the disposed root in its own body and stops
+        // rescheduling, so no stored job reference is needed here
+        ourRoot.addListener(SWT.Dispose, event -> OUR_PANELS.remove(ChatPanel.this));
         // the parent may already have its final size when this panel is built
         // (the deferred open adds the panel after the tab body was laid out):
         // adding a child to a laid-out composite does not resize it, so without
@@ -680,7 +678,7 @@ public final class ChatPanel {
      */
     private void installEscapeFilter() {
         final Display display = ourRoot.getDisplay();
-        final Listener escFilter = (theEvent) -> {
+        final Listener escFilter = theEvent -> {
             if(theEvent.keyCode != SWT.ESC || ourRoot.isDisposed()) {
                 return;
             }
@@ -697,8 +695,8 @@ public final class ChatPanel {
     }
 
     private void handleBridge(final String theMethod, final JsonObject theArguments) {
-        // the routing table itself lives in the tested PageCommandHandler;
-        // here the call only becomes readable: page name-value pairs become
+        // the routing table itself lives in the tested PageCommandHandler.
+        // Here the call only becomes readable: page name-value pairs turn into
         // plain strings for the handler
         ourPageCommands.handle(theMethod, name -> bridgeArgument(theArguments, name));
     }
@@ -1197,9 +1195,11 @@ public final class ChatPanel {
             // an agent tab leads with the agent's name; a plain chat keeps
             // the model line it always showed
             final String agentName = ourProfileName;
-            payload.addProperty("sub", !agentName.isEmpty() ? agentName
-                : ourModel == null || ourModel.isEmpty()
-                    ? "ассистент по проекту" : ourModel);
+            String sub = agentName;
+            if(sub.isEmpty()) {
+                sub = ourModel == null || ourModel.isEmpty() ? "ассистент по проекту" : ourModel;
+            }
+            payload.addProperty("sub", sub);
             payload.addProperty("mode", AgentMode.current().wireName());
         }
         ourBridge.push(theKind, payload);
@@ -1650,11 +1650,12 @@ public final class ChatPanel {
         // the runtime cuts the oldest prompt text in silence when the
         // window runs out: only the stop reason says so, and without
         // this note the user reads a shortened answer as a full one
-        final String stats = ourSession.wasLastTurnTruncated()
-            ? (baseStats.isEmpty()
+        String stats = baseStats;
+        if(ourSession.wasLastTurnTruncated()) {
+            stats = baseStats.isEmpty()
                 ? "Контекст обрезан рантаймом, ответ неполный"
-                : baseStats + " — контекст обрезан рантаймом, ответ неполный")
-            : baseStats;
+                : baseStats + " — контекст обрезан рантаймом, ответ неполный";
+        }
         ourLastAnswer = body;
         if(theTurn.cancellation().isCancelled()) {
             ColleagueLog.info("[colleague] cancelled turn observed: partial "
@@ -2271,7 +2272,7 @@ public final class ChatPanel {
             + theText : theText;
         final int start = ourConversation.getCharCount();
         ourConversation.append(bubbleText);
-        final Color bubble = error ? ourErrorBubble : (user ? ourUserBubble : ourAnswerBubble);
+        final Color bubble = bubbleColor(user, error);
         final int prefixEnd = bubbleText.indexOf(':') + 1;
         if(prefixEnd > 1) {
             final StyleRange header = new StyleRange(start, prefixEnd, null, bubble);
@@ -2286,6 +2287,18 @@ public final class ChatPanel {
             ourStyleRanges.toArray(new StyleRange[ourStyleRanges.size()]));
         ourConversation.setSelection(start + bubbleText.length());
         ourConversation.showSelection();
+    }
+
+    /**
+     * @param theUser the message came from the user
+     * @param theError the message reports a failure
+     * @return the bubble colour for that kind of message
+     */
+    private Color bubbleColor(final boolean theUser, final boolean theError) {
+        if(theError) {
+            return ourErrorBubble;
+        }
+        return theUser ? ourUserBubble : ourAnswerBubble;
     }
 
     private void initBubbleColors() {

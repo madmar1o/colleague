@@ -28,7 +28,10 @@ import com.google.gson.JsonObject;
  */
 class WebBridgeTest {
 
+    // endpoint paths of the stub bridge under test, not deployment URIs
+    @SuppressWarnings("java:S1075")
     private static final String PATH_CALL = "/call";
+    @SuppressWarnings("java:S1075")
     private static final String PATH_EVENTS = "/events";
 
     private WebBridge ourBridge;

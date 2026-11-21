@@ -163,7 +163,7 @@ abstract class AbstractHttpLLMProvider implements ILLMProvider {
     private LLMException streamFailure(final HttpCallResult theResponse) {
         final StringBuilder excerpt = new StringBuilder();
         try (java.util.stream.Stream<String> lines = theResponse.lines()) {
-            lines.limit(4).forEach(line -> excerpt.append(line));
+            lines.limit(4).forEach(excerpt::append);
         }
         return new LLMException("Endpoint " + config.getBaseUrl() + " returned HTTP "
             + theResponse.getStatus() + ": " + excerpt + failureHint(theResponse.getStatus()),

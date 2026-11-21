@@ -82,8 +82,7 @@ class SearchRulesTest {
         final List<SearchEngine.Hit> top = SearchEngine.keepTop(
             java.util.Arrays.asList(hits), 2);
         assertEquals(List.of(STRONG_MD, "mid.md"),
-            top.stream().map(hit -> hit.file().displayPath())
-                .collect(java.util.stream.Collectors.toList()));
+            top.stream().map(hit -> hit.file().displayPath()).toList());
     }
 
     @Test

@@ -138,8 +138,7 @@ public final class AgentsPanel {
 
     private void handleBridge(final String theMethod, final JsonObject theArguments) {
         switch(theMethod) {
-            case "bridgeReady":
-            case "refresh":
+            case "bridgeReady", "refresh":
                 pushAgents();
                 return;
             case "openAgent":

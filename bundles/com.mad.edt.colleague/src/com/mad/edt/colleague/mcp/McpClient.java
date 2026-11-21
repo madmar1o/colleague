@@ -149,7 +149,7 @@ public final class McpClient implements ToolBridge, AutoCloseable {
         params.add("capabilities", new JsonObject());
         params.add("clientInfo", clientInfo);
         request("initialize", params);
-        notify_("notifications/initialized");
+        sendNotification("notifications/initialized");
         initialized = true;
     }
 
@@ -188,7 +188,7 @@ public final class McpClient implements ToolBridge, AutoCloseable {
      * @param theMethod notification method name
      * @throws McpException when the channel is broken
      */
-    private void notify_(final String theMethod) throws McpException {
+    private void sendNotification(final String theMethod) throws McpException {
         final JsonObject message = new JsonObject();
         message.addProperty("jsonrpc", "2.0");
         message.addProperty("method", theMethod);

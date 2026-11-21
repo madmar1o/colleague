@@ -17,12 +17,12 @@ public final class ToolSpec {
     private final JsonObject parametersSchema;
 
     /**
-     * @param theName tool name, must match {@code [a-zA-Z0-9_]+}
+     * @param theName tool name, must match {@code \w+}
      * @param theDescription description shown to the model
      * @param theParametersSchema JSON-Schema of the arguments object
      */
     public ToolSpec(final String theName, final String theDescription, final JsonObject theParametersSchema) {
-        if(theName == null || !theName.matches("[a-zA-Z0-9_]+")) {
+        if(theName == null || !theName.matches("\\w+")) {
             throw new IllegalArgumentException("illegal tool name: " + theName);
         }
         name = theName;

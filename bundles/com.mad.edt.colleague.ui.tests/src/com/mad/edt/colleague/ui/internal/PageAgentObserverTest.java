@@ -115,8 +115,8 @@ class PageAgentObserverTest {
         observer.onRound(4, 0);
 
         assertEquals(List.of("round|3|2", "round|4|0"), trace.calls);
-        // the round that asks for tools opens the block its chips nest into;
-        // the bridge queue puts this event ahead of those chips
+        // the round that asks for tools opens the block its chips nest into.
+        // The bridge queue puts this event ahead of those chips
         assertEquals(1, page.traces.size());
         final JsonObject block = page.trace(0);
         assertEquals(3, block.get("round").getAsInt());

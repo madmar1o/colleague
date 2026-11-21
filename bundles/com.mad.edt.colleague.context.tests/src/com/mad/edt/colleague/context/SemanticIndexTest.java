@@ -226,7 +226,7 @@ class SemanticIndexTest {
         assertEquals(1, report.skipped());
 
         // search through the hybrid layer quotes the stored chunk after the
-        // keyword section and skips files the keyword part already showed;
+        // keyword section and skips files the keyword part already showed.
         // withKeyword is exactly the seam the UI wires into a question
         embed.answer(200, EMBED_FLAT);
         store.answer(200, "{\"result\":[{\"score\":0.66,\"payload\":{\"path\":\"src/x.bsl\","

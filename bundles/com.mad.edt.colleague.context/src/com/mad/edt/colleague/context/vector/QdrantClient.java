@@ -29,6 +29,9 @@ public final class QdrantClient {
     private static final int SCROLL_PAGE_LIMIT = 256;
 
     /** Qdrant REST path root and the response payload field names. */
+    // relative REST path fragment, not a configurable URI: the host comes from
+    // the store URL setting, this constant is only its tail
+    @SuppressWarnings("java:S1075")
     private static final String COLLECTIONS_PATH = "/collections/";
     private static final String RESULT = "result";
     private static final String POINTS = "points";

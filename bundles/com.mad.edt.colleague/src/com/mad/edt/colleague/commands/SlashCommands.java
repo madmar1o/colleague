@@ -67,11 +67,12 @@ public final class SlashCommands {
         if(arguments.isEmpty() && wantsArguments) {
             return null;
         }
-        final String prompt = wantsArguments
-            ? command.getTemplate().replace(ARGUMENTS_PLACEHOLDER, arguments)
-            : arguments.isEmpty()
-                ? command.getTemplate()
-                : command.getTemplate() + "\n" + arguments;
+        String prompt = command.getTemplate();
+        if(wantsArguments) {
+            prompt = prompt.replace(ARGUMENTS_PLACEHOLDER, arguments);
+        } else if(!arguments.isEmpty()) {
+            prompt = prompt + "\n" + arguments;
+        }
         return new Invocation(command, prompt);
     }
 

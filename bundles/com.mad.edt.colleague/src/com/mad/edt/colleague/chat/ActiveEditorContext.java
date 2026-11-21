@@ -1,6 +1,7 @@
 package com.mad.edt.colleague.chat;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -70,9 +71,7 @@ public final class ActiveEditorContext {
     private static List<String> lines(final String theText) {
         final String normalized = theText.replace("\r\n", "\n").replace('\r', '\n');
         final List<String> lines = new ArrayList<>();
-        for(final String line : normalized.split("\n", -1)) {
-            lines.add(line);
-        }
+        Collections.addAll(lines, normalized.split("\n", -1));
         if(!lines.isEmpty() && lines.get(lines.size() - 1).isEmpty()) {
             lines.remove(lines.size() - 1);
         }

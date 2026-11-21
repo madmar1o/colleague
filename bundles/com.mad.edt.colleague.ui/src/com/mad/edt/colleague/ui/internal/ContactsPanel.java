@@ -163,7 +163,7 @@ public final class ContactsPanel {
             return;
         }
         ourLoading = true;
-        Job.create("Colleague: contacts", (monitor) -> {
+        Job.create("Colleague: contacts", monitor -> {
             final List<Object[]> providers = probeProviders();
             Display.getDefault().asyncExec(() -> {
                 if(ourRoot == null || ourRoot.isDisposed()) {
@@ -208,8 +208,8 @@ public final class ContactsPanel {
                 final ILLMProvider provider =
                     LLMProviderFactory.create(LLMSettings.getConfig(id));
                 final List<String> models = provider.listModels().stream()
-                    .filter(name -> provider.supportsChatCapability(name))
-                    .collect(Collectors.toList());
+                    .filter(provider::supportsChatCapability)
+                    .toList();
                 providers.add(new Object[] {Boolean.TRUE, id,
                     provider.getConfig().getBaseUrl(), models});
             } catch (final Exception ex) {
@@ -271,8 +271,7 @@ public final class ContactsPanel {
 
     private void handleBridge(final String theMethod, final JsonObject theArguments) {
         switch(theMethod) {
-            case "bridgeReady":
-            case "refresh":
+            case "bridgeReady", "refresh":
                 reload();
                 return;
             case "openContact": {
@@ -372,7 +371,7 @@ public final class ContactsPanel {
             ourBridge.push("testResult", result);
             return;
         }
-        Job.create("Colleague: provider test", (monitor) -> {
+        Job.create("Colleague: provider test", monitor -> {
             final JsonObject result = new JsonObject();
             try {
                 final ProviderConfig config = ProviderConfig
@@ -510,7 +509,7 @@ public final class ContactsPanel {
      */
     private void testMcp(final JsonObject theArguments) {
         final McpServerConfig probe = buildProbeConfig(theArguments);
-        Job.create("Colleague: MCP server test", (monitor) -> {
+        Job.create("Colleague: MCP server test", monitor -> {
             pushProbeResult(probeResult(probe));
             return Status.OK_STATUS;
         }).schedule();
