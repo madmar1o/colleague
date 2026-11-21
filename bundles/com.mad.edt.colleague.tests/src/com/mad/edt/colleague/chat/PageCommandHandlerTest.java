@@ -20,6 +20,22 @@ import com.mad.edt.colleague.chat.PageCommandHandler.Actions;
  */
 class PageCommandHandlerTest {
 
+    // the page method names double as the recorded action names, so one
+    // constant per command serves the dispatch call and the expected line
+    private static final String BRIDGE_READY = "bridgeReady";
+    private static final String SEND_PREFIX = "send|";
+    private static final String NEW_CHAT = "newChat";
+    private static final String TOGGLE_EDIT = "toggleEdit";
+    private static final String ATTACH_FILE = "attachFile";
+    private static final String ABORT = "abort";
+    private static final String CONTINUE_TURN = "continueTurn";
+    private static final String OPEN_SETTINGS = "openSettings";
+    private static final String SEND = "send";
+    private static final String COPY = "copy";
+    private static final String BACK = "back";
+    // argument names repeated across the argument fixtures
+    private static final String ARG_TEXT = "text";
+
     /** records every action the dispatcher triggers */
     private static final class RecordingActions implements Actions {
 
@@ -27,7 +43,7 @@ class PageCommandHandlerTest {
 
         @Override
         public void bridgeReady() {
-            calls.add("bridgeReady");
+            calls.add(BRIDGE_READY);
         }
 
         @Override
@@ -37,17 +53,17 @@ class PageCommandHandlerTest {
 
         @Override
         public void send(final String theText) {
-            calls.add("send|" + theText);
+            calls.add(SEND_PREFIX + theText);
         }
 
         @Override
         public void newChat() {
-            calls.add("newChat");
+            calls.add(NEW_CHAT);
         }
 
         @Override
         public void toggleEdit() {
-            calls.add("toggleEdit");
+            calls.add(TOGGLE_EDIT);
         }
 
         @Override
@@ -57,12 +73,12 @@ class PageCommandHandlerTest {
 
         @Override
         public void attachFile() {
-            calls.add("attachFile");
+            calls.add(ATTACH_FILE);
         }
 
         @Override
         public void back() {
-            calls.add("back");
+            calls.add(BACK);
         }
 
         @Override
@@ -72,7 +88,7 @@ class PageCommandHandlerTest {
 
         @Override
         public void abort() {
-            calls.add("abort");
+            calls.add(ABORT);
         }
 
         @Override
@@ -87,7 +103,7 @@ class PageCommandHandlerTest {
 
         @Override
         public void continueTurn() {
-            calls.add("continueTurn");
+            calls.add(CONTINUE_TURN);
         }
 
         @Override
@@ -97,7 +113,7 @@ class PageCommandHandlerTest {
 
         @Override
         public void openSettings() {
-            calls.add("openSettings");
+            calls.add(OPEN_SETTINGS);
         }
 
         @Override
@@ -123,28 +139,28 @@ class PageCommandHandlerTest {
     void everyKnownMethodReachesItsAction() {
         final RecordingActions actions = new RecordingActions();
         final PageCommandHandler handler = handlerWith(actions);
-        handler.handle("bridgeReady", args());
-        handler.handle("send", args("text", "hello"));
-        handler.handle("newChat", args());
-        handler.handle("toggleEdit", args());
-        handler.handle("copy", args("text", "clip me"));
-        handler.handle("attachFile", args());
-        handler.handle("back", args());
+        handler.handle(BRIDGE_READY, args());
+        handler.handle(SEND, args(ARG_TEXT, "hello"));
+        handler.handle(NEW_CHAT, args());
+        handler.handle(TOGGLE_EDIT, args());
+        handler.handle(COPY, args(ARG_TEXT, "clip me"));
+        handler.handle(ATTACH_FILE, args());
+        handler.handle(BACK, args());
         handler.handle("esc", args());
-        handler.handle("abort", args());
-        assertEquals(List.of("bridgeReady", "send|hello", "newChat", "toggleEdit",
-            "copy|clip me", "attachFile", "back", "escape", "abort"), actions.calls);
+        handler.handle(ABORT, args());
+        assertEquals(List.of(BRIDGE_READY, "send|hello", NEW_CHAT, TOGGLE_EDIT,
+            "copy|clip me", ATTACH_FILE, BACK, "escape", ABORT), actions.calls);
     }
 
     @Test
     void unknownMethodsIgnored() {
         final RecordingActions actions = new RecordingActions();
         final PageCommandHandler handler = handlerWith(actions);
-        handler.handle("teleport", args("text", "x"));
+        handler.handle("teleport", args(ARG_TEXT, "x"));
         handler.handle("", args());
         handler.handle(null, args());
-        handler.handle("send", null);
-        assertEquals(List.of("send|"), actions.calls);
+        handler.handle(SEND, null);
+        assertEquals(List.of(SEND_PREFIX), actions.calls);
     }
 
     @Test
@@ -186,8 +202,8 @@ class PageCommandHandlerTest {
     void continueButtonPicksTheInterruptedTurnBackUp() {
         final RecordingActions actions = new RecordingActions();
         final PageCommandHandler handler = handlerWith(actions);
-        handler.handle("continueTurn", args());
-        assertEquals(List.of("continueTurn"), actions.calls);
+        handler.handle(CONTINUE_TURN, args());
+        assertEquals(List.of(CONTINUE_TURN), actions.calls);
     }
 
     @Test
@@ -204,8 +220,8 @@ class PageCommandHandlerTest {
     void gearOpensTheProviderAndModelSettings() {
         final RecordingActions actions = new RecordingActions();
         final PageCommandHandler handler = handlerWith(actions);
-        handler.handle("openSettings", args());
-        assertEquals(List.of("openSettings"), actions.calls);
+        handler.handle(OPEN_SETTINGS, args());
+        assertEquals(List.of(OPEN_SETTINGS), actions.calls);
     }
 
     @Test
@@ -223,8 +239,8 @@ class PageCommandHandlerTest {
     void missingArgumentArrivesAsEmptyText() {
         final RecordingActions actions = new RecordingActions();
         final PageCommandHandler handler = handlerWith(actions);
-        handler.handle("send", args());
-        handler.handle("copy", args());
-        assertEquals(List.of("send|", "copy|"), actions.calls);
+        handler.handle(SEND, args());
+        handler.handle(COPY, args());
+        assertEquals(List.of(SEND_PREFIX, "copy|"), actions.calls);
     }
 }

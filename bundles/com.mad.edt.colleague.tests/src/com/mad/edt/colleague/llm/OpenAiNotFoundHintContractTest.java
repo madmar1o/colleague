@@ -14,6 +14,8 @@ import com.mad.edt.colleague.http.HttpCallResult;
  */
 class OpenAiNotFoundHintContractTest {
 
+    private static final String GATEWAY_V1 = "http://127.0.0.1:8080/v1";
+
     private static ProviderConfig configWithoutVersion(final String theBaseUrl) {
         return ProviderConfig.builder("srata", LLMProviderType.OPENAI_COMPATIBLE)
             .baseUrl(theBaseUrl)
@@ -37,7 +39,7 @@ class OpenAiNotFoundHintContractTest {
 
         final LLMException error = Assertions.assertThrows(LLMException.class,
             () -> provider.chatStream(request(), chunk -> { }, chunk -> { }));
-        Assertions.assertTrue(error.getMessage().contains("http://127.0.0.1:8080/v1"),
+        Assertions.assertTrue(error.getMessage().contains(GATEWAY_V1),
             "the hint must spell out the address the user should have saved: "
                 + error.getMessage());
     }
@@ -53,7 +55,7 @@ class OpenAiNotFoundHintContractTest {
         final LLMException error = Assertions.assertThrows(LLMException.class,
             () -> provider.chat(request()));
         // the trailing slash was already trimmed by the configuration itself
-        Assertions.assertTrue(error.getMessage().contains("http://127.0.0.1:8080/v1"),
+        Assertions.assertTrue(error.getMessage().contains(GATEWAY_V1),
             error.getMessage());
     }
 
@@ -63,7 +65,7 @@ class OpenAiNotFoundHintContractTest {
             .answering(HttpCallResult.ofBody(404, "{\"error\": {\"message\": \"no such model\"}}"));
         final OpenAiCompatibleLLMProvider provider =
             new OpenAiCompatibleLLMProvider(
-                configWithoutVersion("http://127.0.0.1:8080/v1"), transport);
+                configWithoutVersion(GATEWAY_V1), transport);
 
         final LLMException error = Assertions.assertThrows(LLMException.class,
             () -> provider.chat(request()));

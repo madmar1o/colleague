@@ -33,6 +33,7 @@ import com.mad.edt.colleague.llm.GeneratorGate;
 class VectorIndexGateTest {
 
     private static final String COLLECTION = "ws_gate";
+    private static final String SRC_A = "a.bsl";
 
     private final ScriptedHttpTransport storeTransport = new ScriptedHttpTransport();
     private final ScriptedHttpTransport embedTransport = new ScriptedHttpTransport();
@@ -61,13 +62,13 @@ class VectorIndexGateTest {
     @Test
     @DisplayName("a busy generator past the wait budget ends the pass before any traffic")
     void busyGeneratorAbortsThePass(@TempDir final Path theDir) throws IOException {
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(SRC_A);
         Files.writeString(file, numberedFile(5), StandardCharsets.UTF_8);
         final GeneratorGate gate = new GeneratorGate();
         gate.enter();
 
         final IndexFailure failure = assertThrows(IndexFailure.class,
-            () -> index(gate, 60).update(List.of(new SourceFile(file, "a.bsl"))));
+            () -> index(gate, 60).update(List.of(new SourceFile(file, SRC_A))));
 
         assertTrue(failure.getMessage().contains("generator busy"), failure.getMessage());
         assertEquals(0, embedTransport.getCallCount(),
@@ -80,7 +81,7 @@ class VectorIndexGateTest {
     @Test
     @DisplayName("a pass waits out a short-lived turn and then embeds")
     void shortBurstIsWaitedOut(@TempDir final Path theDir) throws Exception {
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(SRC_A);
         Files.writeString(file, numberedFile(5), StandardCharsets.UTF_8);
         final GeneratorGate gate = new GeneratorGate();
         gate.enter();
@@ -99,7 +100,7 @@ class VectorIndexGateTest {
         embedOne();
         storeOk();
 
-        final UpdateReport report = index(gate, 5_000).update(List.of(new SourceFile(file, "a.bsl")));
+        final UpdateReport report = index(gate, 5_000).update(List.of(new SourceFile(file, SRC_A)));
         holder.join();
 
         assertEquals(1, report.reembedded());
@@ -109,7 +110,7 @@ class VectorIndexGateTest {
     @Test
     @DisplayName("unchanged files never wait: the gate matters only for re-embedding")
     void unchangedFilesSkipTheGate(@TempDir final Path theDir) throws IOException, IndexFailure {
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(SRC_A);
         Files.writeString(file, numberedFile(5), StandardCharsets.UTF_8);
         final GeneratorGate gate = new GeneratorGate();
         storeOk();
@@ -117,12 +118,12 @@ class VectorIndexGateTest {
         embedOne();
         storeOk();
         final VectorIndex index = index(gate, 0);
-        index.update(List.of(new SourceFile(file, "a.bsl")));
+        index.update(List.of(new SourceFile(file, SRC_A)));
 
         // same content on the same session, gate now held by a live turn: the
         // zero-budget wait would fail instantly if this file needed embedding
         gate.enter();
-        final UpdateReport report = index.update(List.of(new SourceFile(file, "a.bsl")));
+        final UpdateReport report = index.update(List.of(new SourceFile(file, SRC_A)));
         gate.leave();
 
         assertEquals(1, report.skipped());
@@ -132,7 +133,7 @@ class VectorIndexGateTest {
     @Test
     @DisplayName("an index without a gate embeds regardless of other holders")
     void gatelessIndexNeverWaits(@TempDir final Path theDir) throws IOException, IndexFailure {
-        final Path file = theDir.resolve("a.bsl");
+        final Path file = theDir.resolve(SRC_A);
         Files.writeString(file, numberedFile(5), StandardCharsets.UTF_8);
         storeOk();
         storeOk();
@@ -142,7 +143,7 @@ class VectorIndexGateTest {
         final UpdateReport report = new VectorIndex(COLLECTION,
             new QdrantClient("http://store.test:6333", 1000, storeTransport),
             new EmbeddingClient("http://embed.test:11435", "embed-model", 5000,
-                embedTransport)).update(List.of(new SourceFile(file, "a.bsl")));
+                embedTransport)).update(List.of(new SourceFile(file, SRC_A)));
 
         assertEquals(1, report.reembedded());
     }

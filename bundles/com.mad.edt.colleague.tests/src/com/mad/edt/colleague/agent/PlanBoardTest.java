@@ -17,6 +17,9 @@ import com.mad.edt.colleague.agent.PlanBoard.Step;
  */
 class PlanBoardTest {
 
+    // java:S6126 kept suppressed: the expected value has no trailing newline,
+    // a text block would append one and change the byte-exact assertion.
+    @SuppressWarnings("java:S6126")
     @Test
     void rendersNumberedStepsWithStatusMarks() {
         final PlanBoard board = new PlanBoard();
@@ -32,6 +35,9 @@ class PlanBoardTest {
             + "\n3. [ ] run the build", rendered);
     }
 
+    // java:S6126 kept suppressed: the expected value has no trailing newline,
+    // a text block would append one and change the byte-exact assertion.
+    @SuppressWarnings("java:S6126")
     @Test
     void keepsOnlyTheFirstActiveStep() {
         final PlanBoard board = new PlanBoard();

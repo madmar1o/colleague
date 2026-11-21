@@ -32,6 +32,14 @@ public final class McpClient implements ToolBridge, AutoCloseable {
     /** Milliseconds one JSON-RPC answer may take before the call is cut off. */
     public static final long RESPONSE_TIMEOUT_MS = 30_000L;
 
+    /** MCP result payload field names and the common error message prefix. */
+    private static final String NEXT_CURSOR = "nextCursor";
+    private static final String SERVER_PREFIX = "server ";
+    private static final String INPUT_SCHEMA = "inputSchema";
+    private static final String ANNOTATIONS = "annotations";
+    private static final String DESCRIPTION = "description";
+    private static final String CONTENT = "content";
+
     private final McpServerConfig config;
     private final Object channelLock = new Object();
 
@@ -73,8 +81,8 @@ public final class McpClient implements ToolBridge, AutoCloseable {
                         tools.add(toToolInfo(tool));
                     }
                 }
-                cursor = result.has("nextCursor") && !result.get("nextCursor").isJsonNull()
-                    ? result.get("nextCursor").getAsString() : null;
+                cursor = result.has(NEXT_CURSOR) && !result.get(NEXT_CURSOR).isJsonNull()
+                    ? result.get(NEXT_CURSOR).getAsString() : null;
             } while(cursor != null && !cursor.isEmpty());
             return List.copyOf(tools);
         }
@@ -141,7 +149,7 @@ public final class McpClient implements ToolBridge, AutoCloseable {
         params.add("capabilities", new JsonObject());
         params.add("clientInfo", clientInfo);
         request("initialize", params);
-        notify_("notifications/initialized");
+        sendNotification("notifications/initialized");
         initialized = true;
     }
 
@@ -166,7 +174,7 @@ public final class McpClient implements ToolBridge, AutoCloseable {
             final JsonElement error = answer.get("error");
             final String text = error.isJsonObject() && error.getAsJsonObject().has("message")
                 ? error.getAsJsonObject().get("message").getAsString() : error.toString();
-            throw new McpException("server " + config.getName() + " refused " + theMethod
+            throw new McpException(SERVER_PREFIX + config.getName() + " refused " + theMethod
                 + ": " + text);
         }
         final JsonElement result = answer.get("result");
@@ -180,7 +188,7 @@ public final class McpClient implements ToolBridge, AutoCloseable {
      * @param theMethod notification method name
      * @throws McpException when the channel is broken
      */
-    private void notify_(final String theMethod) throws McpException {
+    private void sendNotification(final String theMethod) throws McpException {
         final JsonObject message = new JsonObject();
         message.addProperty("jsonrpc", "2.0");
         message.addProperty("method", theMethod);
@@ -204,7 +212,7 @@ public final class McpClient implements ToolBridge, AutoCloseable {
         try {
             return JsonParser.parseString(body).getAsJsonObject();
         } catch (final RuntimeException ex) {
-            throw new McpException("server " + config.getName()
+            throw new McpException(SERVER_PREFIX + config.getName()
                 + " answered with a non-JSON body", ex);
         }
     }
@@ -231,7 +239,7 @@ public final class McpClient implements ToolBridge, AutoCloseable {
             final HttpResponse<String> response =
                 http.send(request, HttpResponse.BodyHandlers.ofString());
             if(response.statusCode() / 100 != 2) {
-                throw new McpException("server " + config.getName() + " answered HTTP "
+                throw new McpException(SERVER_PREFIX + config.getName() + " answered HTTP "
                     + Integer.valueOf(response.statusCode()));
             }
             return response.body();
@@ -261,7 +269,7 @@ public final class McpClient implements ToolBridge, AutoCloseable {
             String line;
             while((line = childOut.readLine()) != null) {
                 if(System.currentTimeMillis() > deadline) {
-                    throw new McpException("server " + config.getName() + " did not answer "
+                    throw new McpException(SERVER_PREFIX + config.getName() + " did not answer "
                         + "within " + Long.valueOf(RESPONSE_TIMEOUT_MS) + " ms");
                 }
                 if(line.isBlank()) {
@@ -272,11 +280,11 @@ public final class McpClient implements ToolBridge, AutoCloseable {
                     return answer;
                 }
             }
-            throw new McpException("server " + config.getName() + " closed the pipe");
+            throw new McpException(SERVER_PREFIX + config.getName() + " closed the pipe");
         } catch (final IOException ex) {
             throw new McpException("stdio round-trip to " + config.getName() + " failed", ex);
         } catch (final IllegalStateException ex) {
-            throw new McpException("server " + config.getName() + " sent a non-JSON line", ex);
+            throw new McpException(SERVER_PREFIX + config.getName() + " sent a non-JSON line", ex);
         } finally {
             if(child != null && !child.isAlive()) {
                 initialized = false;
@@ -325,18 +333,18 @@ public final class McpClient implements ToolBridge, AutoCloseable {
      * @return parsed tool info, read-only only when the server said so
      */
     private static McpToolInfo toToolInfo(final JsonObject theTool) {
-        final JsonObject schema = theTool.has("inputSchema")
-            && theTool.get("inputSchema").isJsonObject()
-            ? theTool.getAsJsonObject("inputSchema") : null;
+        final JsonObject schema = theTool.has(INPUT_SCHEMA)
+            && theTool.get(INPUT_SCHEMA).isJsonObject()
+            ? theTool.getAsJsonObject(INPUT_SCHEMA) : null;
         boolean readOnly = false;
-        if(theTool.has("annotations") && theTool.get("annotations").isJsonObject()) {
-            final JsonObject annotations = theTool.getAsJsonObject("annotations");
+        if(theTool.has(ANNOTATIONS) && theTool.get(ANNOTATIONS).isJsonObject()) {
+            final JsonObject annotations = theTool.getAsJsonObject(ANNOTATIONS);
             readOnly = annotations.has("readOnlyHint")
                 && annotations.get("readOnlyHint").getAsBoolean();
         }
         return new McpToolInfo(theTool.has("name") ? theTool.get("name").getAsString() : "",
-            theTool.has("description") && !theTool.get("description").isJsonNull()
-                ? theTool.get("description").getAsString() : "",
+            theTool.has(DESCRIPTION) && !theTool.get(DESCRIPTION).isJsonNull()
+                ? theTool.get(DESCRIPTION).getAsString() : "",
             schema, readOnly);
     }
 
@@ -346,8 +354,8 @@ public final class McpClient implements ToolBridge, AutoCloseable {
      */
     private static String joinText(final JsonObject theResult) {
         final StringBuilder text = new StringBuilder();
-        final JsonArray content = theResult.has("content") && theResult.get("content").isJsonArray()
-            ? theResult.getAsJsonArray("content") : new JsonArray();
+        final JsonArray content = theResult.has(CONTENT) && theResult.get(CONTENT).isJsonArray()
+            ? theResult.getAsJsonArray(CONTENT) : new JsonArray();
         for(final JsonElement part : content) {
             if(part.isJsonObject() && part.getAsJsonObject().has("text")) {
                 if(text.length() > 0) {

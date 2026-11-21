@@ -19,12 +19,15 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class MemoryToolTest {
 
+    private static final String NOTES_FILE = "l.txt";
+    private static final String EMPTY_NOTE_ERROR = "ERROR: pass a non-empty note";
+
     @TempDir
     private Path ourDir;
 
     @Test
     void advertisesTheToolUnderAStableName() {
-        final MemoryTool tool = new MemoryTool(new AgentMemory(ourDir.resolve("l.txt")));
+        final MemoryTool tool = new MemoryTool(new AgentMemory(ourDir.resolve(NOTES_FILE)));
         assertEquals("remember", tool.getName());
         assertEquals("remember", tool.getSpec().getName());
         assertFalse(tool.getSpec().getDescription().isEmpty());
@@ -33,7 +36,7 @@ class MemoryToolTest {
 
     @Test
     void storesTheNoteAndReportsTheLessonCount() throws IOException {
-        final Path file = ourDir.resolve("l.txt");
+        final Path file = ourDir.resolve(NOTES_FILE);
         final AgentMemory memory = new AgentMemory(file);
         final MemoryTool tool = new MemoryTool(memory);
 
@@ -48,7 +51,7 @@ class MemoryToolTest {
 
     @Test
     void pluralizesTheLessonReport() {
-        final MemoryTool tool = new MemoryTool(new AgentMemory(ourDir.resolve("l.txt")));
+        final MemoryTool tool = new MemoryTool(new AgentMemory(ourDir.resolve(NOTES_FILE)));
         tool.execute("{\"note\":\"one\"}");
 
         assertTrue(tool.execute("{\"note\":\"two\"}").contains("2 lessons"));
@@ -56,10 +59,10 @@ class MemoryToolTest {
 
     @Test
     void rejectsAMissingOrBlankNote() {
-        final MemoryTool tool = new MemoryTool(new AgentMemory(ourDir.resolve("l.txt")));
+        final MemoryTool tool = new MemoryTool(new AgentMemory(ourDir.resolve(NOTES_FILE)));
 
-        assertEquals("ERROR: pass a non-empty note", tool.execute("{}"));
-        assertEquals("ERROR: pass a non-empty note", tool.execute("{\"note\":\"   \"}"));
-        assertEquals("ERROR: pass a non-empty note", tool.execute("broken json"));
+        assertEquals(EMPTY_NOTE_ERROR, tool.execute("{}"));
+        assertEquals(EMPTY_NOTE_ERROR, tool.execute("{\"note\":\"   \"}"));
+        assertEquals(EMPTY_NOTE_ERROR, tool.execute("broken json"));
     }
 }

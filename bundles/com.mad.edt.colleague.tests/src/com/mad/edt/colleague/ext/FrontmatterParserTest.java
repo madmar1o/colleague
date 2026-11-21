@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
  */
 class FrontmatterParserTest {
 
+    private static final String ALPHA = "alpha";
+
     @Test
     @DisplayName("a header value keeps its own colons")
     void parsesKeyColonValueWithColonInValue() {
@@ -59,13 +61,13 @@ class FrontmatterParserTest {
         final ReloadableRegistry<String> registry = new ReloadableRegistry<>();
         final Map<String, String> loaded = new LinkedHashMap<>();
         loaded.put("zeta", "last written");
-        loaded.put("alpha", "first written");
+        loaded.put(ALPHA, "first written");
         registry.reload(loaded);
 
-        Assertions.assertEquals(List.of("zeta", "alpha"),
+        Assertions.assertEquals(List.of("zeta", ALPHA),
             new ArrayList<>(registry.snapshot().keySet()),
             "registration order is the display order of the catalog");
-        Assertions.assertEquals("first written", registry.get("alpha"));
+        Assertions.assertEquals("first written", registry.get(ALPHA));
         Assertions.assertNull(registry.get("absent"));
     }
 

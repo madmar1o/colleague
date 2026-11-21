@@ -14,22 +14,25 @@ import org.junit.jupiter.api.Test;
  */
 class FileDiffTest {
 
+    private static final String MODULE_BSL = "Module.bsl";
+    private static final String F_BSL = "f.bsl";
+
     @Test
     void unchangedFileRendersNoDiff() {
-        assertEquals("", FileDiff.render("Module.bsl", "one\ntwo\n", "one\ntwo\n"));
+        assertEquals("", FileDiff.render(MODULE_BSL, "one\ntwo\n", "one\ntwo\n"));
     }
 
     @Test
     void replacedLineIsShownAsMinusPlusPair() {
-        String diff = FileDiff.render("Module.bsl", "one\ntwo\nthree\n", "one\nTWO\nthree\n");
+        String diff = FileDiff.render(MODULE_BSL, "one\ntwo\nthree\n", "one\nTWO\nthree\n");
         assertTrue(diff.contains("-two"), diff);
         assertTrue(diff.contains("+TWO"), diff);
     }
 
     @Test
     void fileNameAppearsInTheHeader() {
-        String diff = FileDiff.render("Module.bsl", "a\n", "b\n");
-        assertTrue(diff.contains("Module.bsl"), diff);
+        String diff = FileDiff.render(MODULE_BSL, "a\n", "b\n");
+        assertTrue(diff.contains(MODULE_BSL), diff);
     }
 
     @Test
@@ -39,7 +42,7 @@ class FileDiffTest {
             before.append("line ").append(line).append('\n');
         }
         String after = before.toString().replace("line 5", "LINE FIVE");
-        String diff = FileDiff.render("f.bsl", before.toString(), after);
+        String diff = FileDiff.render(F_BSL, before.toString(), after);
         assertTrue(diff.contains(" line 2\n"), diff);
         assertTrue(diff.contains(" line 4\n"), diff);
         assertTrue(diff.contains(" line 6\n"), diff);
@@ -58,13 +61,13 @@ class FileDiffTest {
         String after = before.toString()
             .replace("line 2", "CHANGED TWO")
             .replace("line 25", "CHANGED TWENTY FIVE");
-        String diff = FileDiff.render("f.bsl", before.toString(), after);
+        String diff = FileDiff.render(F_BSL, before.toString(), after);
         assertEquals(2, countHunks(diff), diff);
     }
 
     @Test
     void insertionShowsHunkWithoutMinusLines() {
-        String diff = FileDiff.render("f.bsl", "one\nthree\n", "one\ntwo\nthree\n");
+        String diff = FileDiff.render(F_BSL, "one\nthree\n", "one\ntwo\nthree\n");
         assertTrue(diff.contains("+two"), diff);
         assertTrue(!diff.contains("-one"), diff);
         assertTrue(!diff.contains("-three"), diff);
@@ -78,7 +81,7 @@ class FileDiffTest {
             before.append("old ").append(line).append('\n');
             after.append("new ").append(line).append('\n');
         }
-        String diff = FileDiff.render("f.bsl", before.toString(), after.toString());
+        String diff = FileDiff.render(F_BSL, before.toString(), after.toString());
         assertTrue(diff.contains("truncated"), diff);
         assertTrue(diff.split("\n").length <= FileDiff.MAX_DIFF_LINES + 10, diff);
     }

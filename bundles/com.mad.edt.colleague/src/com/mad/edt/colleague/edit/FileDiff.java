@@ -195,40 +195,81 @@ public final class FileDiff {
         out.append("+++ b/").append(theFileName).append('\n');
         int shownLines = 2;
         for (int[] group : theGroups) {
-            int oldStart = 1;
-            int newStart = 1;
-            for (int index = 0; index < group[0]; index++) {
-                if (theMarks.get(index).tag != '+') {
-                    oldStart++;
-                }
-                if (theMarks.get(index).tag != '-') {
-                    newStart++;
-                }
-            }
-            int oldCount = 0;
-            int newCount = 0;
-            StringBuilder body = new StringBuilder();
-            for (int index = group[0]; index <= group[1]; index++) {
-                MarkedLine mark = theMarks.get(index);
-                body.append(mark.tag == ' ' ? " " : mark.tag).append(mark.text).append('\n');
-                if (mark.tag != '+') {
-                    oldCount++;
-                }
-                if (mark.tag != '-') {
-                    newCount++;
-                }
-            }
-            int bodyLines = body.toString().split("\n", -1).length - 1;
-            if (shownLines + bodyLines + 1 > MAX_DIFF_LINES) {
-                out.append("... diff truncated, more changes are hidden beyond ")
-                    .append(MAX_DIFF_LINES).append(" lines ...\n");
+            int bodyLines = appendHunk(out, theMarks, group, shownLines);
+            if (bodyLines < 0) {
                 return out.toString();
             }
-            out.append("@@ -").append(oldStart).append(',').append(oldCount)
-                .append(" +").append(newStart).append(',').append(newCount)
-                .append(" @@\n").append(body);
             shownLines += bodyLines + 1;
         }
         return out.toString();
+    }
+
+    /**
+     * Appends one hunk with its header; when the hunk would cross the answer
+     * budget, appends the truncation note instead.
+     *
+     * @param theOut diff being built
+     * @param theMarks all marked lines
+     * @param theGroup inclusive index range of the hunk
+     * @param theShownLines lines already shown
+     * @return lines of the hunk body, -1 when the diff was truncated here
+     */
+    private static int appendHunk(StringBuilder theOut, List<MarkedLine> theMarks,
+        int[] theGroup, int theShownLines) {
+        int[] starts = hunkStarts(theMarks, theGroup[0]);
+        int[] counts = new int[2];
+        StringBuilder body = hunkBody(theMarks, theGroup[0], theGroup[1], counts);
+        int bodyLines = body.toString().split("\n", -1).length - 1;
+        if (theShownLines + bodyLines + 1 > MAX_DIFF_LINES) {
+            theOut.append("... diff truncated, more changes are hidden beyond ")
+                .append(MAX_DIFF_LINES).append(" lines ...\n");
+            return -1;
+        }
+        theOut.append("@@ -").append(starts[0]).append(',').append(counts[0])
+            .append(" +").append(starts[1]).append(',').append(counts[1])
+            .append(" @@\n").append(body);
+        return bodyLines;
+    }
+
+    /**
+     * @param theMarks all marked lines
+     * @param theFrom first hunk index
+     * @return start line numbers in the old and the new file
+     */
+    private static int[] hunkStarts(List<MarkedLine> theMarks, int theFrom) {
+        int oldStart = 1;
+        int newStart = 1;
+        for (int index = 0; index < theFrom; index++) {
+            if (theMarks.get(index).tag != '+') {
+                oldStart++;
+            }
+            if (theMarks.get(index).tag != '-') {
+                newStart++;
+            }
+        }
+        return new int[] { oldStart, newStart };
+    }
+
+    /**
+     * @param theMarks all marked lines
+     * @param theFrom first hunk index, inclusive
+     * @param theTo last hunk index, inclusive
+     * @param theCounts output: old and new line counts of the hunk
+     * @return the hunk body text
+     */
+    private static StringBuilder hunkBody(List<MarkedLine> theMarks, int theFrom, int theTo,
+        int[] theCounts) {
+        StringBuilder body = new StringBuilder();
+        for (int index = theFrom; index <= theTo; index++) {
+            MarkedLine mark = theMarks.get(index);
+            body.append(mark.tag == ' ' ? " " : mark.tag).append(mark.text).append('\n');
+            if (mark.tag != '+') {
+                theCounts[0]++;
+            }
+            if (mark.tag != '-') {
+                theCounts[1]++;
+            }
+        }
+        return body;
     }
 }

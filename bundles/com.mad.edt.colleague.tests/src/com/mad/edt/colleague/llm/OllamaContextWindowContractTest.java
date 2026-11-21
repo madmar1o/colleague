@@ -22,9 +22,19 @@ import com.mad.edt.colleague.http.HttpCallSpec;
  */
 class OllamaContextWindowContractTest {
 
+    // fixture vocabulary: the local endpoint, the two option fields the window
+    // is read from, the answer the streaming transport replays, and the prompt
+    // every window question is asked with
+    private static final String RUNTIME_URL = "http://runtime.test";
+    private static final String OPTIONS_FIELD = "options";
+    private static final String WINDOW_FIELD = "num_ctx";
+    private static final String ANSWER_OK =
+        "{\"message\":{\"content\":\"ok\"},\"done\":true}";
+    private static final String ASK_TEXT = "hi";
+
     private static ProviderConfig local() {
         return ProviderConfig.builder("test", LLMProviderType.OLLAMA)
-            .baseUrl("http://runtime.test").readTimeoutMs(1_000).build();
+            .baseUrl(RUNTIME_URL).readTimeoutMs(1_000).build();
     }
 
     private static JsonObject bodyOf(final HttpCallSpec theCall) {
@@ -33,9 +43,9 @@ class OllamaContextWindowContractTest {
 
     private static int windowOf(final HttpCallSpec theCall) {
         final JsonObject body = bodyOf(theCall);
-        final JsonObject options = body.getAsJsonObject("options");
+        final JsonObject options = body.getAsJsonObject(OPTIONS_FIELD);
         Assertions.assertNotNull(options, "chat call must carry options: " + body);
-        final JsonElement window = options.get("num_ctx");
+        final JsonElement window = options.get(WINDOW_FIELD);
         Assertions.assertNotNull(window, "options must carry num_ctx: " + options);
         return window.getAsInt();
     }
@@ -49,9 +59,9 @@ class OllamaContextWindowContractTest {
     @DisplayName("a small chat call still carries the configured window floor")
     void chatCarriesWindowFloor() throws LLMException {
         final RecordingHttpTransport transport = RecordingHttpTransport.streaming(200,
-            "{\"message\":{\"content\":\"ok\"},\"done\":true}");
+            ANSWER_OK);
         new OllamaLLMProvider(local(), transport).chatStream(
-            askingAbout("hi"), piece -> { }, piece -> { });
+            askingAbout(ASK_TEXT), piece -> { }, piece -> { });
 
         Assertions.assertEquals(ProviderConfig.DEFAULT_LOCAL_CONTEXT_TOKENS,
             windowOf(transport.getOnlyCall()));
@@ -63,12 +73,12 @@ class OllamaContextWindowContractTest {
         // 20k characters is far past what the floor covers once the runtime
         // has tokenized it; 200k characters is past even the ceiling
         final RecordingHttpTransport wide = RecordingHttpTransport.streaming(200,
-            "{\"message\":{\"content\":\"ok\"},\"done\":true}");
+            ANSWER_OK);
         new OllamaLLMProvider(local(), wide).chatStream(
             askingAbout("м".repeat(20_000)), piece -> { }, piece -> { });
 
         final RecordingHttpTransport huge = RecordingHttpTransport.streaming(200,
-            "{\"message\":{\"content\":\"ok\"},\"done\":true}");
+            ANSWER_OK);
         new OllamaLLMProvider(local(), huge).chatStream(
             askingAbout("м".repeat(200_000)), piece -> { }, piece -> { });
 
@@ -86,12 +96,12 @@ class OllamaContextWindowContractTest {
     @DisplayName("an explicit window override replaces the floor and the ceiling")
     void configuredWindowOverridesTheDefaults() throws LLMException {
         final ProviderConfig roomy = ProviderConfig.builder("test", LLMProviderType.OLLAMA)
-            .baseUrl("http://runtime.test").readTimeoutMs(1_000)
+            .baseUrl(RUNTIME_URL).readTimeoutMs(1_000)
             .contextWindowTokens(32_768).build();
         final RecordingHttpTransport transport = RecordingHttpTransport.streaming(200,
-            "{\"message\":{\"content\":\"ok\"},\"done\":true}");
+            ANSWER_OK);
         new OllamaLLMProvider(roomy, transport).chatStream(
-            askingAbout("hi"), piece -> { }, piece -> { });
+            askingAbout(ASK_TEXT), piece -> { }, piece -> { });
 
         Assertions.assertEquals(32_768, windowOf(transport.getOnlyCall()));
     }
@@ -100,16 +110,16 @@ class OllamaContextWindowContractTest {
     @DisplayName("a non-positive window opts out of the option entirely")
     void windowCanBeTurnedOff() throws LLMException {
         final ProviderConfig plain = ProviderConfig.builder("test", LLMProviderType.OLLAMA)
-            .baseUrl("http://runtime.test").readTimeoutMs(1_000)
+            .baseUrl(RUNTIME_URL).readTimeoutMs(1_000)
             .contextWindowTokens(0).build();
         final RecordingHttpTransport transport = RecordingHttpTransport.streaming(200,
-            "{\"message\":{\"content\":\"ok\"},\"done\":true}");
+            ANSWER_OK);
         new OllamaLLMProvider(plain, transport).chatStream(
-            askingAbout("hi"), piece -> { }, piece -> { });
+            askingAbout(ASK_TEXT), piece -> { }, piece -> { });
 
         final JsonObject options = bodyOf(transport.getOnlyCall())
-            .getAsJsonObject("options");
-        Assertions.assertTrue(options == null || !options.has("num_ctx"),
+            .getAsJsonObject(OPTIONS_FIELD);
+        Assertions.assertTrue(options == null || !options.has(WINDOW_FIELD),
             transport.getOnlyCall().getJsonBody());
     }
 
@@ -121,11 +131,11 @@ class OllamaContextWindowContractTest {
         new OllamaLLMProvider(local(), transport).warmModel("test-model");
 
         final JsonObject options = bodyOf(transport.getOnlyCall())
-            .getAsJsonObject("options");
+            .getAsJsonObject(OPTIONS_FIELD);
         Assertions.assertNotNull(options,
             "warm-up must reserve the window up front: " + transport.getOnlyCall().getJsonBody());
         Assertions.assertEquals(ProviderConfig.DEFAULT_LOCAL_CONTEXT_TOKENS,
-            options.get("num_ctx").getAsInt());
+            options.get(WINDOW_FIELD).getAsInt());
     }
 
     @Test
@@ -168,14 +178,14 @@ class OllamaContextWindowContractTest {
         final RecordingHttpTransport cut = RecordingHttpTransport.streaming(200,
             "{\"message\":{\"content\":\"half\"},\"done\":true,\"done_reason\":\"length\"}");
         final ChatResult cutResult = new OllamaLLMProvider(local(), cut)
-            .chatStream(askingAbout("hi"), piece -> { }, piece -> { });
+            .chatStream(askingAbout(ASK_TEXT), piece -> { }, piece -> { });
         Assertions.assertTrue(cutResult.truncated(),
             "done_reason=length must surface as truncated()");
 
         final RecordingHttpTransport calm = RecordingHttpTransport.streaming(200,
             "{\"message\":{\"content\":\"ok\"},\"done\":true,\"done_reason\":\"stop\"}");
         final ChatResult calmResult = new OllamaLLMProvider(local(), calm)
-            .chatStream(askingAbout("hi"), piece -> { }, piece -> { });
+            .chatStream(askingAbout(ASK_TEXT), piece -> { }, piece -> { });
         Assertions.assertFalse(calmResult.truncated(),
             "a normally finished answer is not truncated");
     }

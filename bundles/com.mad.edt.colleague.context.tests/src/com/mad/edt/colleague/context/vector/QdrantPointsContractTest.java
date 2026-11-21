@@ -17,6 +17,11 @@ import com.mad.edt.colleague.http.HttpCallSpec;
  */
 class QdrantPointsContractTest {
 
+    // store endpoint and the fixture file path repeated across the scenarios
+    private static final String STORE_BASE = "http://store.test";
+    private static final String STORE_URL = STORE_BASE + "/collections/";
+    private static final String SRC_A_BSL = "src/a.bsl";
+
     private static final String COLLECTION = "chunks";
 
     @Test
@@ -26,14 +31,14 @@ class QdrantPointsContractTest {
             new ScriptedHttpTransport().answer(200, "{\"status\":\"ok\"}");
 
         final JsonObject payload = new JsonObject();
-        payload.addProperty("file", "src/a.bsl");
-        final String id = QdrantClient.pointId("src/a.bsl", 0);
-        new QdrantClient("http://store.test", 1_000, transport).upsert(COLLECTION,
+        payload.addProperty("file", SRC_A_BSL);
+        final String id = QdrantClient.pointId(SRC_A_BSL, 0);
+        new QdrantClient(STORE_BASE, 1_000, transport).upsert(COLLECTION,
             List.of(new QdrantClient.Point(id, new float[] {0.25f, 0.5f}, payload)));
 
         final HttpCallSpec call = transport.callAt(0);
         Assertions.assertEquals("PUT", call.getMethod());
-        Assertions.assertEquals("http://store.test/collections/" + COLLECTION
+        Assertions.assertEquals(STORE_URL + COLLECTION
             + "/points?wait=true", call.getUrl());
         Assertions.assertEquals(
             JsonParser.parseString("{\"points\":[{\"id\":\"" + id
@@ -48,12 +53,12 @@ class QdrantPointsContractTest {
         final ScriptedHttpTransport transport =
             new ScriptedHttpTransport().answer(200, "{\"status\":\"ok\",\"result\":{}}");
 
-        new QdrantClient("http://store.test", 1_000, transport)
+        new QdrantClient(STORE_BASE, 1_000, transport)
             .deleteByField(COLLECTION, "file", "src/a b.txt");
 
         final HttpCallSpec call = transport.callAt(0);
         Assertions.assertEquals("POST", call.getMethod());
-        Assertions.assertEquals("http://store.test/collections/" + COLLECTION
+        Assertions.assertEquals(STORE_URL + COLLECTION
             + "/points/delete?wait=true", call.getUrl());
         // the store filter condition carries the file key at the condition
         // level, only the value is nested under "match"; this shape was
@@ -71,12 +76,12 @@ class QdrantPointsContractTest {
         final ScriptedHttpTransport transport =
             new ScriptedHttpTransport().answer(200, "{\"status\":\"ok\",\"result\":{}}");
 
-        new QdrantClient("http://store.test", 1_000, transport)
+        new QdrantClient(STORE_BASE, 1_000, transport)
             .deleteChunksWithoutField(COLLECTION, "path", "a.bsl", "location");
 
         final HttpCallSpec call = transport.callAt(0);
         Assertions.assertEquals("POST", call.getMethod());
-        Assertions.assertEquals("http://store.test/collections/" + COLLECTION
+        Assertions.assertEquals(STORE_URL + COLLECTION
             + "/points/delete?wait=true", call.getUrl());
         // the point must match the value under one key and carry the second
         // key as empty: exactly the older generation of chunks; the store
@@ -97,12 +102,12 @@ class QdrantPointsContractTest {
                 + "{\"score\":0.9,\"payload\":{\"file\":\"x.bsl\"}},"
                 + "{\"score\":0.4,\"payload\":{\"file\":\"y.bsl\"}}]}");
 
-        final List<QdrantClient.Hit> hits = new QdrantClient("http://store.test", 1_000, transport)
+        final List<QdrantClient.Hit> hits = new QdrantClient(STORE_BASE, 1_000, transport)
             .search(COLLECTION, new float[] {0.1f, 0.2f}, 5, Double.valueOf(0.3));
 
         final HttpCallSpec call = transport.callAt(0);
         Assertions.assertEquals("POST", call.getMethod());
-        Assertions.assertEquals("http://store.test/collections/" + COLLECTION
+        Assertions.assertEquals(STORE_URL + COLLECTION
             + "/points/search", call.getUrl());
         Assertions.assertEquals(
             JsonParser.parseString("{\"vector\":[0.1,0.2],\"limit\":5,"
@@ -117,9 +122,9 @@ class QdrantPointsContractTest {
     @Test
     @DisplayName("point ids are stable UUIDs per path and chunk number")
     void stablePointIds() {
-        final String first = QdrantClient.pointId("src/a.bsl", 3);
-        Assertions.assertEquals(first, QdrantClient.pointId("src/a.bsl", 3));
-        Assertions.assertNotEquals(first, QdrantClient.pointId("src/a.bsl", 4));
+        final String first = QdrantClient.pointId(SRC_A_BSL, 3);
+        Assertions.assertEquals(first, QdrantClient.pointId(SRC_A_BSL, 3));
+        Assertions.assertNotEquals(first, QdrantClient.pointId(SRC_A_BSL, 4));
         Assertions.assertTrue(first.matches(
             "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"), first);
     }

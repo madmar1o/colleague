@@ -16,6 +16,8 @@ import org.junit.jupiter.api.Test;
  */
 class ReadOnlyProfileTest {
 
+    private static final String READ_FILE = "read_file";
+
     private static AgentProfile profile(final String theName, final AgentProfile.Mode theMode,
         final Set<String> theTools) {
         return AgentProfile.builder(theName).description("d").system("s")
@@ -26,10 +28,10 @@ class ReadOnlyProfileTest {
     @DisplayName("the picker returns the first chat profile whose tool list has no writer")
     void firstReadOnlySkipsWriteAndEmptyProfiles() {
         final AgentProfile writer = profile("writer", AgentProfile.Mode.PRIMARY,
-            Set.of("read_file", "write_file"));
+            Set.of(READ_FILE, "write_file"));
         final AgentProfile unrestricted = profile("talker", AgentProfile.Mode.PRIMARY, Set.of());
         final AgentProfile reader = profile("reader", AgentProfile.Mode.PRIMARY,
-            Set.of("read_file", "find_metadata"));
+            Set.of(READ_FILE, "find_metadata"));
         final AgentProfile editor = profile("editor", AgentProfile.Mode.ALL,
             Set.of("edit_file"));
 
@@ -44,7 +46,7 @@ class ReadOnlyProfileTest {
     @DisplayName("a subagent profile is never picked even when its tools are read-only")
     void subagentProfilesAreSkipped() {
         final AgentProfile helper = profile("helper", AgentProfile.Mode.SUBAGENT,
-            Set.of("read_file"));
+            Set.of(READ_FILE));
 
         Assertions.assertNull(ReadOnlyProfile.firstReadOnly(List.of(helper)));
     }

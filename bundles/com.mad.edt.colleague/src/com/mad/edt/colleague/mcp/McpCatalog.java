@@ -108,34 +108,50 @@ public final class McpCatalog {
             }
             final ToolBridge bridge = ourBridgeFactory.create(config);
             ourBridges.put(config.getName(), bridge);
-            final McpToolInfo[] discovered;
-            try {
-                discovered = ourDiscovery.discover(config);
-            } catch (final Exception ex) {
-                // one silent server must not cost the chat its other tools;
-                // the settings page test button gives the loud error instead
-                ColleagueLog.error("[colleague] mcp server " + config.getName()
-                    + " is not answering: " + (ex.getMessage() == null
-                        ? ex.getClass().getSimpleName() : ex.getMessage()));
-                continue;
-            }
-            for (final McpToolInfo tool : discovered) {
-                if (taken.contains(tool.name())) {
-                    continue; // a remote tool never shadows a built-in one
-                }
-                final String advertised = McpToolAdapter.NAME_PREFIX
-                    + McpToolAdapter.safe(config.getName()) + "_"
-                    + McpToolAdapter.safe(tool.name());
-                if (taken.contains(advertised)) {
-                    continue;
-                }
-                taken.add(advertised);
-                tools.add(new McpToolAdapter(config.getName(), bridge, tool, theConfirmation));
-            }
+            addServerTools(config, bridge, taken, theConfirmation, tools);
         }
         ourSnapshot = List.copyOf(current);
         ourTools = Collections.unmodifiableList(tools);
         return ourTools;
+    }
+
+    /**
+     * @param theConfig server settings
+     * @return tools of the server, empty when it does not answer - one silent
+     *         server must not cost the chat its other tools, the settings
+     *         page test button gives the loud error instead
+     */
+    private McpToolInfo[] discoverQuietly(final McpServerConfig theConfig) {
+        try {
+            return ourDiscovery.discover(theConfig);
+        } catch (final Exception ex) {
+            ColleagueLog.error("[colleague] mcp server " + theConfig.getName()
+                + " is not answering: " + (ex.getMessage() == null
+                    ? ex.getClass().getSimpleName() : ex.getMessage()));
+            return new McpToolInfo[0];
+        }
+    }
+
+    /**
+     * @param theConfig server settings
+     * @param theBridge open channel of the server
+     * @param theTaken names already offered, a remote tool never shadows one
+     * @param theConfirmation who to ask before a write-like remote call runs
+     * @param theTools list the accepted adapters are added to
+     */
+    private void addServerTools(final McpServerConfig theConfig, final ToolBridge theBridge,
+        final Set<String> theTaken, final McpToolAdapter.Confirmation theConfirmation,
+        final List<IToolExecutor> theTools) {
+        for (final McpToolInfo tool : discoverQuietly(theConfig)) {
+            final String advertised = McpToolAdapter.NAME_PREFIX
+                + McpToolAdapter.safe(theConfig.getName()) + "_"
+                + McpToolAdapter.safe(tool.name());
+            // a remote tool never shadows a built-in one or another adapter
+            if (!theTaken.contains(tool.name()) && !theTaken.contains(advertised)) {
+                theTaken.add(advertised);
+                theTools.add(new McpToolAdapter(theConfig.getName(), theBridge, tool, theConfirmation));
+            }
+        }
     }
 
     /** Drops every open channel; the next rebuild opens them again. */

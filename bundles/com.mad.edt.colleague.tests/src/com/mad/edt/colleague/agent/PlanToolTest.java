@@ -19,6 +19,9 @@ import com.mad.edt.colleague.agent.PlanBoard.Status;
  */
 class PlanToolTest {
 
+    private static final String ITEMS_SHAPE_ERROR =
+        "ERROR: items must be a non-empty array of {content, status} objects";
+
     @Test
     void advertisesTheToolUnderAStableName() {
         final PlanTool tool = new PlanTool(new PlanBoard());
@@ -28,6 +31,9 @@ class PlanToolTest {
         assertFalse(tool.isParallelSafe());
     }
 
+    // java:S6126 kept suppressed: the expected value has no trailing newline,
+    // a text block would append one and change the byte-exact assertion.
+    @SuppressWarnings("java:S6126")
     @Test
     void replacesThePlanAndReturnsTheRenderedBoard() {
         final PlanBoard board = new PlanBoard();
@@ -56,12 +62,9 @@ class PlanToolTest {
     void rejectsAMissingOrMalformedItemsList() {
         final PlanTool tool = new PlanTool(new PlanBoard());
 
-        assertEquals("ERROR: items must be a non-empty array of"
-            + " {content, status} objects", tool.execute("{}"));
-        assertEquals("ERROR: items must be a non-empty array of"
-            + " {content, status} objects", tool.execute("{\"items\":\"whole plan\"}"));
-        assertEquals("ERROR: items must be a non-empty array of"
-            + " {content, status} objects", tool.execute("not json at all"));
+        assertEquals(ITEMS_SHAPE_ERROR, tool.execute("{}"));
+        assertEquals(ITEMS_SHAPE_ERROR, tool.execute("{\"items\":\"whole plan\"}"));
+        assertEquals(ITEMS_SHAPE_ERROR, tool.execute("not json at all"));
     }
 
     @Test

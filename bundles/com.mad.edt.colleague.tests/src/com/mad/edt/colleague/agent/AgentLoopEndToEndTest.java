@@ -65,6 +65,11 @@ class AgentLoopEndToEndTest {
     /** The identifier the task asks to write instead. */
     private static final String FIXED_NAME = "CalculateTotal";
 
+    // fixture tool names and the secret word repeated across the scenarios
+    private static final String READ_FILE = "read_file";
+    private static final String EDIT_FILE = "edit_file";
+    private static final String UMBRELLA = "umbrella";
+
     /**
      * Records the trace in call order and passes every event through to the
      * production log observer, so one run both asserts its behaviour and
@@ -152,7 +157,7 @@ class AgentLoopEndToEndTest {
 
         @Override
         public String getName() {
-            return "read_file";
+            return READ_FILE;
         }
 
         @Override
@@ -162,7 +167,7 @@ class AgentLoopEndToEndTest {
 
         @Override
         public ToolSpec getSpec() {
-            return new ToolSpec("read_file",
+            return new ToolSpec(READ_FILE,
                 "Read a workspace file as text. Pass the workspace-relative path.",
                 objectSchema("path"));
         }
@@ -186,12 +191,12 @@ class AgentLoopEndToEndTest {
 
         @Override
         public String getName() {
-            return "edit_file";
+            return EDIT_FILE;
         }
 
         @Override
         public ToolSpec getSpec() {
-            return new ToolSpec("edit_file",
+            return new ToolSpec(EDIT_FILE,
                 "Replace every occurrence of search with replace inside one workspace file.",
                 objectSchema("path", "search", "replace"));
         }
@@ -345,7 +350,7 @@ class AgentLoopEndToEndTest {
         // unattended run must leave the step-by-step evidence behind, not
         // only a passed/failed line
         java.util.logging.Logger.getLogger("com.mad.edt.colleague.e2e")
-            .info(console.toString(StandardCharsets.UTF_8));
+            .info(() -> console.toString(StandardCharsets.UTF_8));
 
         final java.util.function.Supplier<String> trace =
             () -> String.join("\n", recorder.events);
@@ -354,11 +359,11 @@ class AgentLoopEndToEndTest {
             "the log observer printed no step line during the run; harness trace:\n"
                 + trace.get());
 
-        Assertions.assertTrue(recorder.usedTool("read_file"),
+        Assertions.assertTrue(recorder.usedTool(READ_FILE),
             "the model never read the file; trace:\n" + trace.get());
-        Assertions.assertTrue(recorder.usedTool("edit_file"),
+        Assertions.assertTrue(recorder.usedTool(EDIT_FILE),
             "the model never used the edit tool; trace:\n" + trace.get());
-        Assertions.assertEquals("read_file", recorder.firstTool(),
+        Assertions.assertEquals(READ_FILE, recorder.firstTool(),
             "reading before editing is the required order; trace:\n" + trace.get());
 
         final String fixedSource = Files.readString(module, StandardCharsets.UTF_8);
@@ -397,7 +402,7 @@ class AgentLoopEndToEndTest {
     void realModelDelegatesToASubagent(@TempDir final Path theWorkspace) throws Exception {
         final Path note = theWorkspace.resolve("src/secret.txt");
         Files.createDirectories(note.getParent());
-        Files.writeString(note, "umbrella", StandardCharsets.UTF_8);
+        Files.writeString(note, UMBRELLA, StandardCharsets.UTF_8);
 
         final OllamaLLMProvider provider = new OllamaLLMProvider(ProviderConfig
             .builder("e2e", LLMProviderType.OLLAMA)
@@ -440,7 +445,7 @@ class AgentLoopEndToEndTest {
                     + " word and nothing else.");
         }
         java.util.logging.Logger.getLogger("com.mad.edt.colleague.e2e")
-            .info(console.toString(StandardCharsets.UTF_8));
+            .info(() -> console.toString(StandardCharsets.UTF_8));
 
         final java.util.function.Supplier<String> trace =
             () -> String.join("\n", recorder.events);
@@ -449,15 +454,15 @@ class AgentLoopEndToEndTest {
         final String delegateResult = recorder.events.stream()
             .filter(event -> event.contains(RecordingObserver.TOOL_EVENT + "subagent"))
             .findFirst().orElse("");
-        Assertions.assertTrue(delegateResult.contains("umbrella"),
+        Assertions.assertTrue(delegateResult.contains(UMBRELLA),
             "the delegate answer did not come back as the tool result; trace:\n"
                 + trace.get());
-        Assertions.assertFalse(recorder.usedTool("edit_file"),
+        Assertions.assertFalse(recorder.usedTool(EDIT_FILE),
             "a write tool reached the delegate or the parent rewrote the file; trace:\n"
                 + trace.get());
-        Assertions.assertEquals("umbrella", Files.readString(note, StandardCharsets.UTF_8),
+        Assertions.assertEquals(UMBRELLA, Files.readString(note, StandardCharsets.UTF_8),
             "the delegate must not change the file it reads");
-        Assertions.assertTrue(answer.getText().contains("umbrella"),
+        Assertions.assertTrue(answer.getText().contains(UMBRELLA),
             "the parent did not report the delegate's answer; trace:\n" + trace.get());
         final long totalMs = (System.nanoTime() - startedAtNanos) / 1_000_000L;
         Assertions.assertTrue(totalMs < 180_000L,

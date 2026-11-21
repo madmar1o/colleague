@@ -74,8 +74,7 @@ public final class ProjectContext {
         switch(theResource.getType()) {
             case IResource.FILE:
                 return describeFile((IFile)theResource, maxChars);
-            case IResource.FOLDER:
-            case IResource.PROJECT:
+            case IResource.FOLDER, IResource.PROJECT:
                 if(!(theResource instanceof IContainer)) {
                     return "Resource: " + theResource.getFullPath();
                 }

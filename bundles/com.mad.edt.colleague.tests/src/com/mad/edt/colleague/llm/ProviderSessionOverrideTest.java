@@ -17,43 +17,48 @@ import org.junit.jupiter.api.Test;
  */
 class ProviderSessionOverrideTest {
 
+    // fixture provider ids and the stored pick repeated across the scenarios
+    private static final String SRATA = "srata";
+    private static final String LOCAL = "local";
+    private static final String WINDOWS_OLLAMA = "Windows ollama";
+
     @Test
     @DisplayName("a flag naming a registered provider picks it for this session")
     void knownProviderIsPicked() {
-        Assertions.assertEquals("srata",
-            ProviderStore.sessionOverrideId("srata", List.of("local", "srata")));
+        Assertions.assertEquals(SRATA,
+            ProviderStore.sessionOverrideId(SRATA, List.of(LOCAL, SRATA)));
     }
 
     @Test
     @DisplayName("a flag naming nothing registered picks nothing")
     void unknownProviderIsRefused() {
         Assertions.assertEquals("",
-            ProviderStore.sessionOverrideId("made-up", List.of("local", "srata")),
+            ProviderStore.sessionOverrideId("made-up", List.of(LOCAL, SRATA)),
             "a typo in the flag must not invent an endpoint");
     }
 
     @Test
     @DisplayName("no flag, no override: the stored choice rules")
     void noFlagKeepsTheStoredChoice() {
-        Assertions.assertEquals("", ProviderStore.sessionOverrideId(null, List.of("local")));
-        Assertions.assertEquals("", ProviderStore.sessionOverrideId("  ", List.of("local")));
+        Assertions.assertEquals("", ProviderStore.sessionOverrideId(null, List.of(LOCAL)));
+        Assertions.assertEquals("", ProviderStore.sessionOverrideId("  ", List.of(LOCAL)));
     }
 
     @Test
     @DisplayName("the override is compared by trimmed name, not by exact spacing")
     void spacesAroundTheFlagDoNotMatter() {
-        Assertions.assertEquals("srata",
-            ProviderStore.sessionOverrideId(" srata ", List.of("local", "srata")));
+        Assertions.assertEquals(SRATA,
+            ProviderStore.sessionOverrideId(" " + SRATA + " ", List.of(LOCAL, SRATA)));
     }
 
     @Test
     @DisplayName("a session override never reaches the stored settings")
     void storedDefaultSurvivesTheOverride() {
         final ProviderStore.SessionDefaults defaults =
-            new ProviderStore.SessionDefaults("Windows ollama", "srata");
+            new ProviderStore.SessionDefaults(WINDOWS_OLLAMA, SRATA);
 
-        Assertions.assertEquals("srata", defaults.forThisSession());
-        Assertions.assertEquals("Windows ollama", defaults.toStore(),
+        Assertions.assertEquals(SRATA, defaults.forThisSession());
+        Assertions.assertEquals(WINDOWS_OLLAMA, defaults.toStore(),
             "a debug run must not rewrite which provider the user chose");
     }
 
@@ -61,22 +66,22 @@ class ProviderSessionOverrideTest {
     @DisplayName("without an override the session and the stored default agree")
     void noOverrideStoresWhatItRan() {
         final ProviderStore.SessionDefaults defaults =
-            new ProviderStore.SessionDefaults("Windows ollama", "");
+            new ProviderStore.SessionDefaults(WINDOWS_OLLAMA, "");
 
-        Assertions.assertEquals("Windows ollama", defaults.forThisSession());
-        Assertions.assertEquals("Windows ollama", defaults.toStore());
-        Assertions.assertTrue(Set.of(defaults.forThisSession()).contains("Windows ollama"));
+        Assertions.assertEquals(WINDOWS_OLLAMA, defaults.forThisSession());
+        Assertions.assertEquals(WINDOWS_OLLAMA, defaults.toStore());
+        Assertions.assertTrue(Set.of(defaults.forThisSession()).contains(WINDOWS_OLLAMA));
     }
 
     @Test
     @DisplayName("a provider picked in the settings page during a flagged session is kept")
     void aUserPickInsideAFlaggedSessionSurvives() {
         final ProviderStore.SessionDefaults defaults =
-            new ProviderStore.SessionDefaults("Windows ollama", "srata");
+            new ProviderStore.SessionDefaults(WINDOWS_OLLAMA, SRATA);
 
         Assertions.assertEquals("another", defaults.toStoreFor("another"),
             "a pick made in the settings page is the user's decision and gets stored");
-        Assertions.assertEquals("Windows ollama", defaults.toStoreFor("srata"),
+        Assertions.assertEquals(WINDOWS_OLLAMA, defaults.toStoreFor(SRATA),
             "the flag alone never rewrites the stored pick");
     }
 }

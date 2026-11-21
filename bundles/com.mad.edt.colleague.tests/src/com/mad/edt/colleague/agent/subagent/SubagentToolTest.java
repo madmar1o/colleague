@@ -29,6 +29,13 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 class SubagentToolTest {
 
+    // fixture vocabulary: the tool names the parent offers and the answers the
+    // nested loop is scripted to hand back
+    private static final String READ_FILE = "read_file";
+    private static final String WRITE_FILE = "write_file";
+    private static final String DELEGATE_ANSWER = "delegate found 12 modules";
+    private static final String FIRST_ANSWER = "first delegate answer";
+
     /** serves the scripted rounds and records every request it received */
     private static final class ScriptedProvider implements ILLMProvider {
 
@@ -81,7 +88,7 @@ class SubagentToolTest {
 
         @Override
         public String getName() {
-            return "read_file";
+            return READ_FILE;
         }
 
         @Override
@@ -91,7 +98,7 @@ class SubagentToolTest {
 
         @Override
         public ToolSpec getSpec() {
-            return new ToolSpec("read_file", "reads a file", null);
+            return new ToolSpec(READ_FILE, "reads a file", null);
         }
 
         @Override
@@ -106,12 +113,12 @@ class SubagentToolTest {
 
         @Override
         public String getName() {
-            return "write_file";
+            return WRITE_FILE;
         }
 
         @Override
         public ToolSpec getSpec() {
-            return new ToolSpec("write_file", "writes a file", null);
+            return new ToolSpec(WRITE_FILE, "writes a file", null);
         }
 
         @Override
@@ -144,7 +151,7 @@ class SubagentToolTest {
             toolRound("d1|subagent|{\"agent\":\"explorer\",\"description\":\"count files\","
                 + "\"prompt\":\"count the modules\"}"),
             toolRound("r1|read_file|{\"path\":\"a.java\"}"),
-            textRound("delegate found 12 modules"),
+            textRound(DELEGATE_ANSWER),
             textRound("parent says: delegate found 12 modules"));
         final ReaderTool reader = new ReaderTool();
         final SubagentTool tool = new SubagentTool(provider, "stub",
@@ -153,15 +160,15 @@ class SubagentToolTest {
         final AgentAnswer answer = new AgentLoop(provider, List.of(tool), "stub", 8,
             new CancellationFlag()).run("sys", "task");
 
-        Assertions.assertTrue(answer.getText().contains("delegate found 12 modules"),
+        Assertions.assertTrue(answer.getText().contains(DELEGATE_ANSWER),
             answer.getText());
         Assertions.assertEquals(1, reader.calls,
             "the delegate ran its own tool round");
         // request 0: the parent round. request 1: the delegate first round -
         // it must see the reader but never the writer
         final List<String> delegateTools = advertised(provider.requests.get(1));
-        Assertions.assertTrue(delegateTools.contains("read_file"), delegateTools.toString());
-        Assertions.assertFalse(delegateTools.contains("write_file"),
+        Assertions.assertTrue(delegateTools.contains(READ_FILE), delegateTools.toString());
+        Assertions.assertFalse(delegateTools.contains(WRITE_FILE),
             "a delegate must not be offered a writer: " + delegateTools);
         // request 2: the delegate second round; request 3: the parent final
         final ChatRequest parentFinal = provider.requests.get(3);
@@ -169,7 +176,7 @@ class SubagentToolTest {
             .filter(message -> ChatMessage.ROLE_TOOL.equals(message.getRole()))
             .map(ChatMessage::getContent).toList();
         Assertions.assertEquals(1, toolResults.size());
-        Assertions.assertTrue(toolResults.get(0).contains("delegate found 12 modules"),
+        Assertions.assertTrue(toolResults.get(0).contains(DELEGATE_ANSWER),
             toolResults.get(0));
     }
 
@@ -194,19 +201,19 @@ class SubagentToolTest {
     @DisplayName("the same delegate name picks its conversation back up")
     void liveSessionContinuesTheSameDelegate() throws Exception {
         final ScriptedProvider provider = new ScriptedProvider(
-            textRound("first delegate answer"),
+            textRound(FIRST_ANSWER),
             textRound("second delegate answer"));
         final SubagentTool tool = new SubagentTool(provider, "stub",
             List.of(new ReaderTool()), List.of(), 0, new CancellationFlag());
 
-        Assertions.assertEquals("first delegate answer",
+        Assertions.assertEquals(FIRST_ANSWER,
             tool.execute("{\"agent\":\"explorer\",\"description\":\"look\",\"prompt\":\"task one\"}"));
         Assertions.assertEquals("second delegate answer",
             tool.execute("{\"agent\":\"explorer\",\"description\":\"look again\",\"prompt\":\"task two\"}"));
 
         final List<String> secondTask =
             provider.requests.get(1).getMessages().stream().map(ChatMessage::getContent).toList();
-        Assertions.assertTrue(secondTask.stream().anyMatch(text -> text.contains("first delegate answer")),
+        Assertions.assertTrue(secondTask.stream().anyMatch(text -> text.contains(FIRST_ANSWER)),
             "the delegate continues where it stopped: " + secondTask);
     }
 

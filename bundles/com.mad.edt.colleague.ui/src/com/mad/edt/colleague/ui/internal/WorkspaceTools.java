@@ -48,6 +48,14 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 public final class WorkspaceTools {
 
+    /** JSON schema vocabulary and the shared path hint used by tool schemas. */
+    private static final String TYPE_STRING = "string";
+    private static final String TYPE_OBJECT = "object";
+    private static final String PROPERTIES = "properties";
+    private static final String DESCRIPTION = "description";
+    private static final String FROM_LINE = "fromLine";
+    private static final String PATH_HINT = "workspace-relative file path";
+
     private WorkspaceTools() {
         // utility
     }
@@ -167,16 +175,7 @@ public final class WorkspaceTools {
                     continue;
                 }
                 try {
-                    final List<IResource> matches = new ArrayList<>();
-                    project.accept(resource -> {
-                        if(resource.getType() == IResource.FILE
-                            && resource.getProjectRelativePath().toPortableString()
-                                .toLowerCase(Locale.ROOT).contains(needle)) {
-                            matches.add(resource);
-                        }
-                        return matches.size() < 5_000;
-                    });
-                    for(final IResource match : matches) {
+                    for(final IResource match : collectMatches(project, needle)) {
                         total++;
                         if(shown < 80) {
                             listing.append(project.getName()).append('/')
@@ -195,6 +194,27 @@ public final class WorkspaceTools {
             }
             listing.append("... total matches: ").append(total);
             return listing.toString();
+        }
+
+        /**
+         * @param theProject open project to walk
+         * @param theNeedle lower-cased path substring
+         * @return the files of the project whose path contains the needle,
+         *         the walk giving up after five thousand matches
+         * @throws CoreException when the project cannot be walked
+         */
+        private static List<IResource> collectMatches(final IProject theProject,
+            final String theNeedle) throws CoreException {
+            final List<IResource> matches = new ArrayList<>();
+            theProject.accept(resource -> {
+                if(resource.getType() == IResource.FILE
+                    && resource.getProjectRelativePath().toPortableString()
+                        .toLowerCase(Locale.ROOT).contains(theNeedle)) {
+                    matches.add(resource);
+                }
+                return matches.size() < 5_000;
+            });
+            return matches;
         }
     }
 
@@ -218,7 +238,7 @@ public final class WorkspaceTools {
             return new ToolSpec("read_file",
                 "Read a workspace file by workspace-relative path. Returns at most"
                     + " 400 lines starting from fromLine (1-based).",
-                schema("path", "workspace-relative file path", "fromLine",
+                schema("path", PATH_HINT, FROM_LINE,
                     "optional 1-based start line"));
         }
 
@@ -233,7 +253,7 @@ public final class WorkspaceTools {
 
         private String readWindow(final String theArgumentsJson) throws IOException {
             final Path file = resolve(stringArg(theArgumentsJson, "path"));
-            final int fromLine = intArg(theArgumentsJson, "fromLine", 1);
+            final int fromLine = intArg(theArgumentsJson, FROM_LINE, 1);
             final List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
             final int from = Math.max(1, fromLine);
             final int to = Math.min(lines.size(), from + MAX_LINES - 1);
@@ -285,7 +305,7 @@ public final class WorkspaceTools {
                 "Create a new workspace file with the given content. Only available in"
                     + " execute mode; the user confirms every creation in a dialog. For"
                     + " changing an existing file use edit_file instead.",
-                schema("path", "workspace-relative file path", "content",
+                schema("path", PATH_HINT, "content",
                     "complete new file content"));
         }
 
@@ -410,37 +430,37 @@ public final class WorkspaceTools {
         private static JsonObject editFileSchema() {
             final JsonObject blockProperties = new JsonObject();
             final JsonObject search = new JsonObject();
-            search.addProperty("type", "string");
-            search.addProperty("description",
+            search.addProperty("type", TYPE_STRING);
+            search.addProperty(DESCRIPTION,
                 "exact fragment of the current file to find, must be unique");
             blockProperties.add("search", search);
             final JsonObject replace = new JsonObject();
-            replace.addProperty("type", "string");
-            replace.addProperty("description", "text that takes the fragment's place");
+            replace.addProperty("type", TYPE_STRING);
+            replace.addProperty(DESCRIPTION, "text that takes the fragment's place");
             blockProperties.add("replace", replace);
             final JsonObject block = new JsonObject();
-            block.addProperty("type", "object");
-            block.add("properties", blockProperties);
+            block.addProperty("type", TYPE_OBJECT);
+            block.add(PROPERTIES, blockProperties);
             final JsonArray blockRequired = new JsonArray();
             blockRequired.add("search");
             blockRequired.add("replace");
             block.add("required", blockRequired);
             final JsonObject properties = new JsonObject();
             final JsonObject path = new JsonObject();
-            path.addProperty("type", "string");
-            path.addProperty("description", "workspace-relative file path");
+            path.addProperty("type", TYPE_STRING);
+            path.addProperty(DESCRIPTION, PATH_HINT);
             properties.add("path", path);
             final JsonObject edits = new JsonObject();
             edits.addProperty("type", "array");
             edits.add("items", block);
-            edits.addProperty("description", "search/replace blocks, applied in order");
+            edits.addProperty(DESCRIPTION, "search/replace blocks, applied in order");
             properties.add("edits", edits);
             final JsonArray required = new JsonArray();
             required.add("path");
             required.add("edits");
             final JsonObject schema = new JsonObject();
-            schema.addProperty("type", "object");
-            schema.add("properties", properties);
+            schema.addProperty("type", TYPE_OBJECT);
+            schema.add(PROPERTIES, properties);
             schema.add("required", required);
             return schema;
         }
@@ -577,16 +597,16 @@ public final class WorkspaceTools {
         for(int index = 0; index + 1 < theNameDescriptionPairs.length; index += 2) {
             final JsonObject property = new JsonObject();
             property.addProperty("type",
-                theNameDescriptionPairs[index].equals("fromLine") ? "integer" : "string");
-            property.addProperty("description", theNameDescriptionPairs[index + 1]);
+                theNameDescriptionPairs[index].equals(FROM_LINE) ? "integer" : TYPE_STRING);
+            property.addProperty(DESCRIPTION, theNameDescriptionPairs[index + 1]);
             properties.add(theNameDescriptionPairs[index], property);
-            if(!theNameDescriptionPairs[index].equals("fromLine")) {
+            if(!theNameDescriptionPairs[index].equals(FROM_LINE)) {
                 required.add(theNameDescriptionPairs[index]);
             }
         }
         final JsonObject schema = new JsonObject();
-        schema.addProperty("type", "object");
-        schema.add("properties", properties);
+        schema.addProperty("type", TYPE_OBJECT);
+        schema.add(PROPERTIES, properties);
         return schema;
     }
 }

@@ -24,6 +24,8 @@ import com.mad.edt.colleague.llm.ProviderConfig;
  */
 class AgentLoopStreamingTest {
 
+    private static final String PLAIN = "plain";
+
     /**
      * Endpoint distinguishing the streaming path from the buffered one.
      */
@@ -93,7 +95,7 @@ class AgentLoopStreamingTest {
 
             @Override
             public String getId() {
-                return "plain";
+                return PLAIN;
             }
 
             @Override
@@ -103,12 +105,12 @@ class AgentLoopStreamingTest {
 
             @Override
             public ChatResult chat(final ChatRequest theRequest) {
-                return new ChatResult("done", null, "plain", "stop", 1, 1, List.of());
+                return new ChatResult("done", null, PLAIN, "stop", 1, 1, List.of());
             }
 
             @Override
             public List<String> listModels() {
-                return List.of("plain");
+                return List.of(PLAIN);
             }
 
             @Override
@@ -117,7 +119,7 @@ class AgentLoopStreamingTest {
             }
         };
         final AgentAnswer answer =
-            new AgentLoop(plain, List.of(), "plain", 2, new CancellationFlag()).run("sys", "task");
+            new AgentLoop(plain, List.of(), PLAIN, 2, new CancellationFlag()).run("sys", "task");
         Assertions.assertEquals("done", answer.getText());
     }
 }

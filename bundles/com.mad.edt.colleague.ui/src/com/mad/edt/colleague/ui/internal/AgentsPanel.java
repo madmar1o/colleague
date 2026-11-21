@@ -34,6 +34,10 @@ import com.mad.edt.colleague.chat.PageCatalogEvents;
  */
 public final class AgentsPanel {
 
+    /** Bridge argument name carrying the agent level and the project level value. */
+    private static final String LEVEL = "level";
+    private static final String PROJECT_LEVEL = "project";
+
     private final Supplier<List<AgentProfile>> ourAgentsSupplier;
     private final Consumer<String> ourOnOpenAgent;
     private final Runnable ourOnOpenSettings;
@@ -134,8 +138,7 @@ public final class AgentsPanel {
 
     private void handleBridge(final String theMethod, final JsonObject theArguments) {
         switch(theMethod) {
-            case "bridgeReady":
-            case "refresh":
+            case "bridgeReady", "refresh":
                 pushAgents();
                 return;
             case "openAgent":
@@ -165,7 +168,7 @@ public final class AgentsPanel {
      */
     private void saveAgent(final JsonObject theArguments) {
         final String id = BridgeBrowser.optString(theArguments, "id");
-        final File dir = ourLevelDirectory.apply(BridgeBrowser.optString(theArguments, "level"));
+        final File dir = ourLevelDirectory.apply(BridgeBrowser.optString(theArguments, LEVEL));
         if(dir == null) {
             pushSaved(false, "этот уровень сейчас недоступен: нет открытого проекта?");
             return;
@@ -196,7 +199,7 @@ public final class AgentsPanel {
      */
     private void removeAgent(final JsonObject theArguments) {
         final String id = BridgeBrowser.optString(theArguments, "id");
-        final File dir = ourLevelDirectory.apply(BridgeBrowser.optString(theArguments, "level"));
+        final File dir = ourLevelDirectory.apply(BridgeBrowser.optString(theArguments, LEVEL));
         if(dir == null) {
             pushSaved(false, "этот уровень сейчас недоступен: нет открытого проекта?");
             return;
@@ -287,7 +290,7 @@ public final class AgentsPanel {
             if(!card.has("builtin")) {
                 // the edit form writes back where the profile actually came
                 // from: the same level the merge won with
-                card.addProperty("level", levelOf(card.get("name").getAsString()));
+                card.addProperty(LEVEL, levelOf(card.get("name").getAsString()));
             }
         }
         final JsonObject payload = new JsonObject();
@@ -301,15 +304,15 @@ public final class AgentsPanel {
      *         neither answers (the safe default for a new write)
      */
     private String levelOf(final String theId) {
-        final java.io.File project = ourLevelDirectory.apply("project");
+        final java.io.File project = ourLevelDirectory.apply(PROJECT_LEVEL);
         if(project != null && AgentProfileWriter.exists(project, theId)) {
-            return "project";
+            return PROJECT_LEVEL;
         }
         final java.io.File personal = ourLevelDirectory.apply("personal");
         if(personal != null && AgentProfileWriter.exists(personal, theId)) {
             return "personal";
         }
-        return "project";
+        return PROJECT_LEVEL;
     }
 
     /** Paints the panel container with the page background color. */

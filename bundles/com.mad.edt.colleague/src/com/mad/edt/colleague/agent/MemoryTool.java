@@ -13,6 +13,9 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 public final class MemoryTool implements IToolExecutor {
 
+    /** Tool id the lesson memory is addressed by. */
+    public static final String TOOL_ID = "remember";
+
     private final AgentMemory memory;
 
     /**
@@ -24,7 +27,7 @@ public final class MemoryTool implements IToolExecutor {
 
     @Override
     public String getName() {
-        return "remember";
+        return TOOL_ID;
     }
 
     @Override
@@ -43,7 +46,7 @@ public final class MemoryTool implements IToolExecutor {
         schema.addProperty("type", "object");
         schema.add("properties", properties);
 
-        return new ToolSpec("remember",
+        return new ToolSpec(TOOL_ID,
             "Store one short lesson for later sessions on this project:"
                 + " a quirk you discovered, an approach that worked or failed,"
                 + " a rule the user corrected you on. One sentence, no code.", schema);

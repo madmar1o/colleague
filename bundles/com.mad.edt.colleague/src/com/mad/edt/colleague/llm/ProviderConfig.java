@@ -210,8 +210,8 @@ public final class ProviderConfig {
         private Builder(final String theId, final LLMProviderType theType) {
             id = theId;
             type = theType;
-            // only a runtime on the same machine pays the cold model load;
-            // gateway-style endpoints start warm and ignore the claim
+            // only a runtime on the same machine pays the cold model load.
+            // Gateway-style endpoints start warm and ignore the claim
             keepAlive = theType == LLMProviderType.OLLAMA
                 ? DEFAULT_LOCAL_KEEP_ALIVE : null;
             // only a local runtime silently trims the prompt to its own tiny

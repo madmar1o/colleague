@@ -143,54 +143,11 @@ public final class SearchEngine {
         java.util.Arrays.sort(order, (left, right) ->
             Integer.compare(nameScores[right.intValue()], nameScores[left.intValue()]));
 
-        final long deadline = clock.nanoTime() + scanBudgetNs;
-        long readBytes = 0L;
-        int scannedFiles = 0;
-        int visitedFiles = 0;
-        boolean cutByTime = false;
-        boolean cutByBytes = false;
-
         final Comparator<Hit> byScore = Comparator.comparingInt(hit -> Integer.valueOf(hit.score()));
         final PriorityQueue<Hit> top = new PriorityQueue<>(byScore);
 
-        for(final Integer position : order) {
-            visitedFiles++;
-            final int index = position.intValue();
-            final SourceIndex.Entry entry = theIndex.get(index);
-            final int nameScore = nameScores[index];
-            if(clock.nanoTime() > deadline) {
-                cutByTime = true;
-                break;
-            }
-            if(readBytes >= readBudgetBytes) {
-                cutByBytes = true;
-                break;
-            }
-            try {
-                final long size = Files.size(entry.location());
-                if(size > maxFileBytes) {
-                    continue;
-                }
-                readBytes += size;
-                final String content = new String(Files.readAllBytes(entry.location()),
-                    StandardCharsets.UTF_8);
-                final String[] lines = content.split("\r?\n", -1);
-                final ContentScorer.LineMatch match = ContentScorer.bestLine(lines, tokens);
-                if(match.score() == 0 && nameScore == 0) {
-                    continue;
-                }
-                scannedFiles++;
-                final int score = nameScore + match.score();
-                final String excerpt = match.lineIndex() < 0 ? ""
-                    : SnippetRenderer.excerpt(lines, match.lineIndex());
-                top.offer(new Hit(entry, score, match.lineIndex() + 1, excerpt));
-                if(top.size() > maxResults) {
-                    top.poll();
-                }
-            } catch (final IOException ex) {
-                // unreadable file, skip
-            }
-        }
+        final long deadline = clock.nanoTime() + scanBudgetNs;
+        final ScanTally tally = scanOrdered(theIndex, tokens, order, nameScores, deadline, top);
 
         final List<Hit> hits = keepTop(top, maxResults);
         if(hits.isEmpty()) {
@@ -202,9 +159,153 @@ public final class SearchEngine {
                 hit.excerpt()));
         }
         final StringBuilder result = new StringBuilder();
-        SnippetRenderer.render(blocks, resultCharBudget, result, scannedFiles, visitedFiles,
-            cutByTime, cutByBytes);
+        SnippetRenderer.render(blocks, resultCharBudget, result, tally.scannedFiles(),
+            tally.visitedFiles(), tally.cutByTime(), tally.cutByBytes());
         return result.toString();
+    }
+
+    /**
+     * Reads and scores files in the path-scored order until a budget runs out.
+     *
+     * @param theIndex index snapshot
+     * @param theQuery tokens of the query
+     * @param theOrder positions of the index, sorted by path score
+     * @param theNameScores path score per index position
+     * @param theDeadline instant the time budget expires
+     * @param theTop bounded queue of the best hits found
+     * @return counters for the coverage note
+     */
+    private ScanTally scanOrdered(final List<SourceIndex.Entry> theIndex,
+        final List<String> theQuery, final Integer[] theOrder, final int[] theNameScores,
+        final long theDeadline, final PriorityQueue<Hit> theTop) {
+        long readBytes = 0L;
+        int scannedFiles = 0;
+        int visitedFiles = 0;
+        boolean cutByTime = false;
+        boolean cutByBytes = false;
+        int step = 0;
+        // single loop exit: the while condition carries the time and read
+        // budgets, the body itself never breaks or continues; the checks run
+        // before the read exactly as the straight-line walk did
+        while(step < theOrder.length && !cutByTime && !cutByBytes) {
+            visitedFiles++;
+            final int budget = budgetCut(theDeadline, readBytes);
+            if(budget == 0) {
+                cutByTime = true;
+            } else if(budget == 1) {
+                cutByBytes = true;
+            } else {
+                final int[] foundHit = new int[1];
+                final long read = scanOne(theIndex, theQuery, theOrder, theNameScores,
+                    step, theTop, foundHit);
+                readBytes += read;
+                if(foundHit[0] > 0) {
+                    scannedFiles++;
+                }
+            }
+            step++;
+        }
+        return new ScanTally(scannedFiles, visitedFiles, cutByTime, cutByBytes);
+    }
+
+    /**
+     * Decides whether the walk may read the file at the given step.
+     *
+     * @param theDeadline instant the time budget expires
+     * @param theReadBytes bytes already read by the walk
+     * @return 0 when the time budget is spent, 1 when the read budget is
+     *         spent, 2 when the file may be read
+     */
+    private int budgetCut(final long theDeadline, final long theReadBytes) {
+        if(clock.nanoTime() > theDeadline) {
+            return 0;
+        }
+        if(theReadBytes >= readBudgetBytes) {
+            return 1;
+        }
+        return 2;
+    }
+
+    /**
+     * Reads one index entry and offers its hit to the bounded queue.
+     *
+     * @param theIndex index snapshot
+     * @param theQuery tokens of the query
+     * @param theOrder positions of the index, sorted by path score
+     * @param theNameScores path score per index position
+     * @param theStep current position in the order
+     * @param theTop bounded queue of the best hits found
+     * @param theFoundHit single-slot flag, set to 1 when the file produced a
+     *                    hit that entered the queue
+     * @return bytes added by this file (0 when it was skipped or unreadable)
+     */
+    private long scanOne(final List<SourceIndex.Entry> theIndex, final List<String> theQuery,
+        final Integer[] theOrder, final int[] theNameScores, final int theStep,
+        final PriorityQueue<Hit> theTop, final int[] theFoundHit) {
+        final int index = theOrder[theStep].intValue();
+        final SourceIndex.Entry entry = theIndex.get(index);
+        final long size = fileSize(entry);
+        if(size < 0L || size > maxFileBytes) {
+            return 0L;
+        }
+        Hit hit = null;
+        try {
+            hit = scanFile(entry, theNameScores[index], theQuery);
+        } catch (final IOException ex) {
+            // unreadable file, skip
+        }
+        if(hit == null) {
+            return size;
+        }
+        theFoundHit[0] = 1;
+        theTop.offer(hit);
+        if(theTop.size() > maxResults) {
+            theTop.poll();
+        }
+        return size;
+    }
+
+    /** Scan counters feeding the coverage note of the result. */
+    private record ScanTally(int scannedFiles, int visitedFiles, boolean cutByTime,
+        boolean cutByBytes) {
+    }
+
+    /**
+     * @param theEntry index entry to stat
+     * @return size of the file, -1 when it cannot be read (an unreadable file
+     *         is skipped)
+     */
+    private static long fileSize(final SourceIndex.Entry theEntry) {
+        try {
+            return Files.size(theEntry.location());
+        } catch (final IOException ex) {
+            // unreadable file, skip
+            return -1L;
+        }
+    }
+
+    /**
+     * Reads one file and scores it; the name score keeps a path-only match
+     * alive even when the content scores nothing.
+     *
+     * @param theEntry index entry of the file
+     * @param theNameScore path score of the entry
+     * @param theTokens query tokens
+     * @return the hit, {@code null} when the file matches neither name nor text
+     */
+    private static Hit scanFile(final SourceIndex.Entry theEntry, final int theNameScore,
+        final List<String> theTokens) throws IOException {
+        final String content = new String(Files.readAllBytes(theEntry.location()),
+            StandardCharsets.UTF_8);
+        final String[] lines = content.split("\r?\n", -1);
+        final ContentScorer.LineMatch match = ContentScorer.bestLine(lines, theTokens);
+        if(match.score() == 0 && theNameScore == 0) {
+            return null;
+        }
+        final int score = theNameScore + match.score();
+        final String excerpt = match.lineIndex() < 0 ? ""
+            : SnippetRenderer.excerpt(lines, match.lineIndex());
+        return new Hit(theEntry, score, match.lineIndex() + 1, excerpt);
     }
 
     /**

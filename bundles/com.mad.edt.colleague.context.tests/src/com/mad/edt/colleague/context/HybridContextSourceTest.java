@@ -79,8 +79,15 @@ class HybridContextSourceTest {
 
     @Test
     void filesAlreadyQuotedByTheKeywordSectionAreSkipped() {
-        final String keyword = "File: src/a.bsl (line 3)\nkeyword code\n\n"
-            + "File: src/c.bsl\npath only\n\n\n";
+        final String keyword = """
+            File: src/a.bsl (line 3)
+            keyword code
+
+            File: src/c.bsl
+            path only
+
+
+            """;
         final HybridContextSource source = new HybridContextSource(
             new FixedKeyword(keyword),
             () -> new StubIndex(List.of(

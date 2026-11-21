@@ -5,9 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
@@ -91,6 +89,9 @@ public class ColleagueView extends ViewPart {
     /** Cap on semantic passes so dead endpoints cannot keep the loop alive forever. */
     private static final int SEMANTIC_MAX_PASSES = 4;
 
+    /** Directory name of the agent definitions and the page id for it. */
+    private static final String AGENTS_DIR = "agents";
+
     private static final String SYSTEM_PROMPT =
         "You are a helpful assistant embedded in an IDE for the 1C:Enterprise platform."
             + " Answer concisely in the language of the question.";
@@ -120,7 +121,6 @@ public class ColleagueView extends ViewPart {
 
     /** Conversations keyed by contact; rebuilt when a saved endpoint moves. */
     private final ChatSessionRegistry ourSessions = new ChatSessionRegistry();
-    private final Map<String, ChatPanel> ourPanels = new HashMap<>();
 
     private Composite ourRoot;
     private Composite ourAgentsArea;
@@ -322,7 +322,7 @@ public class ColleagueView extends ViewPart {
         // the whole-project index waits out its grace period as a system job:
         // reindexing competes with the user's builds, so it must not crowd
         // out the first minutes of the session (see StartupDeferral)
-        StartupDeferral.scheduleIndexJob((monitor) -> {
+        StartupDeferral.scheduleIndexJob(monitor -> {
             final int files = ourCodeSearch.reindex(monitor);
             ColleagueLog.info("[colleague] context index ready: " + files + " files");
             if(ourSemantic != null) {
@@ -478,11 +478,18 @@ public class ColleagueView extends ViewPart {
             final int tabs = ourTabFolder == null || ourTabFolder.isDisposed()
                 ? -1 : ourTabFolder.getItemCount();
             ColleagueLog.info("[colleague] mobile page -> " + PageSwitchNote.describe(
-                thePage == ourTabsArea ? "chat tabs"
-                    : thePage == ourAgentsArea ? "agents" : "contacts",
+                thePage == ourTabsArea ? "chat tabs" : pageNameOf(thePage),
                 theCause, tabs, theDetail)
                 + " stack=" + ourMobileStack.getSize() + " page=" + thePage.getSize());
         }
+    }
+
+    /**
+     * @param thePage page shown by the mobile switch
+     * @return the short page name used in the switch note
+     */
+    private String pageNameOf(final Composite thePage) {
+        return thePage == ourAgentsArea ? AGENTS_DIR : "contacts";
     }
 
     @Override
@@ -633,48 +640,95 @@ public class ColleagueView extends ViewPart {
             showNoContactsNotice();
             return;
         }
-        ContactsPanel.Contact preferred = null;
-        // a pair remembered from a previous session wins while it still
-        // exists among the available contacts; a stale pair (removed model)
-        // falls back to the provider default-model choice below
+        ourDefaultContactCache = choosePreferredContact(theAvailable);
+        // no auto-open on cold start any more: the agents page is where the
+        // view lands, and a chat begins only when the user picks an agent
+        maybeRunSelfTest();
+    }
+
+    /**
+     * Picks the contact to cache as the default one: a pair remembered from a
+     * previous session wins while it still exists among the available contacts;
+     * a stale pair (removed model) falls back to the provider default-model
+     * choice - the default provider's own default model, since reading the
+     * model off the built-in local provider instead made the preference follow
+     * a provider the user may not even have as default, so the first model of
+     * the right provider won by listing order.
+     *
+     * @param theAvailable contacts the provider list produced
+     * @return the contact to cache, never null for a non-empty list
+     */
+    private static ContactsPanel.Contact choosePreferredContact(
+        final List<ContactsPanel.Contact> theAvailable) {
         final String lastProvider = com.mad.edt.colleague.llm.ProviderStore.lastUsedProvider();
         final String lastModel = com.mad.edt.colleague.llm.ProviderStore.lastUsedModel();
-        if(!lastProvider.isEmpty() && !lastModel.isEmpty()) {
-            for(final ContactsPanel.Contact contact : theAvailable) {
-                if(contact.getProviderId().equals(lastProvider)
-                    && contact.getModel().equals(lastModel)) {
+        final ContactsPanel.Contact remembered =
+            findRememberedContact(theAvailable, lastProvider, lastModel);
+        final ContactsPanel.Contact preferred = findDefaultContact(theAvailable, remembered);
+        return preferred == null ? theAvailable.get(0) : preferred;
+    }
+
+    /**
+     * @param theAvailable contacts the provider list produced
+     * @param theLastProvider provider remembered from a previous session
+     * @param theLastModel model remembered from a previous session
+     * @return the contact matching the remembered pair, null when the pair is
+     *         empty or no longer among the available contacts
+     */
+    private static ContactsPanel.Contact findRememberedContact(
+        final List<ContactsPanel.Contact> theAvailable, final String theLastProvider,
+        final String theLastModel) {
+        if(theLastProvider.isEmpty() || theLastModel.isEmpty()) {
+            return null;
+        }
+        for(final ContactsPanel.Contact contact : theAvailable) {
+            if(matchesPair(contact, theLastProvider, theLastModel)) {
+                return contact;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param theContact contact to test
+     * @param theProviderId provider of the pair
+     * @param theModel model of the pair
+     * @return whether the contact carries exactly this provider-model pair
+     */
+    private static boolean matchesPair(final ContactsPanel.Contact theContact,
+        final String theProviderId, final String theModel) {
+        return theContact.getProviderId().equals(theProviderId)
+            && theContact.getModel().equals(theModel);
+    }
+
+    /**
+     * Applies the provider default-model choice over the remembered contact:
+     * the default contact is the default provider's own default model.
+     *
+     * @param theAvailable contacts the provider list produced
+     * @param theRemembered contact matching the remembered pair, possibly null
+     * @return the contact of the default choice, null when the default
+     *         provider has no contacts at all
+     */
+    private static ContactsPanel.Contact findDefaultContact(
+        final List<ContactsPanel.Contact> theAvailable, final ContactsPanel.Contact theRemembered) {
+        ContactsPanel.Contact preferred = theRemembered;
+        final String defaultId = LLMSettings.getDefaultProviderId();
+        final com.mad.edt.colleague.llm.ProviderConfig defaultConfig =
+            LLMSettings.getConfig(defaultId);
+        final String configured = defaultConfig == null ? null : defaultConfig.getDefaultModel();
+        for(final ContactsPanel.Contact contact : theAvailable) {
+            if(contact.getProviderId().equals(defaultId)) {
+                if(preferred == null) {
+                    preferred = contact;
+                }
+                if(contact.getModel().equals(configured)) {
                     preferred = contact;
                     break;
                 }
             }
         }
-        final String defaultId = LLMSettings.getDefaultProviderId();
-        // the default contact is the default provider's own default model:
-        // reading the model off the built-in local provider instead made the
-        // preference follow a provider the user may not even have as default,
-        // so the first model of the right provider won by listing order
-        final com.mad.edt.colleague.llm.ProviderConfig defaultConfig =
-            LLMSettings.getConfig(defaultId);
-        final String configured = defaultConfig == null ? null : defaultConfig.getDefaultModel();
-        for(final ContactsPanel.Contact contact : theAvailable) {
-            if(!contact.getProviderId().equals(defaultId)) {
-                continue;
-            }
-            if(preferred == null) {
-                preferred = contact;
-            }
-            if(contact.getModel().equals(configured)) {
-                preferred = contact;
-                break;
-            }
-        }
-        if(preferred == null) {
-            preferred = theAvailable.get(0);
-        }
-        ourDefaultContactCache = preferred;
-        // no auto-open on cold start any more: the agents page is where the
-        // view lands, and a chat begins only when the user picks an agent
-        maybeRunSelfTest();
+        return preferred;
     }
 
     private void showNoContactsNotice() {
@@ -816,7 +870,7 @@ public class ColleagueView extends ViewPart {
             final List<AgentProfile> merged;
             try {
                 merged = AgentCatalog.load(personalAgentsDirectory(),
-                    colleagueDirectory("agents"));
+                    colleagueDirectory(AGENTS_DIR));
             } catch (final java.io.IOException ex) {
                 ColleagueLog.error("[colleague] agents directories unreadable: "
                     + ex.getMessage());
@@ -837,7 +891,7 @@ public class ColleagueView extends ViewPart {
      *         simply contributes no profiles to the merge
      */
     private static java.io.File personalAgentsDirectory() {
-        return Paths.get(System.getProperty("user.home"), ".colleague", "agents")
+        return Paths.get(System.getProperty("user.home"), ".colleague", AGENTS_DIR)
             .toFile();
     }
 
@@ -866,7 +920,7 @@ public class ColleagueView extends ViewPart {
             return personalAgentsDirectory();
         }
         if("project".equals(theLevel)) {
-            return colleagueDirectoryForWriting("agents");
+            return colleagueDirectoryForWriting(AGENTS_DIR);
         }
         return null;
     }
@@ -900,7 +954,7 @@ public class ColleagueView extends ViewPart {
      * next start.
      */
     private void seedDefaultAgent() {
-        final java.io.File dir = colleagueDirectoryForWriting("agents");
+        final java.io.File dir = colleagueDirectoryForWriting(AGENTS_DIR);
         if(dir == null) {
             return;
         }
@@ -952,15 +1006,14 @@ public class ColleagueView extends ViewPart {
      */
     private java.io.File colleagueDirectory(final String theName) {
         for(final IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
-            if(!project.isOpen()) {
-                continue;
+            if(project.isOpen()) {
+                final java.io.File dir = project.getLocation()
+                    .append(".colleague/" + theName).toFile();
+                if(dir.isDirectory()) {
+                    return dir;
+                }
+                break; // the first open project decides, closed ones never host it
             }
-            final java.io.File dir = project.getLocation()
-                .append(".colleague/" + theName).toFile();
-            if(dir.isDirectory()) {
-                return dir;
-            }
-            break;
         }
         return null;
     }
@@ -1184,8 +1237,8 @@ public class ColleagueView extends ViewPart {
         final List<CTabItem> stale = new ArrayList<>();
         for(final CTabItem item : ourTabFolder.getItems()) {
             final Object data = item.getData();
-            if(data instanceof ChatPanel) {
-                final ChatSession session = ((ChatPanel)data).getSession();
+            if(data instanceof ChatPanel panel) {
+                final ChatSession session = panel.getSession();
                 if(!ourSessions.isCurrent(session,
                     LLMSettings.getConfig(session.getProvider().getId()))) {
                     stale.add(item);
@@ -1399,7 +1452,7 @@ public class ColleagueView extends ViewPart {
         String overview = ourOverview == null ? "" : ourOverview.get();
         if(overview.isEmpty() && ourOverview != null && !ourOverviewStale) {
             ourOverviewStale = true;
-            Job.create("Colleague: configuration picture", (monitor) -> {
+            Job.create("Colleague: configuration picture", monitor -> {
                 ourOverview.rebuild();
                 ourOverviewStale = false;
                 return Status.OK_STATUS;
@@ -1474,6 +1527,9 @@ public class ColleagueView extends ViewPart {
         };
     }
 
+    // java:S6126 kept suppressed: the selftest context has no trailing newline,
+    // a text block would append one and change the staged context bytes.
+    @SuppressWarnings("java:S6126")
     private void maybeRunSelfTest() {
         if(!Boolean.getBoolean("colleague.ui.selftest") || ourSelfTestDone) {
             return;

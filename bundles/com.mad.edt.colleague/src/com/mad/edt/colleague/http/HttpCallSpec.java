@@ -11,6 +11,9 @@ import java.util.Map;
  */
 public final class HttpCallSpec {
 
+    /** Media type every JSON transport call negotiates. */
+    private static final String JSON_MEDIA_TYPE = "application/json";
+
     private final String url;
     private final String method;
     private final String jsonBody;
@@ -35,7 +38,7 @@ public final class HttpCallSpec {
      */
     public static HttpCallSpec getJson(final String theUrl, final int theTimeoutMs) {
         final Map<String, String> headers = new LinkedHashMap<>();
-        headers.put("Accept", "application/json");
+        headers.put("Accept", JSON_MEDIA_TYPE);
         return new HttpCallSpec(theUrl, "GET", null, headers, theTimeoutMs, BodyMode.BUFFERED);
     }
 
@@ -76,8 +79,8 @@ public final class HttpCallSpec {
     private static HttpCallSpec json(final String theMethod, final String theUrl,
         final String theJsonBody, final int theTimeoutMs, final BodyMode theMode) {
         final Map<String, String> headers = new LinkedHashMap<>();
-        headers.put("Content-Type", "application/json");
-        headers.put("Accept", "application/json");
+        headers.put("Content-Type", JSON_MEDIA_TYPE);
+        headers.put("Accept", JSON_MEDIA_TYPE);
         return new HttpCallSpec(theUrl, theMethod, theJsonBody, headers, theTimeoutMs, theMode);
     }
 

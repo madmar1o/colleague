@@ -134,97 +134,177 @@ public final class AgentLoop {
      */
     public AgentAnswer run(final List<ChatMessage> theConversation) throws LLMException {
         final List<ChatMessage> messages = new ArrayList<>(theConversation);
+        final List<ToolSpec> specs = toolSpecs();
 
+        int[] steps = {0};
+        int executed = 0;
+        while(steps[0] < maxSteps) {
+            steps[0]++;
+            if(cancellation.isCancelled()) {
+                return new AgentAnswer("", steps[0], executed, false);
+            }
+            final Attempt attempt = new Attempt(model != null ? model : defaultModel(),
+                messages, specs);
+            final ChatResult result = runRound(attempt, steps);
+            if(!result.wantsToolCall()) {
+                observer.onRound(steps[0], 0);
+                return new AgentAnswer(finalText(result), steps[0], executed, true);
+            }
+            observer.onRound(steps[0], result.getToolCalls().size());
+
+            messages.add(ChatMessage.assistantToolCalls(result.getContent(), result.getToolCalls()));
+            executed += runToolRound(result.getToolCalls(), steps[0], messages);
+        }
+        // the budget died mid-work: the closing round-trip turns the
+        // executed-but-unanswered tool results into a summary the user can
+        // read, instead of a bare exhaustion note. The interrupted
+        // conversation travels with the answer: the caller can offer a
+        // continuation over exactly this history, where the loop left off
+        String closing = closingSummary(messages, steps[0]);
+        return new AgentAnswer(closing.isEmpty()
+            ? "Step budget exhausted after " + steps[0] + " round-trips" : closing,
+            steps[0], executed, false, messages);
+    }
+
+    /**
+     * Runs one round-trip with its repairs: a transient endpoint failure is
+     * retried once identically, an empty turn is retried once without the
+     * reasoning pass; both repairs pay from the step budget.
+     *
+     * @param theAttempt model, messages and tool specs of the round
+     * @param theSteps round-trips spent so far, the holder is advanced by the
+     *             repairs
+     * @return the round-trip result
+     * @throws LLMException when the round fails and no repair applies
+     */
+    private ChatResult runRound(final Attempt theAttempt, final int[] theSteps)
+        throws LLMException {
+        ChatResult result;
+        try {
+            result = streamedRound(buildRoundRequest(theAttempt,
+                provider.supportsThinking(theAttempt.model()), ROUND_TRIP_OUTPUT_TOKENS));
+        } catch (final LLMException ex) {
+            final ChatResult repaired = repairTransientFailure(ex, theAttempt, theSteps[0]);
+            if(repaired == null) {
+                throw ex;
+            }
+            // the repair attempt pays from the step budget
+            theSteps[0]++;
+            result = repaired;
+        }
+        if(isEmptyTurn(result) && theSteps[0] < maxSteps) {
+            // the round-trip ended with neither text nor a call: the
+            // reasoning pass ate the generation budget before producing an
+            // action. One repair asks the same task without thinking; if
+            // that stays empty too, the model is not fixable this way and
+            // chasing it further only burns the budget
+            theSteps[0]++;
+            result = repairEmptyTurn(theAttempt);
+        }
+        return result;
+    }
+
+    /**
+     * @return the specs of every registered tool executor, in registration order
+     */
+    private List<ToolSpec> toolSpecs() {
         final List<ToolSpec> specs = new ArrayList<>();
         for(final IToolExecutor executor : executors.values()) {
             specs.add(executor.getSpec());
         }
+        return specs;
+    }
 
-        int steps = 0;
-        int executed = 0;
-        while(steps < maxSteps) {
-            steps++;
-            if(cancellation.isCancelled()) {
-                return new AgentAnswer("", steps, executed, false);
-            }
-            final String roundModel = model != null ? model : defaultModel();
-            final ChatRequest.Builder request = ChatRequest.builder(roundModel);
-            for(final ChatMessage message : messages) {
-                request.addMessage(message);
-            }
-            request.tools(specs);
-            // the reasoning pass is where the tool-call syntax of local
-            // reasoning models reliably appears; suppressing it on these
-            // models makes them describe calls in prose instead of making
-            // them. a model without the capability rejects the whole round,
-            // so the provider - the side that learns from that rejection -
-            // answers whether the pass may be requested at all
-            request.think(provider.supportsThinking(roundModel));
-            request.maxTokens(ROUND_TRIP_OUTPUT_TOKENS);
-            request.cancellation(cancellation);
-
-            ChatResult result;
-            try {
-                result = streamedRound(request.build());
-            } catch (final LLMException ex) {
-                // a local model server can lose only its generator process and
-                // reload it on the next request: for that failure alone one
-                // identical repair call is worth a full round-trip of the budget
-                if(!ex.isTransient() || cancellation.isCancelled() || steps >= maxSteps) {
-                    throw ex;
-                }
-                steps++;
-                result = streamedRound(request.build());
-            }
-            if(isEmptyTurn(result) && steps < maxSteps) {
-                // the round-trip ended with neither text nor a call: the
-                // reasoning pass ate the generation budget before producing an
-                // action. One repair asks the same task without thinking; if
-                // that stays empty too, the model is not fixable this way and
-                // chasing it further only burns the budget
-                steps++;
-                request.think(false);
-                request.maxTokens(REPAIR_ROUND_OUTPUT_TOKENS);
-                result = streamedRound(request.build());
-            }
-            if(!result.wantsToolCall()) {
-                observer.onRound(steps, 0);
-                return new AgentAnswer(finalText(result), steps, executed, true);
-            }
-            observer.onRound(steps, result.getToolCalls().size());
-
-            messages.add(ChatMessage.assistantToolCalls(result.getContent(), result.getToolCalls()));
-            executed += runToolRound(result.getToolCalls(), steps, messages);
+    /**
+     * @param theAttempt model, messages and tool specs of the round
+     * @param theThink whether the reasoning pass is requested
+     * @param theMaxTokens output budget of the round
+     * @return the request of one round-trip
+     */
+    private ChatRequest buildRoundRequest(final Attempt theAttempt, final boolean theThink,
+        final int theMaxTokens) {
+        // the reasoning pass is where the tool-call syntax of local
+        // reasoning models reliably appears; suppressing it on these
+        // models makes them describe calls in prose instead of making
+        // them. a model without the capability rejects the whole round,
+        // so the provider - the side that learns from that rejection -
+        // answers whether the pass may be requested at all
+        final ChatRequest.Builder request = ChatRequest.builder(theAttempt.model());
+        for(final ChatMessage message : theAttempt.messages()) {
+            request.addMessage(message);
         }
-        // the budget died mid-work: one closing round-trip without tools
-        // turns the executed-but-unanswered tool results into a summary the
-        // user can read, instead of a bare exhaustion note. The interrupted
-        // conversation travels with the answer: the caller can offer a
-        // continuation over exactly this history, where the loop left off
-        String closing = "";
-        if(!cancellation.isCancelled()) {
-            try {
-                final ChatRequest.Builder wrap =
-                    ChatRequest.builder(model != null ? model : defaultModel());
-                for(final ChatMessage message : messages) {
-                    wrap.addMessage(message);
-                }
-                wrap.think(false);
-                wrap.maxTokens(REPAIR_ROUND_OUTPUT_TOKENS);
-                wrap.cancellation(cancellation);
-                final ChatResult wrapResult = streamedRound(wrap.build());
-                observer.onRound(steps + 1, 0);
-                if(!wrapResult.wantsToolCall()) {
-                    closing = finalText(wrapResult);
-                }
-            } catch (final LLMException ex) {
-                // the summary is a bonus over the note: an endpoint failing
-                // here must not lose the partial work already executed
-            }
+        request.tools(theAttempt.specs());
+        request.think(theThink);
+        request.maxTokens(theMaxTokens);
+        request.cancellation(cancellation);
+        return request.build();
+    }
+
+    /**
+     * A local model server can lose only its generator process and reload it
+     * on the next request: for that failure alone one identical repair call
+     * is worth a full round-trip of the budget.
+     *
+     * @param theFailure the failure of the first attempt
+     * @param theAttempt model, messages and tool specs of the round
+     * @param theSteps round-trips spent so far
+     * @return the result of the identical repair call, null when the failure
+     *         is not repairable and the original one must be rethrown
+     * @throws LLMException when the repair call itself fails
+     */
+    private ChatResult repairTransientFailure(final LLMException theFailure,
+        final Attempt theAttempt, final int theSteps) throws LLMException {
+        if(!theFailure.isTransient() || cancellation.isCancelled() || theSteps >= maxSteps) {
+            return null;
         }
-        return new AgentAnswer(closing.isEmpty()
-            ? "Step budget exhausted after " + steps + " round-trips" : closing,
-            steps, executed, false, messages);
+        return streamedRound(buildRoundRequest(theAttempt,
+            provider.supportsThinking(theAttempt.model()), ROUND_TRIP_OUTPUT_TOKENS));
+    }
+
+    /**
+     * Asks the same task once more without the reasoning pass and with a
+     * smaller output budget: the round-trip ended with neither text nor a
+     * call, the reasoning pass ate the generation budget before producing an
+     * action.
+     *
+     * @param theAttempt model, messages and tool specs of the round
+     * @return the result of the thinking-free repair round
+     * @throws LLMException when the repair call itself fails
+     */
+    private ChatResult repairEmptyTurn(final Attempt theAttempt) throws LLMException {
+        return streamedRound(buildRoundRequest(theAttempt, Boolean.FALSE,
+            REPAIR_ROUND_OUTPUT_TOKENS));
+    }
+
+    /**
+     * One closing round-trip without tools over the interrupted conversation.
+     *
+     * @param theMessages the interrupted conversation
+     * @param theSteps round-trips spent by the loop
+     * @return the closing text, empty when it cannot run or stays tool-calling
+     */
+    private String closingSummary(final List<ChatMessage> theMessages, final int theSteps) {
+        if(cancellation.isCancelled()) {
+            return "";
+        }
+        try {
+            final ChatRequest wrap = buildRoundRequest(
+                new Attempt(model != null ? model : defaultModel(), theMessages, List.of()),
+                false, REPAIR_ROUND_OUTPUT_TOKENS);
+            final ChatResult wrapResult = streamedRound(wrap);
+            observer.onRound(theSteps + 1, 0);
+            if(!wrapResult.wantsToolCall()) {
+                return finalText(wrapResult);
+            }
+        } catch (final LLMException ex) {
+            // the summary is a bonus over the note: an endpoint failing
+            // here must not lose the partial work already executed
+        }
+        return "";
+    }
+
+    /** Model, messages and tool specs shared by the rounds of one run. */
+    private record Attempt(String model, List<ChatMessage> messages, List<ToolSpec> specs) {
     }
 
     /**

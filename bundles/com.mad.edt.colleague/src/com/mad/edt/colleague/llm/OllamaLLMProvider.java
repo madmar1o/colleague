@@ -28,6 +28,10 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
      * the model, never guessed from the model name.
      */
     private static final String THINKING_CAPABILITY = "thinking";
+    /** Ollama chat payload field names. */
+    private static final String CONTENT = "content";
+    private static final String TOOL_CALLS = "tool_calls";
+    private static final String MODEL = "model";
 
     /** Capability name the runtime reports for a prompt-completing model. */
     private static final String COMPLETION_CAPABILITY = "completion";
@@ -103,14 +107,14 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
         List<ToolCall> calls = List.of();
         final JsonObject message = response.getAsJsonObject("message");
         if(message != null) {
-            content = textOrNull(message, "content");
+            content = textOrNull(message, CONTENT);
             if(content == null) {
                 content = "";
             }
-            thinking = textOrNull(message, "thinking");
-            calls = parseToolCalls(message.getAsJsonArray("tool_calls"));
+            thinking = textOrNull(message, THINKING_CAPABILITY);
+            calls = parseToolCalls(message.getAsJsonArray(TOOL_CALLS));
         }
-        return new ChatResult(content, thinking, textOrNull(response, "model"),
+        return new ChatResult(content, thinking, textOrNull(response, MODEL),
             textOrNull(response, "done_reason"),
             intOrZero(response, "prompt_eval_count"), intOrZero(response, "eval_count"), calls);
     }
@@ -145,58 +149,81 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
         final Consumer<String> theOnContent, final Consumer<String> theOnThinking,
         final Boolean theThink) throws LLMException {
         final JsonObject body = buildBody(theRequest, true, theThink);
-        final StringBuilder content = new StringBuilder();
-        final StringBuilder thinking = new StringBuilder();
-        final String[] modelName = new String[1];
-        final String[] doneReason = new String[1];
-        final int[] promptTokens = new int[1];
-        final int[] completionTokens = new int[1];
-        final JsonArray lastToolCalls = new JsonArray();
+        final RoundState state = new RoundState();
 
         try {
             postJsonStream("/api/chat", body, getConfig().getReadTimeoutMs(),
-                theRequest.getCancellation(), event -> {
-            final JsonObject message = event.getAsJsonObject("message");
-            if(message != null) {
-                final String thought = textOrNull(message, "thinking");
-                if(thought != null && !thought.isEmpty()) {
-                    thinking.append(thought);
-                    theOnThinking.accept(thought);
-                }
-                final String chunk = textOrNull(message, "content");
-                if(chunk != null && !chunk.isEmpty()) {
-                    content.append(chunk);
-                    theOnContent.accept(chunk);
-                }
-                final JsonArray calls = message.getAsJsonArray("tool_calls");
-                if(calls != null && !calls.isEmpty()) {
-                    lastToolCalls.addAll(calls);
-                }
-            }
-            if(event.has("model")) {
-                modelName[0] = textOrNull(event, "model");
-            }
-            if(event.get("done") != null && event.get("done").getAsBoolean()) {
-                doneReason[0] = textOrNull(event, "done_reason");
-                promptTokens[0] = intOrZero(event, "prompt_eval_count");
-                completionTokens[0] = intOrZero(event, "eval_count");
-            }
-            });
+                theRequest.getCancellation(), event -> applyEvent(event, state, theOnContent, theOnThinking));
         } catch (final TurnCancelledException ex) {
             // the user stopped this turn: the partial text produced so far is
             // kept, and the caller recognizes the stop via its own flag
         }
 
-        return new ChatResult(content.toString(),
-            thinking.length() == 0 ? null : thinking.toString(),
-            modelName[0], doneReason[0],
-            promptTokens[0], completionTokens[0], parseToolCalls(lastToolCalls));
+        return new ChatResult(state.content.toString(),
+            state.thinking.length() == 0 ? null : state.thinking.toString(),
+            state.modelName[0], state.doneReason[0],
+            state.promptTokens[0], state.completionTokens[0], parseToolCalls(state.lastToolCalls));
+    }
+
+    /**
+     * Folds one streamed chat event into the accumulators of the round.
+     *
+     * @param theEvent parsed event object
+     * @param theState accumulators of the round
+     * @param theOnContent receives answer chunks
+     * @param theOnThinking receives reasoning chunks
+     */
+    private static void applyEvent(final JsonObject theEvent, final RoundState theState,
+        final Consumer<String> theOnContent, final Consumer<String> theOnThinking) {
+        final JsonObject message = theEvent.getAsJsonObject("message");
+        if(message != null) {
+            final String thought = textOrNull(message, THINKING_CAPABILITY);
+            if(thought != null && !thought.isEmpty()) {
+                theState.thinking.append(thought);
+                theOnThinking.accept(thought);
+            }
+            final String chunk = textOrNull(message, CONTENT);
+            if(chunk != null && !chunk.isEmpty()) {
+                theState.content.append(chunk);
+                theOnContent.accept(chunk);
+            }
+            final JsonArray calls = message.getAsJsonArray(TOOL_CALLS);
+            if(calls != null && !calls.isEmpty()) {
+                theState.lastToolCalls.addAll(calls);
+            }
+        }
+        if(theEvent.has(MODEL)) {
+            theState.modelName[0] = textOrNull(theEvent, MODEL);
+        }
+        if(theEvent.get("done") != null && theEvent.get("done").getAsBoolean()) {
+            theState.doneReason[0] = textOrNull(theEvent, "done_reason");
+            theState.promptTokens[0] = intOrZero(theEvent, "prompt_eval_count");
+            theState.completionTokens[0] = intOrZero(theEvent, "eval_count");
+        }
+    }
+
+    /** Mutable accumulators of one streamed round. */
+    private static final class RoundState {
+
+        private final StringBuilder content = new StringBuilder();
+
+        private final StringBuilder thinking = new StringBuilder();
+
+        private final String[] modelName = new String[1];
+
+        private final String[] doneReason = new String[1];
+
+        private final int[] promptTokens = new int[1];
+
+        private final int[] completionTokens = new int[1];
+
+        private final JsonArray lastToolCalls = new JsonArray();
     }
 
     @Override
     public void warmModel(final String theModel) throws LLMException {
         final JsonObject body = new JsonObject();
-        body.addProperty("model", resolveModel(theModel));
+        body.addProperty(MODEL, resolveModel(theModel));
         // buffered answer, one JSON document: the point is the load itself,
         // not the generation, so the request carries no prompt at all
         body.addProperty("stream", Boolean.FALSE);
@@ -272,7 +299,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
      */
     private Set<String> readCapabilities(final String theModel) {
         final JsonObject body = new JsonObject();
-        body.addProperty("model", theModel);
+        body.addProperty(MODEL, theModel);
         try {
             final JsonObject answer = postJson("/api/show", body, PING_TIMEOUT_MS);
             final JsonArray reported = answer.getAsJsonArray("capabilities");
@@ -305,7 +332,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
             return false;
         }
         final String message = theError.getMessage();
-        return message != null && message.toLowerCase(Locale.ROOT).contains("thinking");
+        return message != null && message.toLowerCase(Locale.ROOT).contains(THINKING_CAPABILITY);
     }
 
     /**
@@ -412,7 +439,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
     private static int estimatedPromptTokens(final JsonArray theMessages) {
         int characters = 0;
         for(final JsonElement entry : theMessages) {
-            final String content = textOrNull(entry.getAsJsonObject(), "content");
+            final String content = textOrNull(entry.getAsJsonObject(), CONTENT);
             if(content != null) {
                 characters += content.length();
             }
@@ -423,7 +450,7 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
     private JsonObject buildBody(final ChatRequest theRequest, final boolean theStreaming,
         final Boolean theThink) throws LLMException {
         final JsonObject body = new JsonObject();
-        body.addProperty("model", resolveModel(theRequest.getModel()));
+        body.addProperty(MODEL, resolveModel(theRequest.getModel()));
         body.addProperty("stream", Boolean.valueOf(theStreaming));
         appendKeepAlive(body);
         if(theThink != null) {
@@ -432,40 +459,10 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
         if(theRequest.getTemperature() != null) {
             body.addProperty("temperature", theRequest.getTemperature().doubleValue());
         }
-        if(!theRequest.getTools().isEmpty()) {
-            final JsonArray tools = new JsonArray();
-            for(final JsonObject tool : ToolSpec.toToolArray(theRequest.getTools())) {
-                tools.add(tool);
-            }
-            body.add("tools", tools);
-        }
-
+        appendTools(body, theRequest);
         final JsonArray messages = new JsonArray();
         for(final ChatMessage message : theRequest.getMessages()) {
-            final JsonObject entry = new JsonObject();
-            entry.addProperty("role", message.getRole());
-            if(message.hasToolCalls()) {
-                final JsonArray calls = new JsonArray();
-                for(final ToolCall call : message.getToolCalls()) {
-                    final JsonObject function = new JsonObject();
-                    function.addProperty("name", call.getName());
-                    function.add("arguments", parseArguments(call.getArgumentsJson()));
-                    final JsonObject wrapper = new JsonObject();
-                    if(call.getId() != null) {
-                        wrapper.addProperty("id", call.getId());
-                    }
-                    wrapper.add("function", function);
-                    calls.add(wrapper);
-                }
-                entry.add("tool_calls", calls);
-                entry.addProperty("content", message.getContent());
-            } else {
-                entry.addProperty("content", message.getContent());
-                if(message.getToolCallId() != null) {
-                    entry.addProperty("tool_call_id", message.getToolCallId());
-                }
-            }
-            messages.add(entry);
+            appendMessageEntry(messages, message);
         }
         body.add("messages", messages);
         final JsonObject options = new JsonObject();
@@ -480,6 +477,60 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
             body.add("options", options);
         }
         return body;
+    }
+
+    /**
+     * @param theBody request body being built
+     * @param theRequest chat request
+     */
+    private static void appendTools(final JsonObject theBody, final ChatRequest theRequest) {
+        if(theRequest.getTools().isEmpty()) {
+            return;
+        }
+        final JsonArray tools = new JsonArray();
+        for(final JsonObject tool : ToolSpec.toToolArray(theRequest.getTools())) {
+            tools.add(tool);
+        }
+        theBody.add("tools", tools);
+    }
+
+    /**
+     * @param theMessages messages array being built
+     * @param theMessage message to append as one entry
+     */
+    private static void appendMessageEntry(final JsonArray theMessages, final ChatMessage theMessage) {
+        final JsonObject entry = new JsonObject();
+        entry.addProperty("role", theMessage.getRole());
+        if(theMessage.hasToolCalls()) {
+            entry.add(TOOL_CALLS, toolCallsArray(theMessage.getToolCalls()));
+            entry.addProperty(CONTENT, theMessage.getContent());
+        } else {
+            entry.addProperty(CONTENT, theMessage.getContent());
+            if(theMessage.getToolCallId() != null) {
+                entry.addProperty("tool_call_id", theMessage.getToolCallId());
+            }
+        }
+        theMessages.add(entry);
+    }
+
+    /**
+     * @param theCalls tool calls of an assistant message
+     * @return their array in the shape the endpoint expects
+     */
+    private static JsonArray toolCallsArray(final List<ToolCall> theCalls) {
+        final JsonArray calls = new JsonArray();
+        for(final ToolCall call : theCalls) {
+            final JsonObject function = new JsonObject();
+            function.addProperty("name", call.getName());
+            function.add("arguments", parseArguments(call.getArgumentsJson()));
+            final JsonObject wrapper = new JsonObject();
+            if(call.getId() != null) {
+                wrapper.addProperty("id", call.getId());
+            }
+            wrapper.add("function", function);
+            calls.add(wrapper);
+        }
+        return calls;
     }
 
     @Override
@@ -516,23 +567,19 @@ public class OllamaLLMProvider extends AbstractHttpLLMProvider {
         for(final JsonElement element : theCalls) {
             final JsonObject call = element.getAsJsonObject();
             final JsonObject function = call.getAsJsonObject("function");
-            if(function == null) {
-                continue;
+            final String name = function == null ? null : textOrNull(function, "name");
+            if(name != null) {
+                final JsonElement arguments = function.get("arguments");
+                final String argumentsJson;
+                if(arguments == null || arguments.isJsonNull()) {
+                    argumentsJson = "{}";
+                } else if(arguments.isJsonPrimitive()) {
+                    argumentsJson = arguments.getAsString();
+                } else {
+                    argumentsJson = arguments.toString();
+                }
+                calls.add(new ToolCall(textOrNull(call, "id"), name, argumentsJson));
             }
-            final JsonElement arguments = function.get("arguments");
-            final String argumentsJson;
-            if(arguments == null || arguments.isJsonNull()) {
-                argumentsJson = "{}";
-            } else if(arguments.isJsonPrimitive()) {
-                argumentsJson = arguments.getAsString();
-            } else {
-                argumentsJson = arguments.toString();
-            }
-            final String name = textOrNull(function, "name");
-            if(name == null) {
-                continue;
-            }
-            calls.add(new ToolCall(textOrNull(call, "id"), name, argumentsJson));
         }
         return calls;
     }

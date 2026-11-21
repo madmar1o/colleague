@@ -331,12 +331,23 @@ final class BridgeBrowser implements PageTransport {
         final JsonObject theArguments) {
         final int seq = ourCallSeq++;
         if(seq < 8 || !"sync".equals(theMethod)) {
-            final String args = theArguments.toString();
             ColleagueLog.info("[colleague] bridge call #" + seq + " via " + theChannel
-                + ": " + theMethod + (args.length() > 1 && ! "{}".equals(args)
-                    ? " " + (args.length() > 160 ? args.substring(0, 160) : args) : ""));
+                + ": " + theMethod + shortArgs(theArguments));
         }
         return seq;
+    }
+
+    /**
+     * @param theArguments call arguments
+     * @return a space-prefixed short form for the trace line, empty when there
+     *         is nothing worth printing
+     */
+    private static String shortArgs(final JsonObject theArguments) {
+        final String args = theArguments.toString();
+        if(args.length() <= 1 || "{}".equals(args)) {
+            return "";
+        }
+        return " " + (args.length() > 160 ? args.substring(0, 160) : args);
     }
 
     /**
@@ -373,10 +384,10 @@ final class BridgeBrowser implements PageTransport {
     }
 
     static JsonObject parseArgs(final Object theArgument) {
-        if(theArgument instanceof String) {
+        if(theArgument instanceof String text) {
             try {
                 final com.google.gson.JsonElement parsed =
-                    JsonParser.parseString((String)theArgument);
+                    JsonParser.parseString(text);
                 if(parsed.isJsonObject()) {
                     return parsed.getAsJsonObject();
                 }

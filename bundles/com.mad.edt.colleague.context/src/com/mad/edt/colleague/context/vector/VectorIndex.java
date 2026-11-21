@@ -304,50 +304,11 @@ public class VectorIndex {
      *             already updated keep their new state
      */
     public UpdateReport update(final List<SourceFile> theFiles) throws IndexFailure {
-        int refreshed = 0;
-        int skipped = 0;
-        int failed = 0;
-        int consecutiveFailures = 0;
+        final PassCounters counters = new PassCounters();
         final List<String> present = new ArrayList<>(theFiles.size());
         for(final SourceFile file : theFiles) {
             present.add(file.location().toString());
-            try {
-                final byte[] content = Files.readAllBytes(file.location());
-                final String hash = sha256(content);
-                final FileState known = states.get(file.location().toString());
-                if(known != null && known.ourHash.equals(hash)) {
-                    skipped++;
-                } else {
-                    awaitQuietGenerator(file);
-                    reembed(file, content, hash);
-                    refreshed++;
-                }
-                consecutiveFailures = 0;
-            } catch (final IOException ex) {
-                failed++;
-                consecutiveFailures++;
-                ColleagueLog.error("[colleague] semantic pass cannot read "
-                    + file.displayPath() + ": " + ex.getMessage());
-                if(consecutiveFailures >= MAX_CONSECUTIVE_FILE_FAILURES) {
-                    throw new IndexFailure("giving up the pass after " + consecutiveFailures
-                        + " consecutive file failures, last: cannot read " + file.displayPath(),
-                        ex);
-                }
-            } catch (final GeneratorBusy ex) {
-                // not one file's bad luck but the whole generator being taken:
-                // counting it per file would only burn one more bounded wait
-                // per remaining file, so the pass ends here and the next
-                // scheduled pass picks up where this one stopped
-                throw ex;
-            } catch (final IndexFailure ex) {
-                failed++;
-                consecutiveFailures++;
-                ColleagueLog.error("[colleague] semantic pass " + ex.getMessage());
-                if(consecutiveFailures >= MAX_CONSECUTIVE_FILE_FAILURES) {
-                    throw new IndexFailure("giving up the pass after " + consecutiveFailures
-                        + " consecutive file failures, last: " + ex.getMessage(), ex);
-                }
-            }
+            updateFile(file, counters);
         }
         int purged = 0;
         for(final String location : new ArrayList<>(states.keySet())) {
@@ -357,7 +318,70 @@ public class VectorIndex {
                 purged++;
             }
         }
-        return new UpdateReport(refreshed, skipped, purged, failed);
+        return new UpdateReport(counters.ourRefreshed, counters.ourSkipped, purged, counters.ourFailed);
+    }
+
+    /** Mutable counters of one {@link #update(List)} pass. */
+    private static final class PassCounters {
+
+        private int ourRefreshed;
+
+        private int ourSkipped;
+
+        private int ourFailed;
+
+        private int ourConsecutiveFailures;
+    }
+
+    /**
+     * Re-embeds one file unless its fingerprint did not move; trouble with
+     * this file costs this file alone, and only a run of consecutive failures
+     * ends the whole pass.
+     *
+     * @param theFile current source file
+     * @param theCounters counters of the pass
+     * @throws IndexFailure when consecutive per-file failures pile up or the
+     *             generator is taken for the whole pass
+     */
+    private void updateFile(final SourceFile theFile, final PassCounters theCounters)
+        throws IndexFailure {
+        try {
+            final byte[] content = Files.readAllBytes(theFile.location());
+            final String hash = sha256(content);
+            final FileState known = states.get(theFile.location().toString());
+            if(known != null && known.ourHash.equals(hash)) {
+                theCounters.ourSkipped++;
+            } else {
+                awaitQuietGenerator(theFile);
+                reembed(theFile, content, hash);
+                theCounters.ourRefreshed++;
+            }
+            theCounters.ourConsecutiveFailures = 0;
+        } catch (final IOException ex) {
+            theCounters.ourFailed++;
+            theCounters.ourConsecutiveFailures++;
+            ColleagueLog.error("[colleague] semantic pass cannot read "
+                + theFile.displayPath() + ": " + ex.getMessage());
+            if(theCounters.ourConsecutiveFailures >= MAX_CONSECUTIVE_FILE_FAILURES) {
+                throw new IndexFailure("giving up the pass after " + theCounters.ourConsecutiveFailures
+                    + " consecutive file failures, last: cannot read " + theFile.displayPath(),
+                    ex);
+            }
+        } catch (final GeneratorBusy ex) {
+            // not one file's bad luck but the whole generator being taken:
+            // counting it per file would only burn one more bounded wait
+            // per remaining file, so the pass ends here and the next
+            // scheduled pass picks up where this one stopped
+            throw ex;
+        } catch (final IndexFailure ex) {
+            theCounters.ourFailed++;
+            theCounters.ourConsecutiveFailures++;
+            ColleagueLog.error("[colleague] semantic pass " + ex.getMessage());
+            if(theCounters.ourConsecutiveFailures >= MAX_CONSECUTIVE_FILE_FAILURES) {
+                throw new IndexFailure("giving up the pass after " + theCounters.ourConsecutiveFailures
+                    + " consecutive file failures, last: " + ex.getMessage(), ex);
+            }
+        }
     }
 
     /**
@@ -498,15 +522,9 @@ public class VectorIndex {
                 if(!path.isEmpty()) {
                     legacyPaths.add(path);
                 }
-                continue;
-            }
-            if(hash.isEmpty()) {
-                continue;
-            }
-            if(!states.containsKey(location)) {
+            } else if(!hash.isEmpty() && states.put(location, new FileState(hash)) == null) {
                 adopted++;
             }
-            states.put(location, new FileState(hash));
         }
         for(final String path : legacyPaths) {
             try {

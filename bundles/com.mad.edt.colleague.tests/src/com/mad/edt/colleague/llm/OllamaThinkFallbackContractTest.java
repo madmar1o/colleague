@@ -22,6 +22,14 @@ import com.mad.edt.colleague.http.HttpCallSpec;
  */
 class OllamaThinkFallbackContractTest {
 
+    // fixture vocabulary: the model the scripted endpoint refuses to reason
+    // with, the JSON field the rounds are checked on, and the capability
+    // name the description probe reports
+    private static final String TEST_MODEL = "test-model";
+    private static final String REASONING_MODEL = "reasoning-model";
+    private static final String THINK_FIELD = "think";
+    private static final String CAP_COMPLETION = "completion";
+
     private static ProviderConfig config() {
         return ProviderConfig.builder("test", LLMProviderType.OLLAMA)
             .baseUrl("http://runtime.test")
@@ -43,7 +51,7 @@ class OllamaThinkFallbackContractTest {
     }
 
     private static ChatRequest reasoningRequest() {
-        return ChatRequest.builder("test-model")
+        return ChatRequest.builder(TEST_MODEL)
             .addMessage(ChatMessage.user("why?"))
             .think(true)
             .build();
@@ -66,11 +74,11 @@ class OllamaThinkFallbackContractTest {
         Assertions.assertEquals("ok", result.getContent());
         Assertions.assertEquals(2, transport.getCallCount(),
             "the provider must send the repair round itself");
-        Assertions.assertTrue(body(transport, 0).get("think").getAsBoolean(),
+        Assertions.assertTrue(body(transport, 0).get(THINK_FIELD).getAsBoolean(),
             "the first round asked for the pass before the endpoint taught otherwise");
-        Assertions.assertFalse(body(transport, 1).get("think").getAsBoolean(),
+        Assertions.assertFalse(body(transport, 1).get(THINK_FIELD).getAsBoolean(),
             "the repair round must not ask for thinking again");
-        Assertions.assertFalse(provider.supportsThinking("test-model"),
+        Assertions.assertFalse(provider.supportsThinking(TEST_MODEL),
             "the model stays marked as thinking-free for the rest of the session");
     }
 
@@ -87,7 +95,7 @@ class OllamaThinkFallbackContractTest {
 
         Assertions.assertEquals("second", second.getContent());
         Assertions.assertEquals(3, transport.getCallCount());
-        Assertions.assertFalse(body(transport, 2).get("think").getAsBoolean(),
+        Assertions.assertFalse(body(transport, 2).get(THINK_FIELD).getAsBoolean(),
             "a learned model must not be asked for thinking a second time");
     }
 
@@ -103,7 +111,7 @@ class OllamaThinkFallbackContractTest {
             () -> provider.chatStream(reasoningRequest(), chunk -> { }, chunk -> { }));
         Assertions.assertEquals(1, transport.getCallCount(),
             "a permanent rejection must surface instead of burning a second call");
-        Assertions.assertTrue(provider.supportsThinking("test-model"),
+        Assertions.assertTrue(provider.supportsThinking(TEST_MODEL),
             "an unrelated failure says nothing about the model's thinking support");
     }
 
@@ -124,18 +132,18 @@ class OllamaThinkFallbackContractTest {
     @DisplayName("the endpoint's own description of the model answers the thinking question")
     void theModelDescriptionDecidesThinkingSupport() throws LLMException {
         final RecordingHttpTransport transport =
-            RecordingHttpTransport.sequence(describes("completion", "tools", "thinking"));
+            RecordingHttpTransport.sequence(describes(CAP_COMPLETION, "tools", "thinking"));
         final OllamaLLMProvider provider = new OllamaLLMProvider(config(), transport);
 
-        Assertions.assertTrue(provider.supportsThinking("reasoning-model"));
+        Assertions.assertTrue(provider.supportsThinking(REASONING_MODEL));
         // cached: the second question costs no second probe
-        Assertions.assertTrue(provider.supportsThinking("reasoning-model"));
+        Assertions.assertTrue(provider.supportsThinking(REASONING_MODEL));
 
         Assertions.assertEquals(1, transport.getCallCount(),
             "one description per model is enough for the whole session");
         Assertions.assertEquals("http://runtime.test/api/show",
             transport.getCalls().get(0).getUrl());
-        Assertions.assertEquals("reasoning-model",
+        Assertions.assertEquals(REASONING_MODEL,
             body(transport, 0).get("model").getAsString());
     }
 
@@ -143,7 +151,7 @@ class OllamaThinkFallbackContractTest {
     @DisplayName("a model the endpoint describes without thinking is never asked for the pass")
     void aDescribedThinkingFreeModelIsNeverAskedForThePass() throws LLMException {
         final RecordingHttpTransport transport =
-            RecordingHttpTransport.sequence(describes("completion"), answer("plain answer"));
+            RecordingHttpTransport.sequence(describes(CAP_COMPLETION), answer("plain answer"));
         final OllamaLLMProvider provider = new OllamaLLMProvider(config(), transport);
 
         Assertions.assertFalse(provider.supportsThinking("plain-model"),
@@ -155,7 +163,7 @@ class OllamaThinkFallbackContractTest {
 
         Assertions.assertEquals("plain answer", result.getContent());
         Assertions.assertEquals(2, transport.getCallCount());
-        Assertions.assertFalse(body(transport, 1).has("think"),
+        Assertions.assertFalse(body(transport, 1).has(THINK_FIELD),
             "a request that never asked for thinking must not grow the field on its own");
     }
 
@@ -175,7 +183,7 @@ class OllamaThinkFallbackContractTest {
     @DisplayName("the description keeps an embedding model out of the chat list")
     void theDescriptionDecidesWhichModelsAreOfferedForChat() {
         final RecordingHttpTransport transport = RecordingHttpTransport.sequence(
-            describes("embedding"), describes("completion", "tools", "thinking"));
+            describes("embedding"), describes(CAP_COMPLETION, "tools", "thinking"));
         final OllamaLLMProvider provider = new OllamaLLMProvider(config(), transport);
 
         Assertions.assertFalse(provider.supportsChatCapability("embedding-model"),

@@ -22,6 +22,8 @@ import com.mad.edt.colleague.agent.AgentObserver;
  */
 class PageAgentObserverTest {
 
+    private static final String SEARCH_CODE = "search_code";
+
     /** records the console-side trace calls */
     private static final class Trace implements AgentObserver {
 
@@ -67,13 +69,13 @@ class PageAgentObserverTest {
         final Page page = new Page();
         final PageAgentObserver observer = page.attachTo(trace);
 
-        observer.onToolCall(2, "search_code",
+        observer.onToolCall(2, SEARCH_CODE,
             "{\"query\":\"модуль объекта справочник проводка\"}", "1234 chars", 3977L);
 
         assertEquals(List.of("tool|2|search_code"), trace.calls);
         assertEquals(1, page.chips.size());
         final JsonObject chip = page.chip(0);
-        assertEquals("search_code", chip.get("name").getAsString());
+        assertEquals(SEARCH_CODE, chip.get("name").getAsString());
         assertEquals("done", chip.get("state").getAsString());
         assertTrue(chip.get("detail").getAsString().contains("модуль объекта"),
             "the chip must name what the tool searched for: " + chip);
@@ -93,7 +95,7 @@ class PageAgentObserverTest {
             longResult.append("line of a search result\n");
         }
 
-        observer.onToolCall(1, "search_code", "{}", longResult.toString(), 10L);
+        observer.onToolCall(1, SEARCH_CODE, "{}", longResult.toString(), 10L);
 
         final String preview = page.chip(0).get("result").getAsString();
         assertTrue(preview.length() <= 401,
@@ -113,8 +115,8 @@ class PageAgentObserverTest {
         observer.onRound(4, 0);
 
         assertEquals(List.of("round|3|2", "round|4|0"), trace.calls);
-        // the round that asks for tools opens the block its chips nest into;
-        // the bridge queue puts this event ahead of those chips
+        // the round that asks for tools opens the block its chips nest into.
+        // The bridge queue puts this event ahead of those chips
         assertEquals(1, page.traces.size());
         final JsonObject block = page.trace(0);
         assertEquals(3, block.get("round").getAsInt());

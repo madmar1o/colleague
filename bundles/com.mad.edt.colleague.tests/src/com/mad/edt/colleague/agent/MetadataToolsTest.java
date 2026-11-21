@@ -24,6 +24,26 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class MetadataToolsTest {
 
+    /** tool names the suite calls over and over */
+    private static final String FIND = "find_metadata";
+    private static final String READ = "read_metadata";
+    /** XML declaration that opens every fixture file */
+    private static final String XML_HEAD = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    /** the open and close tags around an object, attribute or section name */
+    private static final String NAME_OPEN = "  <name>";
+    private static final String NAME_CLOSE = "</name>\n";
+    /** fixture paths spelled out in write calls and in expected results */
+    private static final String BANK_FILE = "Catalogs/Банк/Банк.mdo";
+    private static final String ANKETA_FILE = "Documents/Анкета/Анкета.mdo";
+    /** repeated attribute types of the fixture */
+    private static final String TYPE_STRING = "String";
+    private static final String TYPE_NUMBER = "Number";
+    /** the currency catalog the read tests lean on */
+    private static final String CURRENCIES = "Валюты";
+    private static final String CURRENCY_PRESENTATION = "Валюта";
+    /** the tabular section of the questionnaire fixture */
+    private static final String TOWNS = "Товары";
+
     @TempDir
     private Path ourDir;
 
@@ -33,23 +53,24 @@ class MetadataToolsTest {
     @BeforeEach
     void buildFixture() throws java.io.IOException {
         ourSrc = ourDir.resolve("Demo").resolve("src");
-        write("Catalogs/Валюты/Валюты.mdo", catalog("Валюты", "Валюта", "Currencies",
-            attribute("Код", "String", "9"), attribute("Наименование", "String", "150")));
-        write("Catalogs/Банк/Банк.mdo", catalog("Банк", "Банк", "Bank"));
+        write("Catalogs/" + CURRENCIES + "/" + CURRENCIES + ".mdo",
+            catalog(CURRENCIES, CURRENCY_PRESENTATION, "Currencies",
+                attribute("Код", TYPE_STRING, "9"), attribute("Наименование", TYPE_STRING, "150")));
+        write(BANK_FILE, catalog("Банк", "Банк", "Bank"));
         write("Catalogs/Банки/Банки.mdo", catalog("Банки", "Банк", "Banks"));
         write("InformationRegisters/КурсыВалют/КурсыВалют.mdo", register("КурсыВалют",
-            "Курсы валют", "Exchange rates", dimension("Валюта", "CatalogRef.Валюты"),
-            resource("Курс", "Number", "15", "4"), resource("Кратность", "Number", "10", "0")));
-        write("Documents/Анкета/Анкета.mdo", document("Анкета", "Анкета", "Questionnaire",
+            "Курсы валют", "Exchange rates", dimension(CURRENCY_PRESENTATION, "CatalogRef.Валюты"),
+            resource("Курс", TYPE_NUMBER, "15", "4"), resource("Кратность", TYPE_NUMBER, "10", "0")));
+        write(ANKETA_FILE, document("Анкета", "Анкета", "Questionnaire",
             attribute("Организация", "CatalogRef.Организации"),
-            tabularSection("Товары", "Товары", attribute("Номенклатура", "CatalogRef.Номенклатура"),
-                attribute("Количество", "Number", "15", "3"))));
+            tabularSection(TOWNS, TOWNS, attribute("Номенклатура", "CatalogRef.Номенклатура"),
+                attribute("Количество", TYPE_NUMBER, "15", "3"))));
         // form descriptors live next to the object file and are not objects
-        write("Documents/Анкета/Анкета.form.mdo", "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        write("Documents/Анкета/Анкета.form.mdo", XML_HEAD
             + "<form:Form xmlns:form=\"http://g5.1c.ru/v8/dt/form\"><name>Форма</name></form:Form>\n");
-        write("Configuration/Configuration.mdo", "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        write("Configuration/Configuration.mdo", XML_HEAD
             + "<mdclass:Configuration xmlns:mdclass=\"http://g5.1c.ru/v8/dt/metadata/mdclass\">\n"
-            + "  <name>Демо</name>\n</mdclass:Configuration>\n");
+            + NAME_OPEN + "Демо" + NAME_CLOSE + "</mdclass:Configuration>\n");
     }
 
     private MetadataTools tools() {
@@ -70,8 +91,8 @@ class MetadataToolsTest {
         final List<IToolExecutor> offered = tools().tools();
 
         assertEquals(2, offered.size());
-        assertEquals("find_metadata", offered.get(0).getName());
-        assertEquals("read_metadata", offered.get(1).getName());
+        assertEquals(FIND, offered.get(0).getName());
+        assertEquals(READ, offered.get(1).getName());
         for(final IToolExecutor tool : offered) {
             assertFalse(tool.getSpec().getDescription().isBlank());
             assertTrue(tool.isParallelSafe(), tool.getName() + " only reads metadata");
@@ -80,25 +101,25 @@ class MetadataToolsTest {
 
     @Test
     void findsObjectByName() throws Exception {
-        final String found = tool("find_metadata").execute("{\"query\":\"Валюты\"}");
+        final String found = tool(FIND).execute("{\"query\":\"Валюты\"}");
 
         assertTrue(found.contains("Catalog"), "kind of the object: " + found);
         assertTrue(found.contains("Demo/src/Catalogs/Валюты/Валюты.mdo"), found);
-        assertTrue(found.contains("Валюта"), "russian presentation: " + found);
+        assertTrue(found.contains(CURRENCY_PRESENTATION), "russian presentation: " + found);
     }
 
     @Test
     void findsCaseInsensitively() throws Exception {
-        final String found = tool("find_metadata").execute("{\"query\":\"валюты\"}");
+        final String found = tool(FIND).execute("{\"query\":\"валюты\"}");
 
         assertTrue(found.contains("Demo/src/Catalogs/Валюты/Валюты.mdo"), found);
     }
 
     @Test
     void ranksTheExactNameFirst() throws Exception {
-        final String found = tool("find_metadata").execute("{\"query\":\"Банк\"}");
+        final String found = tool(FIND).execute("{\"query\":\"Банк\"}");
 
-        final int exact = found.indexOf("Catalogs/Банк/Банк.mdo");
+        final int exact = found.indexOf(BANK_FILE);
         final int longer = found.indexOf("Catalogs/Банки/Банки.mdo");
         assertTrue(exact >= 0, found);
         assertTrue(longer >= 0, found);
@@ -107,7 +128,7 @@ class MetadataToolsTest {
 
     @Test
     void filtersByKind() throws Exception {
-        final String found = tool("find_metadata")
+        final String found = tool(FIND)
             .execute("{\"query\":\"Валют\",\"kind\":\"InformationRegister\"}");
 
         assertTrue(found.contains("InformationRegister"), found);
@@ -117,14 +138,14 @@ class MetadataToolsTest {
 
     @Test
     void reportsWhenNothingMatches() throws Exception {
-        final String found = tool("find_metadata").execute("{\"query\":\"НетТакого\"}");
+        final String found = tool(FIND).execute("{\"query\":\"НетТакого\"}");
 
         assertTrue(found.startsWith("No metadata objects match"), found);
     }
 
     @Test
     void readsAttributesOfAnObject() throws Exception {
-        final String read = tool("read_metadata")
+        final String read = tool(READ)
             .execute("{\"path\":\"Demo/src/Catalogs/Валюты/Валюты.mdo\"}");
 
         assertTrue(read.contains("Catalog Валюты"), read);
@@ -136,21 +157,21 @@ class MetadataToolsTest {
 
     @Test
     void readsTabularSectionsWithTheirOwnAttributes() throws Exception {
-        final String read = tool("read_metadata").execute("{\"name\":\"Анкета\"}");
+        final String read = tool(READ).execute("{\"name\":\"Анкета\"}");
 
         assertTrue(read.contains("Tabular sections (1)"), read);
-        assertTrue(read.contains("Товары"), read);
+        assertTrue(read.contains(TOWNS), read);
         assertTrue(read.contains("Номенклатура"), read);
         assertTrue(read.contains("Number(15,3)"), read);
     }
 
     @Test
     void listsRegistersWithDimensions() throws Exception {
-        final String read = tool("read_metadata")
+        final String read = tool(READ)
             .execute("{\"name\":\"КурсыВалют\",\"kind\":\"InformationRegister\"}");
 
         assertTrue(read.contains("Dimensions (1)"), read);
-        assertTrue(read.contains("Валюта"), read);
+        assertTrue(read.contains(CURRENCY_PRESENTATION), read);
         assertTrue(read.contains("CatalogRef.Валюты"), read);
         assertTrue(read.contains("Resources (2)"), read);
         assertTrue(read.contains("Курс"), read);
@@ -159,9 +180,9 @@ class MetadataToolsTest {
 
     @Test
     void ignoresFormDescriptorsWhenSearching() throws Exception {
-        final String found = tool("find_metadata").execute("{\"query\":\"Анкета\"}");
+        final String found = tool(FIND).execute("{\"query\":\"Анкета\"}");
 
-        assertTrue(found.contains("Documents/Анкета/Анкета.mdo"), found);
+        assertTrue(found.contains(ANKETA_FILE), found);
         assertFalse(found.contains(".form.mdo"), "form descriptors are not objects: " + found);
     }
 
@@ -170,11 +191,11 @@ class MetadataToolsTest {
         final StringBuilder huge = new StringBuilder(catalog("Огромный", "Огромный", "Huge"));
         int at = huge.indexOf("</mdclass:Catalog>");
         for(int index = 0; index < 300; index++) {
-            huge.insert(at, attribute("Реквизит" + index, "String", "50"));
+            huge.insert(at, attribute("Реквизит" + index, TYPE_STRING, "50"));
         }
         write("Catalogs/Огромный/Огромный.mdo", huge.toString());
 
-        final String read = tool("read_metadata").execute("{\"path\":\"Demo/src/Catalogs/Огромный/Огромный.mdo\"}");
+        final String read = tool(READ).execute("{\"path\":\"Demo/src/Catalogs/Огромный/Огромный.mdo\"}");
 
         assertTrue(read.length() < 4_000, "result stays under the agent budget: " + read.length());
         assertTrue(read.contains("more"), "the cut is announced: " + read);
@@ -182,7 +203,7 @@ class MetadataToolsTest {
 
     @Test
     void refusesPathsOutsideTheMetadataRoots() throws Exception {
-        final String refused = tool("read_metadata")
+        final String refused = tool(READ)
             .execute("{\"path\":\"Demo/src/../../secret.mdo\"}");
 
         assertTrue(refused.startsWith("ERROR"), refused);
@@ -190,20 +211,20 @@ class MetadataToolsTest {
 
     @Test
     void reportsANonMetadataFileAsError() throws Exception {
-        write("Documents/Анкета/Анкета.mdo", "");
+        write(ANKETA_FILE, "");
 
-        final String read = tool("read_metadata").execute("{\"path\":\"Demo/src/Documents/Анкета/Анкета.mdo\"}");
+        final String read = tool(READ).execute("{\"path\":\"Demo/src/Documents/Анкета/Анкета.mdo\"}");
 
         assertTrue(read.startsWith("ERROR"), read);
     }
 
     @Test
     void toleratesATruncatedMetadataFile() throws Exception {
-        write("Catalogs/Банк/Банк.mdo", "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        write(BANK_FILE, XML_HEAD
             + "<mdclass:Catalog xmlns:mdclass=\"http://g5.1c.ru/v8/dt/metadata/mdclass\">\n"
             + "  <name>Банк</name>\n  <attributes uuid=\"1\">\n    <name>Код</name>\n");
 
-        final String read = tool("read_metadata").execute("{\"path\":\"Demo/src/Catalogs/Банк/Банк.mdo\"}");
+        final String read = tool(READ).execute("{\"path\":\"Demo/src/Catalogs/Банк/Банк.mdo\"}");
 
         assertTrue(read.contains("Банк"), read);
         assertTrue(read.contains("incomplete"), "the cut file is reported honestly: " + read);
@@ -217,10 +238,10 @@ class MetadataToolsTest {
 
     private static String catalog(final String theName, final String thePresented,
         final String theEnglish, final String... theAttributes) {
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        return XML_HEAD
             + "<mdclass:Catalog xmlns:mdclass=\"http://g5.1c.ru/v8/dt/metadata/mdclass\" uuid=\"c\">\n"
             + "  <producedTypes>\n    <objectType typeId=\"t\" valueTypeId=\"v\"/>\n  </producedTypes>\n"
-            + "  <name>" + theName + "</name>\n"
+            + NAME_OPEN + theName + NAME_CLOSE
             + synonym(thePresented, theEnglish)
             + String.join("", theAttributes)
             + "</mdclass:Catalog>\n";
@@ -228,9 +249,9 @@ class MetadataToolsTest {
 
     private static String document(final String theName, final String thePresented,
         final String theEnglish, final String... theAttributes) {
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        return XML_HEAD
             + "<mdclass:Document xmlns:mdclass=\"http://g5.1c.ru/v8/dt/metadata/mdclass\" uuid=\"d\">\n"
-            + "  <name>" + theName + "</name>\n"
+            + NAME_OPEN + theName + NAME_CLOSE
             + synonym(thePresented, theEnglish)
             + String.join("", theAttributes)
             + "</mdclass:Document>\n";
@@ -238,10 +259,10 @@ class MetadataToolsTest {
 
     private static String register(final String theName, final String thePresented,
         final String theEnglish, final String... theChildren) {
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        return XML_HEAD
             + "<mdclass:InformationRegister xmlns:mdclass=\"http://g5.1c.ru/v8/dt/metadata/mdclass\""
             + " uuid=\"r\">\n"
-            + "  <name>" + theName + "</name>\n"
+            + NAME_OPEN + theName + NAME_CLOSE
             + synonym(thePresented, theEnglish)
             + String.join("", theChildren)
             + "</mdclass:InformationRegister>\n";
@@ -254,18 +275,18 @@ class MetadataToolsTest {
 
     private static String attribute(final String theName, final String theType,
         final String... theQualifiers) {
-        return "  <attributes uuid=\"a\">\n    <name>" + theName + "</name>\n"
+        return "  <attributes uuid=\"a\">\n    <name>" + theName + NAME_CLOSE
             + type(theType, theQualifiers) + "  </attributes>\n";
     }
 
     private static String dimension(final String theName, final String theType) {
-        return "  <dimensions uuid=\"m\">\n    <name>" + theName + "</name>\n"
+        return "  <dimensions uuid=\"m\">\n    <name>" + theName + NAME_CLOSE
             + type(theType) + "  </dimensions>\n";
     }
 
     private static String resource(final String theName, final String theType,
         final String... theQualifiers) {
-        return "  <resources uuid=\"s\">\n    <name>" + theName + "</name>\n"
+        return "  <resources uuid=\"s\">\n    <name>" + theName + NAME_CLOSE
             + type(theType, theQualifiers) + "  </resources>\n";
     }
 
@@ -273,7 +294,7 @@ class MetadataToolsTest {
         final String... theAttributes) {
         return "  <tabularSections uuid=\"ts\">\n"
             + "    <producedTypes>\n      <rowType typeId=\"t\" valueTypeId=\"v\"/>\n    </producedTypes>\n"
-            + "    <name>" + theName + "</name>\n"
+            + "    <name>" + theName + NAME_CLOSE
             + synonym(thePresented, thePresented)
             + String.join("", theAttributes)
             + "  </tabularSections>\n";

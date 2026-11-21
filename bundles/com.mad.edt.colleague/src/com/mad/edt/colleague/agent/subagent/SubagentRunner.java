@@ -24,6 +24,9 @@ public final class SubagentRunner {
     /** Ceiling one delegate turn may take before it is cut off. */
     public static final long TURN_WAIT_MS = 240_000L;
 
+    /** Prefix shared by the three delegate timeout/interruption failures. */
+    private static final String DELEGATE_PREFIX = "delegate ";
+
     private SubagentRunner() {
     }
 
@@ -58,19 +61,19 @@ public final class SubagentRunner {
         try {
             if(!job.join(TURN_WAIT_MS, null)) {
                 job.cancel();
-                throw new LLMException("delegate " + theLabel + " did not finish in "
+                throw new LLMException(DELEGATE_PREFIX + theLabel + " did not finish in "
                     + TURN_WAIT_MS + " ms");
             }
         } catch (final InterruptedException ex) {
             job.cancel();
             Thread.currentThread().interrupt();
-            throw new LLMException("delegate " + theLabel + " was interrupted", ex);
+            throw new LLMException(DELEGATE_PREFIX + theLabel + " was interrupted", ex);
         }
         if(failure[0] != null) {
             throw failure[0];
         }
         if(outcome[0] == null) {
-            throw new LLMException("delegate " + theLabel + " produced no answer");
+            throw new LLMException(DELEGATE_PREFIX + theLabel + " produced no answer");
         }
         return outcome[0];
     }

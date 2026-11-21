@@ -20,6 +20,9 @@ import com.mad.edt.colleague.http.HttpCallSpec;
  */
 class OpenAiCompatibleStreamContractTest {
 
+    private static final String DONE_FRAME = "data: [DONE]";
+    private static final String MODEL = "gw-model";
+
     private static ProviderConfig config() {
         return ProviderConfig.builder("test", LLMProviderType.OPENAI_COMPATIBLE)
             .baseUrl("http://gateway.test/v1")
@@ -39,14 +42,14 @@ class OpenAiCompatibleStreamContractTest {
             "data: {\"choices\":[{\"delta\":{\"content\":\" there\"},"
                 + "\"finish_reason\":\"stop\"}],"
                 + "\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3}}",
-            "data: [DONE]");
+            DONE_FRAME);
         final List<String> thinkingFrames = new ArrayList<>();
         final List<String> contentFrames = new ArrayList<>();
 
         final OpenAiCompatibleLLMProvider provider =
             new OpenAiCompatibleLLMProvider(config(), transport);
         final ChatResult result = provider.chatStream(
-            ChatRequest.builder("gw-model").addMessage(ChatMessage.user("hi")).build(),
+            ChatRequest.builder(MODEL).addMessage(ChatMessage.user("hi")).build(),
             contentFrames::add, thinkingFrames::add);
 
         Assertions.assertEquals(List.of("hmm ", "alright"), thinkingFrames);
@@ -71,12 +74,12 @@ class OpenAiCompatibleStreamContractTest {
             "this gateway line is not JSON at all",
             "data: {\"choices\":[{\"delta\":{\"reasoning\":\"more\"}}]}",
             "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}",
-            "data: [DONE]");
+            DONE_FRAME);
         final List<String> thinkingFrames = new ArrayList<>();
         final OpenAiCompatibleLLMProvider provider =
             new OpenAiCompatibleLLMProvider(config(), transport);
         final ChatResult result = provider.chatStream(
-            ChatRequest.builder("gw-model").addMessage(ChatMessage.user("hi")).build(),
+            ChatRequest.builder(MODEL).addMessage(ChatMessage.user("hi")).build(),
             piece -> { }, thinkingFrames::add);
 
         Assertions.assertEquals(List.of("think ", "more"), thinkingFrames);
@@ -94,7 +97,7 @@ class OpenAiCompatibleStreamContractTest {
         final OpenAiCompatibleLLMProvider provider =
             new OpenAiCompatibleLLMProvider(config(), transport);
         final ChatResult result = provider.chat(
-            ChatRequest.builder("gw-model").addMessage(ChatMessage.user("q")).build());
+            ChatRequest.builder(MODEL).addMessage(ChatMessage.user("q")).build());
 
         Assertions.assertEquals("yes", result.getContent());
         Assertions.assertEquals("because", result.getThinking());
@@ -105,16 +108,16 @@ class OpenAiCompatibleStreamContractTest {
     void requestShape() throws LLMException {
         final RecordingHttpTransport transport = RecordingHttpTransport.streaming(200,
             "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}",
-            "data: [DONE]");
+            DONE_FRAME);
         final OpenAiCompatibleLLMProvider provider =
             new OpenAiCompatibleLLMProvider(config(), transport);
-        provider.chatStream(ChatRequest.builder("gw-model")
+        provider.chatStream(ChatRequest.builder(MODEL)
             .addMessage(ChatMessage.user("ping")).build(), piece -> { }, piece -> { });
 
         final HttpCallSpec call = transport.getOnlyCall();
         Assertions.assertEquals("http://gateway.test/v1/chat/completions", call.getUrl());
         final JsonObject body = JsonParser.parseString(call.getJsonBody()).getAsJsonObject();
         Assertions.assertTrue(body.get("stream").getAsBoolean());
-        Assertions.assertEquals("gw-model", body.get("model").getAsString());
+        Assertions.assertEquals(MODEL, body.get("model").getAsString());
     }
 }

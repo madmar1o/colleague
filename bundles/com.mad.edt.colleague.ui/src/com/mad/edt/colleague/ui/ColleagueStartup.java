@@ -48,7 +48,7 @@ public class ColleagueStartup implements IStartup {
      * Opens the assistant view once the workbench page is available.
      */
     private static void scheduleViewOpen() {
-        org.eclipse.swt.widgets.Display.getDefault().syncExec(() -> {
+        org.eclipse.swt.widgets.Display.getDefault().syncExec(() ->
             org.eclipse.swt.widgets.Display.getDefault().timerExec(4_000, () -> {
                 try {
                     final var window = org.eclipse.ui.PlatformUI.getWorkbench().getActiveWorkbenchWindow();
@@ -62,8 +62,7 @@ public class ColleagueStartup implements IStartup {
                 } catch (final Exception ex) {
                     ColleagueLog.warn("[colleague] view open failed: " + ex);
                 }
-            });
-        });
+            }));
     }
 
     private static final Runnable VIEW_RETRY = () -> {

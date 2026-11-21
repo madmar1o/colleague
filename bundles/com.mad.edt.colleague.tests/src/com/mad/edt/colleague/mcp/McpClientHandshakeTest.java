@@ -1,9 +1,7 @@
 package com.mad.edt.colleague.mcp;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -32,6 +30,11 @@ class McpClientHandshakeTest {
 
     /** The JSON-RPC identity of the tool both fakes expose. */
     private static final String TOOL_NAME = "echo";
+
+    /** JSON-RPC methods the client is expected to drive, in handshake order. */
+    private static final String INITIALIZE = "initialize";
+    private static final String TOOLS_LIST = "tools/list";
+    private static final String TOOLS_CALL = "tools/call";
 
     /**
      * Minimal in-process HTTP endpoint on a plain server socket answering
@@ -84,11 +87,24 @@ class McpClientHandshakeTest {
         private void serve(final Socket theClient) throws IOException {
             theClient.setSoTimeout(10_000);
             final InputStream in = theClient.getInputStream();
-            final BufferedReader head =
-                new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+            // the head is taken one byte at a time on purpose: a buffered reader
+            // would already have pulled the body that follows the empty line into
+            // its own buffer, and the body read below would then wait for bytes
+            // that arrived long ago until the socket timeout closes the connection
+            final StringBuilder head = new StringBuilder();
+            int current;
+            while((current = in.read()) >= 0) {
+                head.append((char) current);
+                if(head.length() >= 4
+                    && head.charAt(head.length() - 4) == '\r'
+                    && head.charAt(head.length() - 3) == '\n'
+                    && head.charAt(head.length() - 2) == '\r'
+                    && head.charAt(head.length() - 1) == '\n') {
+                    break;
+                }
+            }
             int contentLength = 0;
-            String line;
-            while((line = head.readLine()) != null && !line.isEmpty()) {
+            for(final String line : head.toString().split("\r\n")) {
                 if(line.toLowerCase().startsWith("content-length:")) {
                     contentLength = Integer.parseInt(line.substring(15).trim());
                 }
@@ -102,15 +118,15 @@ class McpClientHandshakeTest {
                 methods.add(method);
             }
             final String result;
-            if("initialize".equals(method)) {
+            if(INITIALIZE.equals(method)) {
                 result = "{\"protocolVersion\":\"2024-11-05\","
                     + "\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"fake\"}}";
-            } else if("tools/list".equals(method)) {
+            } else if(TOOLS_LIST.equals(method)) {
                 result = "{\"tools\":[{\"name\":\"" + TOOL_NAME + "\","
                     + "\"description\":\"echoes its argument\","
                     + "\"inputSchema\":{\"type\":\"object\"},"
                     + "\"annotations\":{\"readOnlyHint\":true}}]}";
-            } else if("tools/call".equals(method) && !request.contains("unknown_tool")) {
+            } else if(TOOLS_CALL.equals(method) && !request.contains("unknown_tool")) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"echo: hello\"}],"
                     + "\"isError\":false}";
             } else {
@@ -186,31 +202,44 @@ class McpClientHandshakeTest {
                     if(line.isBlank()) {
                         continue;
                     }
-                    String method = between(line, "\\"method\\":\\"", "\\"");
-                    String id = between(line, "\\"id\\":", ",");
+                    String method = between(line, q("method") + c(58) + c(34), c(34));
+                    String id = between(line, q("id") + c(58), c(44));
                     String result;
                     if("initialize".equals(method)) {
-                        result = "{\\"protocolVersion\\":\\"2024-11-05\\",\\"capabilities\\":{},"
-                            + "\\"serverInfo\\":{\\"name\\":\\"stdio-fake\\"}}";
+                        result = "{" + q("protocolVersion") + c(58) + q("2024-11-05") + ","
+                            + q("capabilities") + c(58) + "{},"
+                            + q("serverInfo") + c(58) + "{" + q("name") + c(58) + q("stdio-fake") + "}}";
                     } else if("tools/list".equals(method)) {
-                        result = "{\\"tools\\":[{\\"name\\":\\"echo\\","
-                            + "\\"description\\":\\"stdio echo\\","
-                            + "\\"inputSchema\\":{\\"type\\":\\"object\\"}}]}";
+                        result = "{" + q("tools") + c(58) + "[{" + q("name") + c(58) + q("echo") + ","
+                            + q("description") + c(58) + q("stdio echo") + ","
+                            + q("inputSchema") + c(58) + "{" + q("type") + c(58) + q("object") + "}}]}";
                     } else if("tools/call".equals(method)) {
-                        result = "{\\"content\\":[{\\"type\\":\\"text\\","
-                            + "\\"text\\":\\"stdio echo ok\\"}],\\"isError\\":false}";
+                        result = "{" + q("content") + c(58) + "[{" + q("type") + c(58) + q("text") + ","
+                            + q("text") + c(58) + q("stdio echo ok") + "}],"
+                            + q("isError") + c(58) + "false}";
                     } else if("notifications/initialized".equals(method)) {
                         continue;
                     } else {
-                        writeLine(out, "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":" + id
-                            + ",\\"error\\":{\\"code\\":-32601,"
-                            + "\\"message\\":\\"unknown method\\"}}");
+                        writeLine(out, response(id)
+                            + q("error") + c(58) + "{" + q("code") + c(58) + "-32601,"
+                            + q("message") + c(58) + q("unknown method") + "}}");
                         continue;
                     }
-                    writeLine(out, "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":" + id
-                        + ",\\"result\\":" + result + "}");
+                    writeLine(out, response(id) + q("result") + c(58) + result + "}");
                 }
                 out.flush();
+            }
+
+            private static String q(String value) {
+                return (char) 34 + value + (char) 34;
+            }
+
+            private static String c(int ch) {
+                return "" + (char) ch;
+            }
+
+            private static String response(String id) {
+                return "{" + q("jsonrpc") + c(58) + q("2.0") + "," + q("id") + c(58) + id + ",";
             }
 
             private static String between(String text, String start, String end) {
@@ -225,7 +254,7 @@ class McpClientHandshakeTest {
 
             private static void writeLine(Writer out, String line) throws Exception {
                 out.write(line);
-                out.write('\\n');
+                out.write(System.lineSeparator());
                 out.flush();
             }
         }
@@ -245,12 +274,12 @@ class McpClientHandshakeTest {
             Assertions.assertEquals("echoes its argument", tools.get(0).description());
             Assertions.assertTrue(tools.get(0).readOnly(),
                 "the readOnlyHint annotation must survive into the tool info");
-            Assertions.assertEquals(List.of("initialize", "tools/list"), fake.methods,
+            Assertions.assertEquals(List.of(INITIALIZE, TOOLS_LIST), fake.methods,
                 "initialize must come before listing, nothing else");
 
             final String text = client.call(TOOL_NAME, null);
             Assertions.assertEquals("echo: hello", text);
-            Assertions.assertEquals(List.of("initialize", "tools/list", "tools/call"),
+            Assertions.assertEquals(List.of(INITIALIZE, TOOLS_LIST, TOOLS_CALL),
                 fake.methods, "the call must not redo the handshake");
         }
     }
@@ -285,7 +314,7 @@ class McpClientHandshakeTest {
 
             final McpException failure = Assertions.assertThrows(McpException.class,
                 () -> client.call("unknown_tool", null));
-            Assertions.assertTrue(fake.methods.contains("tools/call"));
+            Assertions.assertTrue(fake.methods.contains(TOOLS_CALL));
             Assertions.assertTrue(failure.getMessage().contains("unknown method"),
                 failure.getMessage());
         }

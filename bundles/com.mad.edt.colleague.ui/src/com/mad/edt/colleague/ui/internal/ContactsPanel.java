@@ -47,6 +47,12 @@ import com.mad.edt.colleague.mcp.McpToolInfo;
  */
 public final class ContactsPanel {
 
+    /** Contact key separator and the bridge payload field names. */
+    private static final String ID_SEPARATOR = "\u0000";
+    private static final String ERROR = "error";
+    private static final String COMMAND = "command";
+    private static final String ENABLED = "enabled";
+
     /** A selectable chat contact: provider, model and the agent speaking them. */
     public static final class Contact {
 
@@ -106,8 +112,8 @@ public final class ContactsPanel {
          *         own conversation even when two of them share one model
          */
         public String getKey() {
-            return ourProviderId + "\u0000" + ourModel
-                + (ourAgentName.isEmpty() ? "" : "\u0000" + ourAgentName);
+            return ourProviderId + ID_SEPARATOR + ourModel
+                + (ourAgentName.isEmpty() ? "" : ID_SEPARATOR + ourAgentName);
         }
     }
 
@@ -157,7 +163,7 @@ public final class ContactsPanel {
             return;
         }
         ourLoading = true;
-        Job.create("Colleague: contacts", (monitor) -> {
+        Job.create("Colleague: contacts", monitor -> {
             final List<Object[]> providers = probeProviders();
             Display.getDefault().asyncExec(() -> {
                 if(ourRoot == null || ourRoot.isDisposed()) {
@@ -202,8 +208,8 @@ public final class ContactsPanel {
                 final ILLMProvider provider =
                     LLMProviderFactory.create(LLMSettings.getConfig(id));
                 final List<String> models = provider.listModels().stream()
-                    .filter(name -> provider.supportsChatCapability(name))
-                    .collect(Collectors.toList());
+                    .filter(provider::supportsChatCapability)
+                    .toList();
                 providers.add(new Object[] {Boolean.TRUE, id,
                     provider.getConfig().getBaseUrl(), models});
             } catch (final Exception ex) {
@@ -220,7 +226,7 @@ public final class ContactsPanel {
         ourRoot.setLayout(new GridLayout(1, false));
         createBrowser();
         if(ourBridge == null) {
-            createFallback(theParent);
+            createFallback();
         }
     }
 
@@ -265,8 +271,7 @@ public final class ContactsPanel {
 
     private void handleBridge(final String theMethod, final JsonObject theArguments) {
         switch(theMethod) {
-            case "bridgeReady":
-            case "refresh":
+            case "bridgeReady", "refresh":
                 reload();
                 return;
             case "openContact": {
@@ -362,11 +367,11 @@ public final class ContactsPanel {
         if(url.isEmpty()) {
             final JsonObject result = new JsonObject();
             result.addProperty("ok", Boolean.FALSE);
-            result.addProperty("error", "не задан адрес сервиса");
+            result.addProperty(ERROR, "не задан адрес сервиса");
             ourBridge.push("testResult", result);
             return;
         }
-        Job.create("Colleague: provider test", (monitor) -> {
+        Job.create("Colleague: provider test", monitor -> {
             final JsonObject result = new JsonObject();
             try {
                 final ProviderConfig config = ProviderConfig
@@ -385,7 +390,7 @@ public final class ContactsPanel {
                 result.addProperty("ok", Boolean.TRUE);
             } catch (final Exception ex) {
                 result.addProperty("ok", Boolean.FALSE);
-                result.addProperty("error", ex.getMessage() == null
+                result.addProperty(ERROR, ex.getMessage() == null
                     ? ex.getClass().getSimpleName() : ex.getMessage());
             }
             Display.getDefault().asyncExec(() -> {
@@ -411,7 +416,7 @@ public final class ContactsPanel {
             pushSaved(false, "нужны идентификатор и адрес сервиса");
             return;
         }
-        if(id.contains("\u0000") || id.contains("/")) {
+        if(id.contains(ID_SEPARATOR) || id.contains("/")) {
             pushSaved(false, "некорректный идентификатор");
             return;
         }
@@ -454,7 +459,7 @@ public final class ContactsPanel {
      */
     private void saveMcp(final JsonObject theArguments) {
         final String name = BridgeBrowser.optString(theArguments, "name");
-        final String command = BridgeBrowser.optString(theArguments, "command");
+        final String command = BridgeBrowser.optString(theArguments, COMMAND);
         final String url = BridgeBrowser.optString(theArguments, "url");
         if(!name.matches("[a-z0-9_]{1,40}")) {
             pushSaved(false, "имя сервера — только строчные латинские буквы,"
@@ -475,8 +480,8 @@ public final class ContactsPanel {
                 parts.add(part);
             }
         }
-        final boolean enabled = !theArguments.has("enabled")
-            || theArguments.get("enabled").getAsBoolean();
+        final boolean enabled = !theArguments.has(ENABLED)
+            || theArguments.get(ENABLED).getAsBoolean();
         McpSettings.upsert(new McpServerConfig(name,
             url.isEmpty() ? parts : null, url.isEmpty() ? null : url, enabled));
         pushSaved(true, "");
@@ -503,8 +508,25 @@ public final class ContactsPanel {
      * @param theArguments draft fields: name, command, url
      */
     private void testMcp(final JsonObject theArguments) {
+        final McpServerConfig probe = buildProbeConfig(theArguments);
+        Job.create("Colleague: MCP server test", monitor -> {
+            pushProbeResult(probeResult(probe));
+            return Status.OK_STATUS;
+        }).schedule();
+    }
+
+    /**
+     * Turns the draft fields of the settings form into a throwaway server
+     * configuration for the probe: an empty name becomes "probe", a url wins
+     * over the command line, and the command is split into executable plus
+     * arguments.
+     *
+     * @param theArguments draft fields: name, command, url
+     * @return configuration the probe will connect with
+     */
+    private static McpServerConfig buildProbeConfig(final JsonObject theArguments) {
         final String name = BridgeBrowser.optString(theArguments, "name");
-        final String command = BridgeBrowser.optString(theArguments, "command");
+        final String command = BridgeBrowser.optString(theArguments, COMMAND);
         final String url = BridgeBrowser.optString(theArguments, "url");
         final List<String> parts = new ArrayList<>();
         for(final String part : command.trim().split("\\s+")) {
@@ -512,33 +534,49 @@ public final class ContactsPanel {
                 parts.add(part);
             }
         }
-        final McpServerConfig probe = new McpServerConfig(
+        return new McpServerConfig(
             name.isEmpty() ? "probe" : name,
             url.isEmpty() ? parts : null, url.isEmpty() ? null : url, true);
-        Job.create("Colleague: MCP server test", (monitor) -> {
-            final JsonObject result = new JsonObject();
-            try (McpClient client = new McpClient(probe)) {
-                final JsonArray tools = new JsonArray();
-                for(final McpToolInfo tool : client.discover()) {
-                    final JsonObject item = new JsonObject();
-                    item.addProperty("name", tool.name());
-                    item.addProperty("readOnly", Boolean.valueOf(tool.readOnly()));
-                    tools.add(item);
-                }
-                result.add("tools", tools);
-                result.addProperty("ok", Boolean.TRUE);
-            } catch (final Exception ex) {
-                result.addProperty("ok", Boolean.FALSE);
-                result.addProperty("error", ex.getMessage() == null
-                    ? ex.getClass().getSimpleName() : ex.getMessage());
+    }
+
+    /**
+     * Runs the handshake against the probe configuration and lists its tools
+     * off the UI thread.
+     *
+     * @param theProbe server configuration to connect to
+     * @return page payload: ok plus tools, or ok=false plus error
+     */
+    private static JsonObject probeResult(final McpServerConfig theProbe) {
+        final JsonObject result = new JsonObject();
+        try (McpClient client = new McpClient(theProbe)) {
+            final JsonArray tools = new JsonArray();
+            for(final McpToolInfo tool : client.discover()) {
+                final JsonObject item = new JsonObject();
+                item.addProperty("name", tool.name());
+                item.addProperty("readOnly", Boolean.valueOf(tool.readOnly()));
+                tools.add(item);
             }
-            Display.getDefault().asyncExec(() -> {
-                if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
-                    ourBridge.push("mcpTestResult", result);
-                }
-            });
-            return Status.OK_STATUS;
-        }).schedule();
+            result.add("tools", tools);
+            result.addProperty("ok", Boolean.TRUE);
+        } catch (final Exception ex) {
+            result.addProperty("ok", Boolean.FALSE);
+            result.addProperty(ERROR, ex.getMessage() == null
+                ? ex.getClass().getSimpleName() : ex.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * Hands the probe result back to the settings page.
+     *
+     * @param theResult payload produced by the probe
+     */
+    private void pushProbeResult(final JsonObject theResult) {
+        Display.getDefault().asyncExec(() -> {
+            if(ourBridge != null && !ourBridge.getControl().isDisposed()) {
+                ourBridge.push("mcpTestResult", theResult);
+            }
+        });
     }
 
     /** Pushes the stored MCP servers so the settings table can redraw itself. */
@@ -556,9 +594,9 @@ public final class ContactsPanel {
         for(final McpServerConfig server : McpSettings.loadServers()) {
             final JsonObject item = new JsonObject();
             item.addProperty("name", server.getName());
-            item.addProperty("enabled", Boolean.valueOf(server.isEnabled()));
+            item.addProperty(ENABLED, Boolean.valueOf(server.isEnabled()));
             item.addProperty("url", server.getUrl() == null ? "" : server.getUrl());
-            item.addProperty("command", server.getCommand() == null
+            item.addProperty(COMMAND, server.getCommand() == null
                 ? "" : String.join(" ", server.getCommand()));
             servers.add(item);
         }
@@ -568,7 +606,7 @@ public final class ContactsPanel {
     private void pushSaved(final boolean theOk, final String theError) {
         final JsonObject payload = new JsonObject();
         payload.addProperty("ok", Boolean.valueOf(theOk));
-        payload.addProperty("error", theError);
+        payload.addProperty(ERROR, theError);
         ourBridge.push("saved", payload);
     }
 
@@ -609,7 +647,7 @@ public final class ContactsPanel {
             item.addProperty("baseUrl", ok ? String.valueOf(entry[2]) : "");
             item.addProperty("ok", Boolean.valueOf(ok));
             if(!ok) {
-                item.addProperty("error", String.valueOf(entry[2]));
+                item.addProperty(ERROR, String.valueOf(entry[2]));
             }
             item.addProperty("default", Boolean.valueOf(id.equals(defaultId)));
             final JsonArray models = new JsonArray();
@@ -638,7 +676,7 @@ public final class ContactsPanel {
     }
 
     /** Plain tree layout used when no browser backend is available. */
-    private void createFallback(final Composite theParent) {
+    private void createFallback() {
         final Composite header = new Composite(ourRoot, SWT.NONE);
         header.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
         final GridLayout headerLayout = new GridLayout(2, false);

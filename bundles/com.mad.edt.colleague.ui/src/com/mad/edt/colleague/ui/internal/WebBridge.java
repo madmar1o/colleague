@@ -60,6 +60,9 @@ public final class WebBridge implements PageTransport {
     private final List<Object[]> ourEvents = new ArrayList<>();
     private final Thread ourAcceptor;
 
+    /** Media type of the plain-text error answers the bridge replies with. */
+    private static final String TEXT_PLAIN_UTF8 = "text/plain; charset=utf-8";
+
     private volatile BiConsumer<String, JsonObject> ourPageCallSink;
     private volatile boolean ourOpen;
 
@@ -218,7 +221,7 @@ public final class WebBridge implements PageTransport {
             }
             final String[] parts = requestLine.split(" ");
             if(parts.length < 2) {
-                answer(socket.getOutputStream(), 400, "text/plain; charset=utf-8", "bad request");
+                answer(socket.getOutputStream(), 400, TEXT_PLAIN_UTF8, "bad request");
                 return;
             }
             final String method = parts[0].toUpperCase(Locale.ROOT);
@@ -251,7 +254,7 @@ public final class WebBridge implements PageTransport {
             return;
         }
         if(!theHeaders.hasToken(ourToken)) {
-            answer(theOut, 401, "text/plain; charset=utf-8", "token required");
+            answer(theOut, 401, TEXT_PLAIN_UTF8, "token required");
             return;
         }
         if("/call".equals(thePath)) {
@@ -262,7 +265,7 @@ public final class WebBridge implements PageTransport {
             answer(theOut, 200, "application/json; charset=utf-8", pollEvents());
             return;
         }
-        answer(theOut, 404, "text/plain; charset=utf-8", "not found");
+        answer(theOut, 404, TEXT_PLAIN_UTF8, "not found");
     }
 
     /**
@@ -276,24 +279,24 @@ public final class WebBridge implements PageTransport {
     private void handleCall(final OutputStream theOut, final String theMethod, final String theBody)
         throws IOException {
         if(!"POST".equals(theMethod)) {
-            answer(theOut, 405, "text/plain; charset=utf-8", "POST only");
+            answer(theOut, 405, TEXT_PLAIN_UTF8, "POST only");
             return;
         }
         final JsonElement parsed;
         try {
             parsed = JsonParser.parseString(theBody);
         } catch (final RuntimeException ex) {
-            answer(theOut, 400, "text/plain; charset=utf-8", "body is not JSON");
+            answer(theOut, 400, TEXT_PLAIN_UTF8, "body is not JSON");
             return;
         }
         if(parsed == null || !parsed.isJsonObject()) {
-            answer(theOut, 400, "text/plain; charset=utf-8", "body is not a JSON object");
+            answer(theOut, 400, TEXT_PLAIN_UTF8, "body is not a JSON object");
             return;
         }
         final JsonObject call = parsed.getAsJsonObject();
         final String name = text(call, "m");
         if(name.isEmpty()) {
-            answer(theOut, 400, "text/plain; charset=utf-8", "no method in the call");
+            answer(theOut, 400, TEXT_PLAIN_UTF8, "no method in the call");
             return;
         }
         final JsonObject arguments = call.has("a") && call.get("a").isJsonObject()
@@ -325,16 +328,20 @@ public final class WebBridge implements PageTransport {
     private String pollEvents() {
         final long deadline = System.currentTimeMillis() + POLL_WAIT_MS;
         synchronized(ourEvents) {
-            while(ourEvents.isEmpty() && ourOpen) {
+            boolean timedOut = false;
+            // single loop exit: the deadline and the interrupt flag close the
+            // wait through the while condition instead of breaking twice
+            while(!timedOut && ourEvents.isEmpty() && ourOpen) {
                 final long left = deadline - System.currentTimeMillis();
                 if(left <= 0) {
-                    break;
-                }
-                try {
-                    ourEvents.wait(left);
-                } catch (final InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                    break;
+                    timedOut = true;
+                } else {
+                    try {
+                        ourEvents.wait(left);
+                    } catch (final InterruptedException ex) {
+                        Thread.currentThread().interrupt();
+                        timedOut = true;
+                    }
                 }
             }
             return BridgePushDelivery.renderBatch(drainLocked());

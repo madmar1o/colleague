@@ -28,6 +28,17 @@ public final class QdrantClient {
     /** Points per page while walking the stored point set. */
     private static final int SCROLL_PAGE_LIMIT = 256;
 
+    /** Qdrant REST path root and the response payload field names. */
+    // relative REST path fragment, not a configurable URI: the host comes from
+    // the store URL setting, this constant is only its tail
+    @SuppressWarnings("java:S1075")
+    private static final String COLLECTIONS_PATH = "/collections/";
+    private static final String RESULT = "result";
+    private static final String POINTS = "points";
+    private static final String PAYLOAD = "payload";
+    private static final String VECTORS = "vectors";
+    private static final String DELETE_METHOD = "DELETE";
+
     private final String baseUrl;
     private final HttpTransport transport;
     private final int readTimeoutMs;
@@ -75,7 +86,7 @@ public final class QdrantClient {
     public boolean isAlive() {
         try {
             final JsonObject response = call("GET", "/collections", null);
-            return response.has("result");
+            return response.has(RESULT);
         } catch (final QdrantException ex) {
             return false;
         }
@@ -87,7 +98,7 @@ public final class QdrantClient {
      */
     public boolean collectionExists(final String theCollection) {
         try {
-            call("GET", "/collections/" + theCollection, null);
+            call("GET", COLLECTIONS_PATH + theCollection, null);
             return true;
         } catch (final QdrantException ex) {
             return false;
@@ -117,11 +128,11 @@ public final class QdrantClient {
             // the create-collection contract takes vector settings at the
             // top level under the plural "vectors" key; other spellings are
             // silently ignored by the server and leave a vectorless store
-            body.add("vectors", vectorParams);
-            call("PUT", "/collections/" + theCollection, body);
+            body.add(VECTORS, vectorParams);
+            call("PUT", COLLECTIONS_PATH + theCollection, body);
         }
         final JsonObject stored = vectorConfigOf(
-            call("GET", "/collections/" + theCollection, null));
+            call("GET", COLLECTIONS_PATH + theCollection, null));
         if(stored == null) {
             throw new QdrantException("vector store created collection '" + theCollection
                 + "' without vector configuration");
@@ -138,18 +149,18 @@ public final class QdrantClient {
      * single-vector form or any entry of the named-vectors map.
      */
     private static JsonObject vectorConfigOf(final JsonObject theDescription) {
-        if(theDescription == null || !theDescription.has("result")) {
+        if(theDescription == null || !theDescription.has(RESULT)) {
             return null;
         }
-        final JsonObject result = theDescription.getAsJsonObject("result");
+        final JsonObject result = theDescription.getAsJsonObject(RESULT);
         final JsonObject config = result.has("config")
             ? result.getAsJsonObject("config") : null;
         final JsonObject params = config != null && config.has("params")
             ? config.getAsJsonObject("params") : null;
-        if(params == null || !params.has("vectors") || params.get("vectors").isJsonNull()) {
+        if(params == null || !params.has(VECTORS) || params.get(VECTORS).isJsonNull()) {
             return null;
         }
-        final com.google.gson.JsonElement vectors = params.get("vectors");
+        final com.google.gson.JsonElement vectors = params.get(VECTORS);
         if(!vectors.isJsonObject()) {
             return null;
         }
@@ -173,7 +184,7 @@ public final class QdrantClient {
      * @throws QdrantException when deletion fails
      */
     public void dropCollection(final String theCollection) throws QdrantException {
-        call("DELETE", "/collections/" + theCollection, null);
+        call(DELETE_METHOD, COLLECTIONS_PATH + theCollection, null);
     }
 
     /**
@@ -211,12 +222,12 @@ public final class QdrantClient {
             final JsonObject entry = new JsonObject();
             entry.addProperty("id", point.id);
             entry.add("vector", toJsonVector(point.vector));
-            entry.add("payload", point.payload);
+            entry.add(PAYLOAD, point.payload);
             points.add(entry);
         }
         final JsonObject body = new JsonObject();
-        body.add("points", points);
-        call("PUT", "/collections/" + theCollection + "/points?wait=true", body);
+        body.add(POINTS, points);
+        call("PUT", COLLECTIONS_PATH + theCollection + "/points?wait=true", body);
     }
 
     /**
@@ -242,7 +253,7 @@ public final class QdrantClient {
         filter.add("must", must);
         final JsonObject body = new JsonObject();
         body.add("filter", filter);
-        call("POST", "/collections/" + theCollection + "/points/delete?wait=true", body);
+        call("POST", COLLECTIONS_PATH + theCollection + "/points/delete?wait=true", body);
     }
 
     /**
@@ -277,7 +288,7 @@ public final class QdrantClient {
         filter.add("must", must);
         final JsonObject body = new JsonObject();
         body.add("filter", filter);
-        call("POST", "/collections/" + theCollection + "/points/delete?wait=true", body);
+        call("POST", COLLECTIONS_PATH + theCollection + "/points/delete?wait=true", body);
     }
 
     /**
@@ -328,12 +339,12 @@ public final class QdrantClient {
             body.addProperty("score_threshold", theScoreThreshold);
         }
         final JsonObject result =
-            call("POST", "/collections/" + theCollection + "/points/search", body);
+            call("POST", COLLECTIONS_PATH + theCollection + "/points/search", body);
         final List<Hit> hits = new ArrayList<>();
-        if(result.has("result")) {
-            for(final com.google.gson.JsonElement element : result.getAsJsonArray("result")) {
+        if(result.has(RESULT)) {
+            for(final com.google.gson.JsonElement element : result.getAsJsonArray(RESULT)) {
                 final JsonObject hit = element.getAsJsonObject();
-                final JsonObject payload = hit.getAsJsonObject("payload");
+                final JsonObject payload = hit.getAsJsonObject(PAYLOAD);
                 final double score = hit.has("score") ? hit.get("score").getAsDouble() : 0.0;
                 hits.add(new Hit(payload == null ? new JsonObject() : payload,
                     Double.valueOf(score)));
@@ -358,37 +369,62 @@ public final class QdrantClient {
         final List<String> theFields) throws QdrantException {
         final List<JsonObject> payloads = new ArrayList<>();
         String offset = null;
-        while(true) {
-            final JsonObject body = new JsonObject();
-            body.addProperty("limit", Integer.valueOf(SCROLL_PAGE_LIMIT));
-            body.addProperty("with_vector", Boolean.FALSE);
-            final JsonArray fields = new JsonArray();
-            for(final String field : theFields) {
-                fields.add(field);
-            }
-            body.add("with_payload", fields);
-            if(offset != null) {
-                body.addProperty("offset", offset);
-            }
+        boolean morePages = true;
+        // single loop exit: the store handing over no offset (or an empty
+        // page) closes the walk through the while condition
+        while(morePages) {
             final JsonObject result =
-                call("POST", "/collections/" + theCollection + "/points/scroll", body);
-            final JsonObject page = result.getAsJsonObject("result");
-            if(page == null || !page.has("points")) {
-                break;
+                call("POST", COLLECTIONS_PATH + theCollection + "/points/scroll",
+                    scrollBody(offset, theFields));
+            final JsonObject page = result.getAsJsonObject(RESULT);
+            if(page == null || !page.has(POINTS)) {
+                morePages = false;
+            } else {
+                final int pagePoints = appendPage(payloads, page);
+                final com.google.gson.JsonElement next = page.get("next_page_offset");
+                if(next == null || next.isJsonNull() || pagePoints == 0) {
+                    morePages = false;
+                } else {
+                    offset = next.getAsString();
+                }
             }
-            int pagePoints = 0;
-            for(final com.google.gson.JsonElement element : page.getAsJsonArray("points")) {
-                final JsonObject payload = element.getAsJsonObject().getAsJsonObject("payload");
-                payloads.add(payload == null ? new JsonObject() : payload);
-                pagePoints++;
-            }
-            final com.google.gson.JsonElement next = page.get("next_page_offset");
-            if(next == null || next.isJsonNull() || pagePoints == 0) {
-                break;
-            }
-            offset = next.getAsString();
         }
         return payloads;
+    }
+
+    /**
+     * @param theOffset walk offset, {@code null} for the first page
+     * @param theFields payload fields to carry back
+     * @return the request body of one scroll page
+     */
+    private static JsonObject scrollBody(final String theOffset, final List<String> theFields) {
+        final JsonObject body = new JsonObject();
+        body.addProperty("limit", Integer.valueOf(SCROLL_PAGE_LIMIT));
+        body.addProperty("with_vector", Boolean.FALSE);
+        final JsonArray fields = new JsonArray();
+        for(final String field : theFields) {
+            fields.add(field);
+        }
+        body.add("with_payload", fields);
+        if(theOffset != null) {
+            body.addProperty("offset", theOffset);
+        }
+        return body;
+    }
+
+    /**
+     * @param thePayloads collected payloads, the page ones are appended
+     * @param thePage one scroll page answer
+     * @return points the page carried
+     */
+    private static int appendPage(final List<JsonObject> thePayloads, final JsonObject thePage) {
+        int pagePoints = 0;
+        for(final com.google.gson.JsonElement element : thePage.getAsJsonArray(POINTS)) {
+            final JsonObject payload = element.getAsJsonObject().getAsJsonObject(PAYLOAD);
+            thePayloads.add(payload == null ? new JsonObject() : payload);
+            pagePoints++;
+        }
+        return pagePoints;
     }
 
     /**
@@ -397,14 +433,15 @@ public final class QdrantClient {
      * @param theCollection collection name
      * @return point count, {@code -1} when unknown
      */
-    public long count(final String theCollection) {        try {
+    public long count(final String theCollection) {
+        try {
             final JsonObject body = new JsonObject();
             body.addProperty("exact", Boolean.TRUE);
             final JsonObject result =
-                call("POST", "/collections/" + theCollection + "/points/count", body);
-            if(result.has("result")
-                && result.getAsJsonObject("result").has("count")) {
-                return result.getAsJsonObject("result").get("count").getAsLong();
+                call("POST", COLLECTIONS_PATH + theCollection + "/points/count", body);
+            if(result.has(RESULT)
+                && result.getAsJsonObject(RESULT).has("count")) {
+                return result.getAsJsonObject(RESULT).get("count").getAsLong();
             }
         } catch (final QdrantException ex) {
             // count is informational only
@@ -417,8 +454,8 @@ public final class QdrantClient {
         HttpCallSpec call;
         if("GET".equals(theMethod)) {
             call = HttpCallSpec.getJson(baseUrl + thePath, readTimeoutMs);
-        } else if("DELETE".equals(theMethod)) {
-            call = HttpCallSpec.json("DELETE", baseUrl + thePath,
+        } else if(DELETE_METHOD.equals(theMethod)) {
+            call = HttpCallSpec.json(DELETE_METHOD, baseUrl + thePath,
                 theBody == null ? null : theBody.toString(), readTimeoutMs);
         } else {
             call = HttpCallSpec.json(theMethod, baseUrl + thePath,

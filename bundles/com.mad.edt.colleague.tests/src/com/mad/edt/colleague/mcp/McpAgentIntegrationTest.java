@@ -34,6 +34,8 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 class McpAgentIntegrationTest {
 
+    private static final String TOOL = "mcp_stdio_echo";
+
     /**
      * Round-trips the scripted list and remembers every request, so the test
      * can read what the loop advertised and what tool results reached the
@@ -136,12 +138,12 @@ class McpAgentIntegrationTest {
                 () -> List.of(config));
             final List<IToolExecutor> remote =
                 catalog.tools(Set.of("read_file"), question -> "yes");
-            Assertions.assertEquals(List.of("mcp_stdio_echo"),
+            Assertions.assertEquals(List.of(TOOL),
                 remote.stream().map(IToolExecutor::getName).toList());
 
             final List<IToolExecutor> tools = new ArrayList<>(remote);
             final ScriptedProvider provider = new ScriptedProvider(List.of(
-                toolRound("mcp_stdio_echo", "{}"),
+                toolRound(TOOL, "{}"),
                 finalRound("the server answered")));
             final AgentAnswer answer = new AgentLoop(provider, tools, "stub", 5,
                 new CancellationFlag()).run("sys", "call the remote echo");
@@ -149,7 +151,7 @@ class McpAgentIntegrationTest {
             Assertions.assertEquals("the server answered", answer.getText());
             final List<String> advertised =
                 provider.requests.get(0).getTools().stream().map(ToolSpec::getName).toList();
-            Assertions.assertEquals(List.of("mcp_stdio_echo"), advertised);
+            Assertions.assertEquals(List.of(TOOL), advertised);
             final String toolResult = provider.requests.get(1).getMessages().stream()
                 .map(ChatMessage::getContent)
                 .filter(text -> text != null && text.contains("stdio echo ok"))

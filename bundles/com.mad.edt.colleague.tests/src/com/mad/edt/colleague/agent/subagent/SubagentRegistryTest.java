@@ -11,16 +11,19 @@ import org.junit.jupiter.api.Test;
  */
 class SubagentRegistryTest {
 
+    private static final String EXPLORER = "explorer";
+    private static final String MODEL = "plain";
+
     @Test
     @DisplayName("a session is kept under its name and can be taken back")
     void sessionIsKeptUnderItsName() {
         final SubagentRegistry registry = new SubagentRegistry();
 
-        registry.put("explorer", new SubagentRegistry.Session("look", "plain"));
-        final SubagentRegistry.Session live = registry.get("explorer");
+        registry.put(EXPLORER, new SubagentRegistry.Session("look", MODEL));
+        final SubagentRegistry.Session live = registry.get(EXPLORER);
 
         Assertions.assertNotNull(live);
-        Assertions.assertEquals("plain", live.modelName());
+        Assertions.assertEquals(MODEL, live.modelName());
         Assertions.assertNull(registry.get("nobody"));
     }
 
@@ -30,7 +33,7 @@ class SubagentRegistryTest {
         final SubagentRegistry registry = new SubagentRegistry();
 
         for(int index = 0; index < SubagentRegistry.MAX_SESSIONS + 2; index++) {
-            registry.put("agent" + index, new SubagentRegistry.Session("task", "plain"));
+            registry.put("agent" + index, new SubagentRegistry.Session("task", MODEL));
         }
 
         Assertions.assertEquals(SubagentRegistry.MAX_SESSIONS, registry.size());
@@ -45,10 +48,10 @@ class SubagentRegistryTest {
     void sameNameReplacesInPlace() {
         final SubagentRegistry registry = new SubagentRegistry();
 
-        registry.put("explorer", new SubagentRegistry.Session("first", "plain"));
-        registry.put("explorer", new SubagentRegistry.Session("second", "plain"));
+        registry.put(EXPLORER, new SubagentRegistry.Session("first", MODEL));
+        registry.put(EXPLORER, new SubagentRegistry.Session("second", MODEL));
 
         Assertions.assertEquals(1, registry.size());
-        Assertions.assertEquals("second", registry.get("explorer").description());
+        Assertions.assertEquals("second", registry.get(EXPLORER).description());
     }
 }

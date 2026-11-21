@@ -20,10 +20,12 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class AgentCatalogTest {
 
+    private static final String PERSONAL = "personal";
+
     @Test
     @DisplayName("a project profile replaces the personal profile of the same id")
     void projectLevelOverridesPersonalById(@TempDir final Path theRoot) throws IOException {
-        final Path personal = Files.createDirectories(theRoot.resolve("personal"));
+        final Path personal = Files.createDirectories(theRoot.resolve(PERSONAL));
         final Path project = Files.createDirectories(theRoot.resolve("project"));
         Files.writeString(personal.resolve("reviewer.md"),
             "---\ndescription: personal take\n---\nPersonal prompt.\n", StandardCharsets.UTF_8);
@@ -42,7 +44,7 @@ class AgentCatalogTest {
     @Test
     @DisplayName("both levels merge into one list sorted by name")
     void bothLevelsMergeSorted(@TempDir final Path theRoot) throws IOException {
-        final Path personal = Files.createDirectories(theRoot.resolve("personal"));
+        final Path personal = Files.createDirectories(theRoot.resolve(PERSONAL));
         final Path project = Files.createDirectories(theRoot.resolve("project"));
         Files.writeString(personal.resolve("zebra.md"),
             "---\ndescription: personal zebra\n---\n", StandardCharsets.UTF_8);
@@ -66,7 +68,7 @@ class AgentCatalogTest {
     @Test
     @DisplayName("a missing level is not an error: the other one alone is the catalogue")
     void missingLevelsAreEmpty(@TempDir final Path theRoot) throws IOException {
-        final Path personal = Files.createDirectories(theRoot.resolve("personal"));
+        final Path personal = Files.createDirectories(theRoot.resolve(PERSONAL));
         Files.writeString(personal.resolve("solo.md"),
             "---\ndescription: personal only\n---\n", StandardCharsets.UTF_8);
         final Path absent = theRoot.resolve("no-such-dir");

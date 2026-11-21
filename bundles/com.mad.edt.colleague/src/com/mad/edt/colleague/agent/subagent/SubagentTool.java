@@ -31,7 +31,11 @@ public final class SubagentTool implements IToolExecutor {
     /** Round-trips a delegate gets unless its profile asks for another number. */
     public static final int SUBAGENT_MAX_STEPS = 4;
 
-    private static final String TOOL_NAME = "subagent";
+    /** Tool id the delegate spawner is addressed by. */
+    public static final String TOOL_NAME = "subagent";
+    /** Argument field names the subagent tool declares and reads back. */
+    private static final String DESCRIPTION = "description";
+    private static final String PROMPT = "prompt";
 
     /**
      * Hears about one finished delegate turn so the chat page can show a card
@@ -123,13 +127,13 @@ public final class SubagentTool implements IToolExecutor {
     public ToolSpec getSpec() {
         final JsonObject properties = new JsonObject();
         properties.add("agent", stringProperty("profile name of the delegate, optional"));
-        properties.add("description", stringProperty("what the delegate is asked to do"));
-        properties.add("prompt", stringProperty("task text the delegate works on"));
+        properties.add(DESCRIPTION, stringProperty("what the delegate is asked to do"));
+        properties.add(PROMPT, stringProperty("task text the delegate works on"));
         final JsonObject schema = new JsonObject();
         schema.addProperty("type", "object");
         schema.add("properties", properties);
         final JsonArray required = new JsonArray();
-        required.add("prompt");
+        required.add(PROMPT);
         schema.add("required", required);
         return new ToolSpec(TOOL_NAME,
             "Hand a bounded research task to a nested read-only agent. The delegate"
@@ -140,8 +144,8 @@ public final class SubagentTool implements IToolExecutor {
     @Override
     public String execute(final String theArgumentsJson) {
         final JsonObject arguments = parse(theArgumentsJson);
-        return run(textOf(arguments, "agent"), textOf(arguments, "description"),
-            textOf(arguments, "prompt"));
+        return run(textOf(arguments, "agent"), textOf(arguments, DESCRIPTION),
+            textOf(arguments, PROMPT));
     }
 
     /**
@@ -176,22 +180,10 @@ public final class SubagentTool implements IToolExecutor {
         final String name = theAgent == null || theAgent.isBlank()
             ? "delegate" : theAgent.trim();
         final AgentProfile profile = profileNamed(name);
-        final String delegateModel = profile != null && profile.getModelName() != null
-            && !profile.getModelName().isEmpty() ? profile.getModelName() : model;
-        final int steps = profile != null && profile.getMaxSteps() > 0
-            ? profile.getMaxSteps() : SUBAGENT_MAX_STEPS;
+        final String delegateModel = delegateModelFor(profile);
+        final int steps = stepsFor(profile);
 
-        final List<IToolExecutor> delegateTools = new ArrayList<>();
-        final ToolPolicy policy = new ToolPolicy();
-        for(final IToolExecutor tool : parentTools) {
-            // the read-only subset of the parent: a writer is refused by name,
-            // and anything that mutates other state (the plan board, lesson
-            // memory) is not parallel-safe and stays with the parent
-            if(tool.isParallelSafe() && !policy.isWriteTool(tool.getName())
-                && policy.allows(profile, tool.getName())) {
-                delegateTools.add(tool);
-            }
-        }
+        final List<IToolExecutor> delegateTools = delegateToolsFor(profile);
         // the nested level still sees the tool so the model gets a clear
         // refusal about the depth instead of an unknown-tool error
         delegateTools.add(new SubagentTool(provider, delegateModel, parentTools, profiles,
@@ -218,6 +210,44 @@ public final class SubagentTool implements IToolExecutor {
             announce(name, theDescription, failure);
             return failure;
         }
+    }
+
+    /**
+     * @param theProfile delegate profile, may be {@code null}
+     * @return the model of the profile, or the model of this tool
+     */
+    private String delegateModelFor(final AgentProfile theProfile) {
+        return theProfile != null && theProfile.getModelName() != null
+            && !theProfile.getModelName().isEmpty() ? theProfile.getModelName() : model;
+    }
+
+    /**
+     * @param theProfile delegate profile, may be {@code null}
+     * @return the step budget of the profile, or the default budget
+     */
+    private static int stepsFor(final AgentProfile theProfile) {
+        return theProfile != null && theProfile.getMaxSteps() > 0
+            ? theProfile.getMaxSteps() : SUBAGENT_MAX_STEPS;
+    }
+
+    /**
+     * The read-only subset of the parent: a writer is refused by name, and
+     * anything that mutates other state (the plan board, lesson memory) is
+     * not parallel-safe and stays with the parent.
+     *
+     * @param theProfile delegate profile deciding the policy
+     * @return tools the delegate may call
+     */
+    private List<IToolExecutor> delegateToolsFor(final AgentProfile theProfile) {
+        final List<IToolExecutor> delegateTools = new ArrayList<>();
+        final ToolPolicy policy = new ToolPolicy();
+        for(final IToolExecutor tool : parentTools) {
+            if(tool.isParallelSafe() && !policy.isWriteTool(tool.getName())
+                && policy.allows(theProfile, tool.getName())) {
+                delegateTools.add(tool);
+            }
+        }
+        return delegateTools;
     }
 
     /**
@@ -326,7 +356,7 @@ public final class SubagentTool implements IToolExecutor {
     private static JsonObject stringProperty(final String theDescription) {
         final JsonObject property = new JsonObject();
         property.addProperty("type", "string");
-        property.addProperty("description", theDescription);
+        property.addProperty(DESCRIPTION, theDescription);
         return property;
     }
 }

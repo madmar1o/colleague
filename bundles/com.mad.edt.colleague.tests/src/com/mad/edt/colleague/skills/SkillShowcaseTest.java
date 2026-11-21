@@ -27,6 +27,9 @@ class SkillShowcaseTest {
     /** marker text that must never leak from a body into the catalog */
     private static final String BODY_MARKER = "STEP BY STEP BODY MARKER";
 
+    private static final String SKILL_NAME = "reporter";
+    private static final String LOAD_SKILL = "load_skill";
+
     private static SkillRegistry registryOf(final SkillDefinition... theSkills) {
         final SkillRegistry registry = new SkillRegistry();
         for(final SkillDefinition skill : theSkills) {
@@ -38,7 +41,7 @@ class SkillShowcaseTest {
     @Test
     @DisplayName("the catalog block carries name and description, never the body")
     void catalogGoesToSystemPromptNotBodies() {
-        final SkillRegistry registry = registryOf(new SkillDefinition("reporter",
+        final SkillRegistry registry = registryOf(new SkillDefinition(SKILL_NAME,
             "prints workspace reports", BODY_MARKER + " with the full instruction text",
             List.of()));
 
@@ -46,9 +49,9 @@ class SkillShowcaseTest {
 
         Assertions.assertTrue(catalog.contains("available_skills"),
             "the block must name itself so the model knows what it reads");
-        Assertions.assertTrue(catalog.contains("reporter"), catalog);
+        Assertions.assertTrue(catalog.contains(SKILL_NAME), catalog);
         Assertions.assertTrue(catalog.contains("prints workspace reports"), catalog);
-        Assertions.assertTrue(catalog.contains("load_skill"),
+        Assertions.assertTrue(catalog.contains(LOAD_SKILL),
             "the catalog must tell the model how to pick a skill up");
         Assertions.assertFalse(catalog.contains(BODY_MARKER),
             "the full body must not ride in the catalog block: " + catalog);
@@ -71,7 +74,7 @@ class SkillShowcaseTest {
     @Test
     @DisplayName("load_skill hands over the body plus a sampled file list")
     void loadSkillToolReturnsBody(@TempDir final Path theRoot) throws Exception {
-        final Path skillDir = Files.createDirectories(theRoot.resolve("reporter"));
+        final Path skillDir = Files.createDirectories(theRoot.resolve(SKILL_NAME));
         Files.writeString(skillDir.resolve("SKILL.md"), "---\nname: reporter\ndescription:"
             + " prints workspace reports\n---\n" + BODY_MARKER + "\n", StandardCharsets.UTF_8);
         for(int file = 1; file <= 12; file++) {
@@ -84,8 +87,8 @@ class SkillShowcaseTest {
 
         final SkillTool tool = new SkillTool(registry);
         final ToolSpec spec = tool.getSpec();
-        Assertions.assertEquals("load_skill", tool.getName());
-        Assertions.assertEquals("load_skill", spec.getName());
+        Assertions.assertEquals(LOAD_SKILL, tool.getName());
+        Assertions.assertEquals(LOAD_SKILL, spec.getName());
         Assertions.assertTrue(spec.getParametersSchema().toString().contains("\"id\""),
             "the declaration must ask for the skill id");
 
@@ -123,8 +126,14 @@ class SkillShowcaseTest {
         final File skillDir = theRoot.resolve("quiet").toFile();
         Assertions.assertTrue(skillDir.mkdirs());
         Files.writeString(new File(skillDir, "SKILL.md").toPath(),
-            "---\nname: quiet\ndescription: hidden from the model\n"
-                + "disable-model-invocation: true\n---\nbody\n", StandardCharsets.UTF_8);
+            """
+            ---
+            name: quiet
+            description: hidden from the model
+            disable-model-invocation: true
+            ---
+            body
+            """, StandardCharsets.UTF_8);
 
         final List<SkillDefinition> loaded = new SkillLoader().loadAll(theRoot.toFile());
 

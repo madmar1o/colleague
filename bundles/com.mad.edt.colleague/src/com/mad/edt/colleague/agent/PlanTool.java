@@ -22,6 +22,9 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 public final class PlanTool implements IToolExecutor {
 
+    /** Tool id the plan board is addressed by. */
+    public static final String TOOL_ID = "update_plan";
+
     private final PlanBoard board;
 
     /**
@@ -33,7 +36,7 @@ public final class PlanTool implements IToolExecutor {
 
     @Override
     public String getName() {
-        return "update_plan";
+        return TOOL_ID;
     }
 
     @Override
@@ -56,31 +59,31 @@ public final class PlanTool implements IToolExecutor {
         final JsonObject entryProperties = new JsonObject();
         final JsonObject content = new JsonObject();
         content.addProperty("type", "string");
-        entryProperties.add("content", content);
+        entryProperties.add(CONTENT, content);
         entryProperties.add("status", status);
 
         final JsonObject entry = new JsonObject();
         entry.addProperty("type", "object");
         entry.add("properties", entryProperties);
         final JsonArray required = new JsonArray();
-        required.add("content");
+        required.add(CONTENT);
         entry.add("required", required);
 
         final JsonObject items = new JsonObject();
         items.addProperty("type", "array");
-        items.add("items", entry);
+        items.add(ITEMS, entry);
 
         final JsonObject properties = new JsonObject();
-        properties.add("items", items);
+        properties.add(ITEMS, items);
 
         final JsonObject schema = new JsonObject();
         schema.addProperty("type", "object");
         schema.add("properties", properties);
         final JsonArray topRequired = new JsonArray();
-        topRequired.add("items");
+        topRequired.add(ITEMS);
         schema.add("required", topRequired);
 
-        return new ToolSpec("update_plan",
+        return new ToolSpec(TOOL_ID,
             "Replace your whole visible task plan with this list. Give every"
                 + " unfinished task one status: pending, active (exactly one"
                 + " at a time) or done. Call it before starting a multi-step"
@@ -98,29 +101,56 @@ public final class PlanTool implements IToolExecutor {
         if(parsed == null || !parsed.isJsonObject()) {
             return ITEMS_ERROR;
         }
-        final JsonElement items = parsed.getAsJsonObject().get("items");
+        final JsonElement items = parsed.getAsJsonObject().get(ITEMS);
         if(items == null || !items.isJsonArray() || items.getAsJsonArray().isEmpty()) {
             return ITEMS_ERROR;
         }
-        final List<Step> plan = new ArrayList<>();
-        for(final JsonElement entry : items.getAsJsonArray()) {
-            final String content = entry.isJsonObject() ? text(entry.getAsJsonObject(), "content") : null;
-            if(content == null || content.isBlank()) {
-                return "ERROR: every step needs a non-empty content";
-            }
-            final String rawStatus = text(entry.getAsJsonObject(), "status");
-            Status status = Status.PENDING;
-            if(rawStatus != null && !rawStatus.isBlank()) {
-                status = toStatus(rawStatus);
-                if(status == null) {
-                    return "ERROR: unknown status '" + rawStatus
-                        + "' (accepted: pending, active, done)";
-                }
-            }
-            plan.add(new Step(content.trim(), status));
+        final List<Step> plan;
+        try {
+            plan = parseSteps(items.getAsJsonArray());
+        } catch (final IllegalArgumentException ex) {
+            return ex.getMessage();
         }
         board.replace(plan);
         return board.render();
+    }
+
+    /**
+     * @param theItems items array of the request
+     * @return the steps
+     * @throws IllegalArgumentException when a step was rejected, the message
+     *             is the reason the model is shown
+     */
+    private static List<Step> parseSteps(final JsonArray theItems) {
+        final List<Step> plan = new ArrayList<>();
+        for(final JsonElement entry : theItems) {
+            plan.add(parseStep(entry));
+        }
+        return plan;
+    }
+
+    /**
+     * @param theEntry one element of the items array
+     * @return the step
+     * @throws IllegalArgumentException when it lacks content or carries an
+     *             unknown status
+     */
+    private static Step parseStep(final JsonElement theEntry) {
+        final String content = theEntry.isJsonObject()
+            ? text(theEntry.getAsJsonObject(), CONTENT) : null;
+        if(content == null || content.isBlank()) {
+            throw new IllegalArgumentException("ERROR: every step needs a non-empty content");
+        }
+        final String rawStatus = text(theEntry.getAsJsonObject(), "status");
+        Status status = Status.PENDING;
+        if(rawStatus != null && !rawStatus.isBlank()) {
+            status = toStatus(rawStatus);
+            if(status == null) {
+                throw new IllegalArgumentException("ERROR: unknown status '" + rawStatus
+                    + "' (accepted: pending, active, done)");
+            }
+        }
+        return new Step(content.trim(), status);
     }
 
     private static Status toStatus(final String theRaw) {
@@ -142,4 +172,8 @@ public final class PlanTool implements IToolExecutor {
     }
 
     private static final String ITEMS_ERROR = "ERROR: items must be a non-empty array of {content, status} objects";
+
+    /** Argument field names of the plan tool schema and payload. */
+    private static final String ITEMS = "items";
+    private static final String CONTENT = "content";
 }

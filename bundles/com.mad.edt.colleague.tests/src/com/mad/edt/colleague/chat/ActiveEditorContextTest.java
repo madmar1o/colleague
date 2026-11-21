@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Test;
  */
 class ActiveEditorContextTest {
 
+    private static final String MODULE_BSL = "Module.bsl";
+
     private static String document(final int theLines) {
         final StringBuilder text = new StringBuilder();
         for(int line = 1; line <= theLines; line++) {
@@ -54,7 +56,7 @@ class ActiveEditorContextTest {
     void caretNearStartBeginsAtFirstLine() {
         final ActiveEditorContext context = new ActiveEditorContext();
 
-        context.show("Module.bsl", 5, document(200));
+        context.show(MODULE_BSL, 5, document(200));
         final String rendered = context.render();
 
         Assertions.assertTrue(rendered.contains("1: line1"), rendered);
@@ -67,7 +69,7 @@ class ActiveEditorContextTest {
     void caretNearEndStopsAtLastLine() {
         final ActiveEditorContext context = new ActiveEditorContext();
 
-        context.show("Module.bsl", 199, document(200));
+        context.show(MODULE_BSL, 199, document(200));
         final String rendered = context.render();
 
         Assertions.assertTrue(rendered.contains("159: line159"), rendered);
@@ -80,7 +82,7 @@ class ActiveEditorContextTest {
     void windowNeverExceedsTheRadius() {
         final ActiveEditorContext context = new ActiveEditorContext();
 
-        context.show("Module.bsl", 500, document(1000));
+        context.show(MODULE_BSL, 500, document(1000));
 
         Assertions.assertEquals(2 * ActiveEditorContext.WINDOW_RADIUS + 1,
             numberedLines(context.render()));
@@ -90,7 +92,7 @@ class ActiveEditorContextTest {
     @DisplayName("closing the editor drops the snapshot")
     void clearedSnapshotIsEmpty() {
         final ActiveEditorContext context = new ActiveEditorContext();
-        context.show("Module.bsl", 3, document(10));
+        context.show(MODULE_BSL, 3, document(10));
 
         context.clear();
 
@@ -112,7 +114,7 @@ class ActiveEditorContextTest {
     void nullTextClearsSnapshot() {
         final ActiveEditorContext context = new ActiveEditorContext();
 
-        context.show("Module.bsl", 3, null);
+        context.show(MODULE_BSL, 3, null);
 
         Assertions.assertEquals("", context.render());
     }
@@ -122,7 +124,7 @@ class ActiveEditorContextTest {
     void emptyDocumentCarriesNothing() {
         final ActiveEditorContext context = new ActiveEditorContext();
 
-        context.show("Module.bsl", 3, "");
+        context.show(MODULE_BSL, 3, "");
 
         Assertions.assertEquals("", context.render());
     }
@@ -132,7 +134,7 @@ class ActiveEditorContextTest {
     void crlfIsStripped() {
         final ActiveEditorContext context = new ActiveEditorContext();
 
-        context.show("Module.bsl", 2, "первая\r\nвторая\r\nтретья\r\n");
+        context.show(MODULE_BSL, 2, "первая\r\nвторая\r\nтретья\r\n");
 
         final String rendered = context.render();
         Assertions.assertFalse(rendered.contains("\r"), rendered.replace("\r", "<CR>"));
@@ -143,11 +145,11 @@ class ActiveEditorContextTest {
     @DisplayName("a caret line outside the document is clamped, not rejected")
     void caretLineIsClampedIntoTheDocument() {
         final ActiveEditorContext context = new ActiveEditorContext();
-        context.show("Module.bsl", 0, document(20));
+        context.show(MODULE_BSL, 0, document(20));
         Assertions.assertTrue(context.render().contains("caret line 1"),
             context.render());
 
-        context.show("Module.bsl", 5_000, document(20));
+        context.show(MODULE_BSL, 5_000, document(20));
         Assertions.assertTrue(context.render().contains("caret line 20"),
             context.render());
     }
@@ -157,7 +159,7 @@ class ActiveEditorContextTest {
     void trailingLineBreakAddsNoLine() {
         final ActiveEditorContext context = new ActiveEditorContext();
 
-        context.show("Module.bsl", 2, "первая\nвторая\n");
+        context.show(MODULE_BSL, 2, "первая\nвторая\n");
 
         final String rendered = context.render();
         Assertions.assertTrue(rendered.contains("2: вторая"), rendered);

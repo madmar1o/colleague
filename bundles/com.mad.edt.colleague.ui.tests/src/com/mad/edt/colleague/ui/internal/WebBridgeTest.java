@@ -28,6 +28,12 @@ import com.google.gson.JsonObject;
  */
 class WebBridgeTest {
 
+    // endpoint paths of the stub bridge under test, not deployment URIs
+    @SuppressWarnings("java:S1075")
+    private static final String PATH_CALL = "/call";
+    @SuppressWarnings("java:S1075")
+    private static final String PATH_EVENTS = "/events";
+
     private WebBridge ourBridge;
 
     /** Calls the page made, in arrival order. */
@@ -72,9 +78,9 @@ class WebBridgeTest {
 
         Assertions.assertTrue(html.contains("colleagueEvents"),
             "the page still delivers events through its own handler");
-        Assertions.assertTrue(html.contains("/call"),
+        Assertions.assertTrue(html.contains(PATH_CALL),
             "the bootstrap sends page calls over HTTP");
-        Assertions.assertTrue(html.contains("/events"),
+        Assertions.assertTrue(html.contains(PATH_EVENTS),
             "the bootstrap collects pushed events by polling");
         Assertions.assertTrue(html.contains(ourBridge.token()),
             "the bootstrap has to know the token to reach the panel");
@@ -83,7 +89,7 @@ class WebBridgeTest {
     @Test
     @DisplayName("a call without the token never reaches the panel")
     void callWithoutTokenIsRefused() throws IOException {
-        final HttpURLConnection reply = post("/call", "{\"m\":\"send\",\"a\":{\"text\":\"hi\"}}",
+        final HttpURLConnection reply = post(PATH_CALL, "{\"m\":\"send\",\"a\":{\"text\":\"hi\"}}",
             "wrong-token");
 
         Assertions.assertEquals(401, reply.getResponseCode());
@@ -94,7 +100,7 @@ class WebBridgeTest {
     @Test
     @DisplayName("a page call arrives in the panel handler as method plus arguments")
     void pageCallReachesThePanel() throws IOException {
-        final HttpURLConnection reply = post("/call",
+        final HttpURLConnection reply = post(PATH_CALL,
             "{\"m\":\"send\",\"a\":{\"text\":\"\\u043f\\u0440\\u0438\\u0432\\u0435\\u0442\"}}",
             ourBridge.token());
 
@@ -112,21 +118,21 @@ class WebBridgeTest {
         payload.addProperty("text", "ответ модели");
         ourBridge.push("answer", payload);
 
-        final String batch = read(get("/events"));
+        final String batch = read(get(PATH_EVENTS));
 
         Assertions.assertTrue(batch.contains("\"answer\""),
             "the event kind must travel, got: " + batch);
         Assertions.assertTrue(batch.contains("ответ модели"),
             "the payload must travel as it was pushed, got: " + batch);
         // the queue is drained once: a second poll sees nothing left
-        Assertions.assertEquals("[]", read(get("/events")));
+        Assertions.assertEquals("[]", read(get(PATH_EVENTS)));
     }
 
     @Test
     @DisplayName("an empty poll waits briefly and answers with an empty batch")
     void emptyPollStaysCheap() throws IOException {
         final long started = System.currentTimeMillis();
-        final String batch = read(get("/events"));
+        final String batch = read(get(PATH_EVENTS));
         final long waited = System.currentTimeMillis() - started;
 
         Assertions.assertEquals("[]", batch);

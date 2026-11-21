@@ -26,6 +26,9 @@ import com.mad.edt.colleague.llm.ToolSpec;
  */
 public final class MetadataTools {
 
+    /** Argument field name of the metadata search tool. */
+    private static final String QUERY = "query";
+
     /**
      * One EDT project whose metadata tree the tools may read: the project
      * name is what the model sees in paths, the folder is the {@code src}
@@ -120,27 +123,39 @@ public final class MetadataTools {
         candidates.sort(Comparator.comparingInt((Path candidate) -> rank(candidate, needle)));
         final List<Hit> hits = new ArrayList<>();
         int reads = 0;
-        for(final Path candidate : candidates) {
+        boolean budgetOpen = true;
+        // single loop exit: hit and read budgets close the walk through the
+        // while condition, non-matching heads are filtered in place
+        for(int step = 0; budgetOpen && step < candidates.size(); step++) {
+            final Path candidate = candidates.get(step);
             if(hits.size() >= MAX_HITS || reads >= MAX_HEAD_READS) {
-                break;
+                budgetOpen = false;
+            } else {
+                reads++;
+                final Head head = readHead(candidate);
+                if(head.name != null && headMatches(head, needle, kindNeedle)) {
+                    hits.add(new Hit(head.kind, head.name, head.synonymRu, candidate));
+                }
             }
-            reads++;
-            final Head head = readHead(candidate);
-            if(head.name == null) {
-                continue;
-            }
-            final String name = head.name.toLowerCase(Locale.ROOT);
-            final String presented = head.synonymRu == null
-                ? "" : head.synonymRu.toLowerCase(Locale.ROOT);
-            if(!name.contains(needle) && !presented.contains(needle)) {
-                continue;
-            }
-            if(!kindNeedle.isEmpty() && !normalizeKind(head.kind).equals(kindNeedle)) {
-                continue;
-            }
-            hits.add(new Hit(head.kind, head.name, head.synonymRu, candidate));
         }
         return hits;
+    }
+
+    /**
+     * @param theHead parsed head of a candidate file
+     * @param theNeedle lower-cased query
+     * @param theKindNeedle normalized kind filter, empty for any kind
+     * @return whether the head passes the name and kind filters
+     */
+    private static boolean headMatches(final Head theHead, final String theNeedle,
+        final String theKindNeedle) {
+        final String name = theHead.name.toLowerCase(Locale.ROOT);
+        final String presented = theHead.synonymRu == null
+            ? "" : theHead.synonymRu.toLowerCase(Locale.ROOT);
+        if(!name.contains(theNeedle) && !presented.contains(theNeedle)) {
+            return false;
+        }
+        return theKindNeedle.isEmpty() || normalizeKind(theHead.kind).equals(theKindNeedle);
     }
 
     /**
@@ -159,28 +174,42 @@ public final class MetadataTools {
             return;
         }
         for(final Path kindFolder : children(src)) {
-            final String folderName = kindFolder.getFileName().toString();
-            if(!theKindNeedle.isEmpty() && !normalizeKind(folderName).equals(theKindNeedle)) {
+            collectInKindFolder(kindFolder, theNeedle, theKindNeedle, theCandidates);
+        }
+    }
+
+    /**
+     * Adds the object files of one kind folder, the configuration file being
+     * a single special case.
+     *
+     * @param theKindFolder folder named after a metadata kind
+     * @param theNeedle lower-cased query
+     * @param theKindNeedle normalized kind filter, empty for any kind
+     * @param theCandidates list the candidate files are added to
+     */
+    private static void collectInKindFolder(final Path theKindFolder, final String theNeedle,
+        final String theKindNeedle, final List<Path> theCandidates) {
+        final String folderName = theKindFolder.getFileName().toString();
+        if(!theKindNeedle.isEmpty() && !normalizeKind(folderName).equals(theKindNeedle)) {
+            return;
+        }
+        if("Configuration".equals(folderName)) {
+            final Path file = theKindFolder.resolve("Configuration.mdo");
+            if(Files.isRegularFile(file)) {
+                theCandidates.add(file);
+            }
+            return;
+        }
+        for(final Path objectFolder : children(theKindFolder)) {
+            final String objectName = objectFolder.getFileName().toString();
+            if(!objectName.toLowerCase(Locale.ROOT).contains(theNeedle)) {
                 continue;
             }
-            if("Configuration".equals(folderName)) {
-                final Path file = kindFolder.resolve("Configuration.mdo");
-                if(Files.isRegularFile(file)) {
-                    theCandidates.add(file);
-                }
-                continue;
-            }
-            for(final Path objectFolder : children(kindFolder)) {
-                final String objectName = objectFolder.getFileName().toString();
-                if(!objectName.toLowerCase(Locale.ROOT).contains(theNeedle)) {
-                    continue;
-                }
-                // form and report descriptors live beside the object file and
-                // are not objects themselves, so the exact file name is asked
-                final Path file = objectFolder.resolve(objectName + ".mdo");
-                if(Files.isRegularFile(file)) {
-                    theCandidates.add(file);
-                }
+            // form and report descriptors live beside the object file and
+            // are not objects themselves, so the exact file name is asked
+            final Path file = objectFolder.resolve(objectName + ".mdo");
+            if(Files.isRegularFile(file)) {
+                theCandidates.add(file);
             }
         }
     }
@@ -239,48 +268,99 @@ public final class MetadataTools {
                 index++;
                 continue;
             }
-            if(theText.startsWith("<?", index)) {
-                index = skipPast(theText, index + 2, "?>");
-                continue;
-            }
-            if(theText.startsWith("<!--", index)) {
-                index = skipPast(theText, index + 4, "-->");
-                continue;
-            }
-            if(theText.startsWith("<![CDATA[", index)) {
-                final int end = theText.indexOf("]]>", index + 9);
-                final int to = end < 0 ? length : end;
-                buffer.append(theText, index + 9, to);
-                index = end < 0 ? length : end + 3;
-                continue;
-            }
-            final int close = theText.indexOf('>', index);
-            if(close < 0) {
-                snapshot.incomplete = true;
-                break;
-            }
-            flush(snapshot, open, buffer);
-            final String raw = theText.substring(index + 1, close).trim();
-            if(!raw.isEmpty() && raw.charAt(0) == '/') {
-                pop(open, raw.substring(1));
-            } else if(!raw.isEmpty()) {
-                final String name = localName(raw);
-                if(!name.isEmpty()) {
-                    if(open.isEmpty() && snapshot.kind == null) {
-                        snapshot.kind = name;
-                    }
-                    if(!raw.endsWith("/")) {
-                        open.addLast(name);
-                    }
-                }
-            }
-            index = close + 1;
+            index = skipMarkup(snapshot, open, buffer, theText, index, length);
         }
         flush(snapshot, open, buffer);
         if(!open.isEmpty()) {
             snapshot.incomplete = true;
         }
         return snapshot;
+    }
+
+    /**
+     * Handles one markup construct at the given position and returns the
+     * position right after it: processing instructions, comments and CDATA
+     * sections are skipped or appended, an opening or closing tag updates the
+     * element stack, an unclosed tag marks the snapshot incomplete.
+     *
+     * @param theSnapshot snapshot being built
+     * @param theOpen stack of open element names
+     * @param theBuffer collected text
+     * @param theText whole document
+     * @param theIndex position of the opening angle bracket
+     * @param theLength document length
+     * @return position right after the construct
+     */
+    private static int skipMarkup(final Snapshot theSnapshot, final Deque<String> theOpen,
+        final StringBuilder theBuffer, final String theText, final int theIndex,
+        final int theLength) {
+        if(theText.startsWith("<?", theIndex)) {
+            return skipPast(theText, theIndex + 2, "?>");
+        }
+        if(theText.startsWith("<!--", theIndex)) {
+            return skipPast(theText, theIndex + 4, "-->");
+        }
+        if(theText.startsWith("<![CDATA[", theIndex)) {
+            return appendCdata(theText, theIndex, theBuffer, theLength);
+        }
+        final int close = theText.indexOf('>', theIndex);
+        if(close < 0) {
+            theSnapshot.incomplete = true;
+            return theLength;
+        }
+        flush(theSnapshot, theOpen, theBuffer);
+        final String raw = theText.substring(theIndex + 1, close).trim();
+        if(!raw.isEmpty() && raw.charAt(0) == '/') {
+            pop(theOpen, raw.substring(1));
+        } else {
+            applyOpenTag(theSnapshot, theOpen, raw);
+        }
+        return close + 1;
+    }
+
+    /**
+     * Appends the text inside a CDATA section to the buffer.
+     *
+     * @param theText whole document
+     * @param theIndex position of the section opening
+     * @param theBuffer collected text
+     * @param theLength document length, used when the section is unclosed
+     * @return position right after the section
+     */
+    private static int appendCdata(final String theText, final int theIndex,
+        final StringBuilder theBuffer, final int theLength) {
+        final int end = theText.indexOf("]]>", theIndex + 9);
+        if(end < 0) {
+            theBuffer.append(theText, theIndex + 9, theLength);
+            return theLength;
+        }
+        theBuffer.append(theText, theIndex + 9, end);
+        return end + 3;
+    }
+
+    /**
+     * Handles an opening tag: the root element names the kind, and a tag that
+     * is not self-closing pushes its name on the open path.
+     *
+     * @param theSnapshot snapshot being filled
+     * @param theOpen currently open elements, innermost last
+     * @param theRaw tag text between the angle brackets
+     */
+    private static void applyOpenTag(final Snapshot theSnapshot, final Deque<String> theOpen,
+        final String theRaw) {
+        if(theRaw.isEmpty()) {
+            return;
+        }
+        final String name = localName(theRaw);
+        if(name.isEmpty()) {
+            return;
+        }
+        if(theOpen.isEmpty() && theSnapshot.kind == null) {
+            theSnapshot.kind = name;
+        }
+        if(!theRaw.endsWith("/")) {
+            theOpen.addLast(name);
+        }
     }
 
     /**
@@ -299,34 +379,75 @@ public final class MetadataTools {
             return;
         }
         final List<String> path = new ArrayList<>(theOpen);
-        final int depth = path.size();
-        final String tag = path.get(depth - 1);
-        final String parent = depth >= 2 ? path.get(depth - 2) : "";
-        if(depth == 2 && "name".equals(tag)) {
-            if(theSnapshot.name == null) {
-                theSnapshot.name = value;
-            }
-        } else if(depth == 3 && "synonym".equals(path.get(1))) {
-            if("key".equals(tag)) {
-                theSnapshot.synonymKey = value;
-            } else if("value".equals(tag)) {
-                if("ru".equals(theSnapshot.synonymKey)) {
-                    theSnapshot.synonymRu = value;
-                }
-            }
-        } else if("name".equals(tag) && depth == 3 && isFieldContainer(path.get(1))) {
-            theSnapshot.beginField(path.get(1), value);
-        } else if("name".equals(tag) && depth == 3 && "tabularSections".equals(path.get(1))) {
-            theSnapshot.beginSection(value);
-        } else if("name".equals(tag) && depth == 4 && "attributes".equals(parent)
-            && "tabularSections".equals(path.get(1))) {
-            theSnapshot.beginSectionField(value);
+        applyValue(theSnapshot, path, path.size(), value);
+    }
+
+    /**
+     * Routes one collected text to the snapshot slot its element path names.
+     *
+     * @param theSnapshot snapshot being filled
+     * @param thePath open element path, innermost last
+     * @param theDepth number of elements in the path
+     * @param theValue trimmed text of the innermost element
+     */
+    private static void applyValue(final Snapshot theSnapshot, final List<String> thePath,
+        final int theDepth, final String theValue) {
+        final String tag = thePath.get(theDepth - 1);
+        final String parent = theDepth >= 2 ? thePath.get(theDepth - 2) : "";
+        if("name".equals(tag)) {
+            applyName(theSnapshot, thePath, theDepth, parent, theValue);
+        } else if(theDepth == 3 && "synonym".equals(thePath.get(1))) {
+            applySynonym(theSnapshot, tag, theValue);
         } else if("types".equals(tag) && theSnapshot.currentField != null) {
-            theSnapshot.currentField.types.add(value);
-        } else if(("length".equals(tag) || "precision".equals(tag) || "scale".equals(tag))
-            && theSnapshot.currentField != null && depth >= 4) {
-            theSnapshot.currentField.qualify(tag, value);
+            theSnapshot.currentField.types.add(theValue);
+        } else if(isQualifierTag(tag) && theSnapshot.currentField != null && theDepth >= 4) {
+            theSnapshot.currentField.qualify(tag, theValue);
         }
+    }
+
+    /**
+     * @param theSnapshot snapshot being filled
+     * @param thePath open element path
+     * @param theDepth number of elements in the path
+     * @param theContainer element one level above the name
+     * @param theValue name text
+     */
+    private static void applyName(final Snapshot theSnapshot, final List<String> thePath,
+        final int theDepth, final String theContainer, final String theValue) {
+        if(theDepth == 2) {
+            if(theSnapshot.name == null) {
+                theSnapshot.name = theValue;
+            }
+        } else if(theDepth == 3 && isFieldContainer(theContainer)) {
+            theSnapshot.beginField(theContainer, theValue);
+        } else if(theDepth == 3 && "tabularSections".equals(theContainer)) {
+            theSnapshot.beginSection(theValue);
+        } else if(theDepth == 4 && "attributes".equals(theContainer)
+            && "tabularSections".equals(thePath.get(1))) {
+            theSnapshot.beginSectionField(theValue);
+        }
+    }
+
+    /**
+     * @param theSnapshot snapshot being filled
+     * @param theTag key or value element inside a synonym pair
+     * @param theValue pair text
+     */
+    private static void applySynonym(final Snapshot theSnapshot, final String theTag,
+        final String theValue) {
+        if("key".equals(theTag)) {
+            theSnapshot.synonymKey = theValue;
+        } else if("value".equals(theTag) && "ru".equals(theSnapshot.synonymKey)) {
+            theSnapshot.synonymRu = theValue;
+        }
+    }
+
+    /**
+     * @param theTag element name
+     * @return whether the element qualifies the current field
+     */
+    private static boolean isQualifierTag(final String theTag) {
+        return "length".equals(theTag) || "precision".equals(theTag) || "scale".equals(theTag);
     }
 
     /**
@@ -392,18 +513,16 @@ public final class MetadataTools {
             }
             if(theText.startsWith("<?", at)) {
                 index = skipPast(theText, at + 2, "?>");
-                continue;
-            }
-            if(theText.startsWith("<!", at)) {
+            } else if(theText.startsWith("<!", at)) {
                 index = skipPast(theText, at + 2, ">");
-                continue;
+            } else {
+                final int close = theText.indexOf('>', at);
+                if(close < 0) {
+                    return null;
+                }
+                final String name = localName(theText.substring(at + 1, close));
+                return name.isEmpty() ? null : name;
             }
-            final int close = theText.indexOf('>', at);
-            if(close < 0) {
-                return null;
-            }
-            final String name = localName(theText.substring(at + 1, close));
-            return name.isEmpty() ? null : name;
         }
         return null;
     }
@@ -515,11 +634,10 @@ public final class MetadataTools {
     }
 
     /**
-     * @param theName argument name
      * @param theDescription argument description
      * @return one JSON-Schema property of type string
      */
-    private static JsonObject stringProperty(final String theName, final String theDescription) {
+    private static JsonObject stringProperty(final String theDescription) {
         final JsonObject property = new JsonObject();
         property.addProperty("type", "string");
         property.addProperty("description", theDescription);
@@ -587,9 +705,9 @@ public final class MetadataTools {
         @Override
         public ToolSpec getSpec() {
             final JsonObject properties = new JsonObject();
-            properties.add("query", stringProperty("query",
+            properties.add(QUERY, stringProperty(
                 "object name or its part as the user says it, e.g. Валюты or Заказ"));
-            properties.add("kind", stringProperty("kind",
+            properties.add("kind", stringProperty(
                 "optional metadata kind: Catalog, Document, InformationRegister, ..."));
             return new ToolSpec("find_metadata",
                 "Find configuration metadata objects (catalogs, documents, registers, ...) by"
@@ -597,13 +715,13 @@ public final class MetadataTools {
                     + " presentation and the workspace-relative .mdo path, exact names first."
                     + " Call this before read_file whenever the question names a metadata"
                     + " object instead of a source line.",
-                schema(properties, "query"));
+                schema(properties, QUERY));
         }
 
         @Override
         public String execute(final String theArgumentsJson) {
             final JsonObject arguments = parseArguments(theArgumentsJson);
-            final String query = stringArgument(arguments, "query");
+            final String query = stringArgument(arguments, QUERY);
             if(query == null || query.isBlank()) {
                 return "ERROR: pass a non-empty query";
             }
@@ -646,11 +764,11 @@ public final class MetadataTools {
         @Override
         public ToolSpec getSpec() {
             final JsonObject properties = new JsonObject();
-            properties.add("path", stringProperty("path",
+            properties.add("path", stringProperty(
                 "workspace-relative .mdo path find_metadata returned"));
-            properties.add("name", stringProperty("name",
+            properties.add("name", stringProperty(
                 "object name, used when no path is passed"));
-            properties.add("kind", stringProperty("kind",
+            properties.add("kind", stringProperty(
                 "optional metadata kind that goes with the name"));
             return new ToolSpec("read_metadata",
                 "Read one configuration metadata object: kind, names, attributes, tabular"
@@ -799,25 +917,39 @@ public final class MetadataTools {
                 return;
             }
             for(int index = 0; index < theSections.size(); index++) {
-                final Section section = theSections.get(index);
-                final StringBuilder line = new StringBuilder("  ").append(section.name);
-                if(!section.fields.isEmpty()) {
-                    line.append(" (").append(section.fields.size()).append("): ");
-                    for(int field = 0; field < section.fields.size() && field < FIELDS_PER_SECTION;
-                        field++) {
-                        if(field > 0) {
-                            line.append(", ");
-                        }
-                        line.append(section.fields.get(field).render());
-                    }
-                    if(section.fields.size() > FIELDS_PER_SECTION) {
-                        line.append(", ...");
-                    }
-                }
-                if(!theOut.line(line.toString())) {
+                if(!theOut.line(sectionLine(theSections.get(index)))) {
                     theOut.skip(theSections.size() - index);
                     return;
                 }
+            }
+        }
+
+        /**
+         * @param theSection section to render
+         * @return its line with the first attribute names of the section
+         */
+        private static String sectionLine(final Section theSection) {
+            final StringBuilder line = new StringBuilder("  ").append(theSection.name);
+            if(!theSection.fields.isEmpty()) {
+                appendFirstFields(line, theSection.fields);
+                if(theSection.fields.size() > FIELDS_PER_SECTION) {
+                    line.append(", ...");
+                }
+            }
+            return line.toString();
+        }
+
+        /**
+         * @param theLine line being built
+         * @param theFields section fields, only the first ones are listed
+         */
+        private static void appendFirstFields(final StringBuilder theLine, final List<Field> theFields) {
+            theLine.append(" (").append(theFields.size()).append("): ");
+            for(int field = 0; field < theFields.size() && field < FIELDS_PER_SECTION; field++) {
+                if(field > 0) {
+                    theLine.append(", ");
+                }
+                theLine.append(theFields.get(field).render());
             }
         }
     }
