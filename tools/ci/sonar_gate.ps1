@@ -13,7 +13,7 @@ param(
   [string]$ProjectKey = "colleague-edt-ci",
   [string]$SonarHost = "http://127.0.0.1:9000",
   [string]$Token = $env:SONAR_TOKEN,
-  [string]$TokenFile = "$env:USERPROFILE\.sonar\dsh-scan-token.txt",
+  [string]$TokenFile = "$env:USERPROFILE\.sonar\scan-token.txt",
   [string]$BaselineFile,
   [string]$QualityFile,
   [string]$IssuesFile,
