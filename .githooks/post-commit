@@ -1,0 +1,6 @@
+#!/bin/sh
+# post-commit: записывает событие git и асинхронно просит пересчитать SonarQube.
+. "$(dirname "$0")/_workspace.sh"
+git_event post-commit "subject=\"$(git log -1 --pretty=%s 2>/dev/null)\""
+sonar_track_async
+exit 0

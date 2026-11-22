@@ -1,0 +1,6 @@
+#!/bin/sh
+# post-rewrite: amend/rebase/cherry-pick — событие + фоновый пересчёт SonarQube. $1=amend|rebase.
+. "$(dirname "$0")/_workspace.sh"
+git_event post-rewrite "mode=${1:-unknown}"
+sonar_track_async
+exit 0

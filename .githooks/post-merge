@@ -1,0 +1,6 @@
+#!/bin/sh
+# post-merge: merge/pull — событие + фоновый пересчёт SonarQube. $1=1 если был squash.
+. "$(dirname "$0")/_workspace.sh"
+git_event post-merge "squash=${1:-0}"
+sonar_track_async
+exit 0

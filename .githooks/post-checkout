@@ -1,0 +1,8 @@
+#!/bin/sh
+# post-checkout: переключение ветки (flag=1) — только событие, скан на checkout не запускаем.
+# Аргументы: $1=предыдущий ref, $2=текущий ref, $3=1 при переключении ветки, 0 при clone/checkout пути.
+. "$(dirname "$0")/_workspace.sh"
+if [ "$3" = "1" ]; then
+	git_event post-checkout "from=$(git rev-parse --short "$1" 2>/dev/null) to=$(git rev-parse --short "$2" 2>/dev/null)"
+fi
+exit 0
