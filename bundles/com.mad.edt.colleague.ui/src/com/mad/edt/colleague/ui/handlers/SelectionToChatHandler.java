@@ -5,10 +5,12 @@ import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
 import org.eclipse.jface.text.TextSelection;
 import org.eclipse.jface.viewers.ISelection;
+import org.eclipse.jface.viewers.ISelectionProvider;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.handlers.HandlerUtil;
+import org.eclipse.ui.texteditor.ITextEditor;
 
 import com.mad.edt.colleague.ui.view.ColleagueView;
 
@@ -50,20 +52,87 @@ public abstract class SelectionToChatHandler extends AbstractHandler {
 
     /**
      * Extracts the text selected in the editor the action was called on.
+     * Two providers answer for one editor: the editor site replays only the
+     * selection the part last announced and is left empty after the editor
+     * was deactivated and reactivated, while a text editor's own provider
+     * reads the live source viewer. The non-empty answer wins, the editor's
+     * own one otherwise.
      *
      * @param theEditor the active editor part
-     * @return the selected text, empty when the editor reported no text
-     *         selection
+     * @return the selected text, empty when neither provider reported text
      */
     private static String getSelectedText(final IEditorPart theEditor) {
+        final ISelection picked = pickSelection(
+            editorOwnSelection(theEditor), siteSelection(theEditor));
+        return selectedTextIn(picked);
+    }
+
+    /**
+     * Reads the selection straight from the text editor's own provider, the
+     * one that answers from the source viewer rather than from announcements.
+     *
+     * @param theEditor the active editor part
+     * @return the live selection, {@code null} when the part is no text
+     *         editor or its provider is gone
+     */
+    private static ISelection editorOwnSelection(final IEditorPart theEditor) {
+        if (!(theEditor instanceof ITextEditor)) {
+            return null;
+        }
+        final ISelectionProvider provider =
+            ((ITextEditor) theEditor).getSelectionProvider();
+        return provider == null ? null : provider.getSelection();
+    }
+
+    /**
+     * Reads the selection the editor part announced to the workbench.
+     *
+     * @param theEditor the active editor part
+     * @return the announced selection, {@code null} when the part has no
+     *         site or no selection provider
+     */
+    private static ISelection siteSelection(final IEditorPart theEditor) {
         if (theEditor.getEditorSite() == null
                 || theEditor.getEditorSite().getSelectionProvider() == null) {
-            return "";
+            return null;
         }
-        final ISelection selection =
-            theEditor.getEditorSite().getSelectionProvider().getSelection();
-        if (selection instanceof TextSelection) {
-            return ((TextSelection) selection).getText();
+        return theEditor.getEditorSite().getSelectionProvider().getSelection();
+    }
+
+    /**
+     * Chooses which of the two selections to read the code from: a text
+     * selection carrying text outranks a blank one, and with neither
+     * carrying text the editor's own answer is kept, because an empty
+     * selection there is the honest state of the source viewer.
+     *
+     * @param theEditorSelection selection from the editor's own provider,
+     *            possibly {@code null}
+     * @param theSiteSelection selection announced to the workbench,
+     *            possibly {@code null}
+     * @return the selection to read, {@code null} when both providers are
+     *         missing
+     */
+    static ISelection pickSelection(final ISelection theEditorSelection,
+        final ISelection theSiteSelection) {
+        if (!selectedTextIn(theEditorSelection).isEmpty()) {
+            return theEditorSelection;
+        }
+        if (!selectedTextIn(theSiteSelection).isEmpty()) {
+            return theSiteSelection;
+        }
+        return theEditorSelection != null ? theEditorSelection : theSiteSelection;
+    }
+
+    /**
+     * @param theSelection a selection from either provider, possibly
+     *            {@code null}
+     * @return the text of a text selection, empty for any other selection
+     *         or when it carries none
+     */
+    static String selectedTextIn(final ISelection theSelection) {
+        if (theSelection instanceof TextSelection) {
+            final String text = ((TextSelection) theSelection).getText();
+            return text == null ? "" : text;
         }
         return "";
     }
