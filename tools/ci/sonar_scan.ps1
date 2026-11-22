@@ -114,7 +114,7 @@ if (-not $CollectOnly) {
 
 $issues = Get-Issues $ProjectKey
 $file = Join-Path $OutDir "$ProjectKey-issues.json"
-$issues | ConvertTo-Json -Depth 6 | Set-Content -Path $file -Encoding UTF8
+ConvertTo-Json -InputObject @($issues) -Depth 6 | Set-Content -Path $file -Encoding UTF8
 $byRule = $issues | Group-Object rule | Sort-Object Count -Descending
 $summary = [pscustomobject]@{
   project = $ProjectKey
