@@ -82,7 +82,10 @@ function Invoke-Build {
 }
 
 function Invoke-Sonar([string]$rule) {
-  & (Join-Path $here 'sonar_scan.ps1')
+  & (Join-Path $here 'jacoco_report.ps1')
+  if ($LASTEXITCODE -ne 0) { exit 1 }
+  & (Join-Path $here 'sonar_scan.ps1') -ExtraProps @(
+    '-Dsonar.coverage.jacoco.xmlReportPaths=/usr/src/out/ci/jacoco.xml')
   if ($LASTEXITCODE -ne 0) { exit 1 }
   if ($rule) {
     & (Join-Path $here 'sonar_gate.ps1') -Rule $rule
@@ -96,7 +99,7 @@ try {
   switch ($Stage) {
     'hygiene' { Step 'hygiene' { Invoke-Hygiene } }
     'build' { Step 'build' { Invoke-Build } }
-    'sonar' { Step 'sonar' { Invoke-Sonar $Rule } }
+    'sonar' { Step 'build' { Invoke-Build }; Step 'sonar' { Invoke-Sonar $Rule } }
     'all' {
       Step 'hygiene' { Invoke-Hygiene }
       Step 'build' { Invoke-Build }
