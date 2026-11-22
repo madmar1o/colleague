@@ -24,6 +24,7 @@ import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.events.KeyAdapter;
 import org.eclipse.swt.events.KeyEvent;
 import org.eclipse.swt.graphics.Color;
+import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.graphics.RGB;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
@@ -321,6 +322,7 @@ public final class ChatPanel {
                 final JsonObject payload = new JsonObject();
                 payload.addProperty("text", theQuestion);
                 pushNow("input", payload);
+                nudgeBrowserPaint();
             } else {
                 // the page defines its event entry point only once it has
                 // loaded: an input event pushed now would be dropped by the
@@ -334,6 +336,31 @@ public final class ChatPanel {
             ourQuestion.setText(theQuestion);
         }
         setFocus();
+    }
+
+    /**
+     * Makes the embedded browser present the frame an input fill just
+     * changed without a user gesture: the webview surface keeps showing
+     * the previous paint until the control's geometry moves, so a staged
+     * question would otherwise sit invisible in a form that looks
+     * untouched until the user drags a pane border. One pixel off the
+     * browser's width, and the panel's layout puts it back.
+     */
+    private void nudgeBrowserPaint() {
+        if(ourBridge == null || ourRoot.isDisposed()) {
+            return;
+        }
+        final Control control = ourBridge.getControl();
+        if(control == null || control.isDisposed()) {
+            return;
+        }
+        final Point size = control.getSize();
+        final int nudged = BrowserPaintNudge.nudgedWidth(size.x);
+        if(nudged == size.x) {
+            return;
+        }
+        control.setSize(nudged, size.y);
+        ourRoot.requestLayout();
     }
 
     /**
@@ -723,6 +750,7 @@ public final class ChatPanel {
                 final JsonObject stagedPayload = new JsonObject();
                 stagedPayload.addProperty("text", stagedFill);
                 pushNow("input", stagedPayload);
+                nudgeBrowserPaint();
             }
             setStatus(AgentMode.isOn()
                 ? "Режим правки ВКЛЮЧЁН — агент с инструментами проекта"
