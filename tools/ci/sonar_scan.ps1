@@ -19,7 +19,7 @@ param(
   # by default its URL is resolved from the SonarQube container's bridge IP
   [string]$ScannerContainer = "sonarqube",
   [string]$Token = $env:SONAR_TOKEN,
-  [string]$TokenFile = "$env:USERPROFILE\.sonar\dsh-scan-token.txt",
+  [string]$TokenFile = "$env:USERPROFILE\.sonar\scan-token.txt",
   [string]$OutDir,
   [int]$TimeoutSec = 900,
   [string[]]$ExtraProps = @(),

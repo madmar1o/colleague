@@ -158,8 +158,8 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           $tok = $env:SONAR_TOKEN
-          if (-not $tok -and (Test-Path "$env:USERPROFILE\.sonar\dsh-scan-token.txt")) {
-            $tok = (Get-Content "$env:USERPROFILE\.sonar\dsh-scan-token.txt" -Raw).Trim()
+          if (-not $tok -and (Test-Path "$env:USERPROFILE\.sonar\scan-token.txt")) {
+            $tok = (Get-Content "$env:USERPROFILE\.sonar\scan-token.txt" -Raw).Trim()
           }
           if (-not $tok) { exit 0 }
           $cred = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${tok}:"))

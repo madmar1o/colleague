@@ -7,7 +7,7 @@ code that fails the build, the tests, the path-guard canon or the Sonar gate.
 
 | Secret | Value | Used by |
 |---|---|---|
-| `SONAR_TOKEN` | user token of the SonarQube instance (`%USERPROFILE%\.sonar\dsh-scan-token.txt` locally) | `ci.yml`, `nightly.yml` |
+| `SONAR_TOKEN` | user token of the SonarQube instance (`%USERPROFILE%\.sonar\scan-token.txt` locally) | `ci.yml`, `nightly.yml` |
 
 Set it with:
 
