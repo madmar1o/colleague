@@ -31,8 +31,8 @@ repositories/com.mad.edt.colleague.repository/   p2 update site (M5)
 ```
 
 Требования: JDK 17 (EDT 2026.1 работает на Java 17), `JAVA_HOME` должен указывать
-на JDK 17 (например `C:\Program Files\Zulu\zulu-17`) — Maven берёт JDK из
-`JAVA_HOME`, а не из `PATH`. Maven ставить не нужно —
+на JDK 17 — Maven берёт JDK из `JAVA_HOME`, а не из `PATH` (в CI на runner-машине
+JDK 17 задаётся переменной `JAVA_HOME_17`). Maven ставить не нужно —
 Maven Wrapper скачает Maven 3.9.9. Первая сборка скачивает p2-метаданные
 EDT Ruby 2026.1 (≈ несколько минут).
 

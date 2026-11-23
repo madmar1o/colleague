@@ -21,9 +21,14 @@ jobs:
       - name: Java 17
         shell: powershell
         run: |
-          if (Test-Path 'C:\Program Files\Zulu\zulu-17') {
-            "JAVA_HOME=C:\Program Files\Zulu\zulu-17" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-            "$env:JAVA_HOME\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          # the JDK location is a property of the runner machine, not of the
+          # repository: JAVA_HOME_17 names it, plain JAVA_HOME is the fallback
+          if ($env:JAVA_HOME_17 -and (Test-Path "$env:JAVA_HOME_17\bin\java.exe")) {
+            "JAVA_HOME=$env:JAVA_HOME_17" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "$env:JAVA_HOME_17\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          } elseif (-not ($env:JAVA_HOME -and (Test-Path "$env:JAVA_HOME\bin\java.exe"))) {
+            Write-Host '::error::no JDK on the runner: set JAVA_HOME_17 (or JAVA_HOME) in the runner .env file'
+            exit 1
           }
 
       - name: Full build and tests
@@ -34,6 +39,7 @@ jobs:
         shell: powershell
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://son.plaksin.crazedns.ru
         run: |
           $ErrorActionPreference = 'Stop'
           powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/sonar_scan.ps1 -ProjectKey colleague-edt
@@ -70,6 +76,7 @@ jobs:
         shell: powershell
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://son.plaksin.crazedns.ru
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/sonar_gate.ps1 -ProjectKey colleague-edt -IssuesFile out/sonar/colleague-edt-issues.json
           "result=$LASTEXITCODE" | Out-File -FilePath $env:GITHUB_OUTPUT -Append

@@ -7,14 +7,16 @@
 #
 # The CI flow analyses each branch into a dedicated project key
 # (colleague-edt-ci by default) because SonarQube Community has no branch
-# analysis; the key is deleted by the workflow afterwards.
+# analysis; the key stays on the server as the CI analysis history.
 #
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/sonar_scan.ps1 [-ProjectKey colleague-edt-ci]
-#        [-SonarHost http://127.0.0.1:9000] [-CollectOnly] [-TimeoutSec 900]
+#        [-SonarHost <url>] [-CollectOnly] [-TimeoutSec 900]
+# Without -SonarHost the SONAR_HOST_URL environment variable wins, then the
+# local loopback instance.
 param(
   [string]$ProjectKey = "colleague-edt-ci",
-  [string]$SonarHost = "http://127.0.0.1:9000",
+  [string]$SonarHost = $(if ($env:SONAR_HOST_URL) { $env:SONAR_HOST_URL } else { 'http://127.0.0.1:9000' }),
   # the scanner runs inside a container and cannot reach the host's loopback;
   # by default its URL is resolved from the SonarQube container's bridge IP
   [string]$ScannerContainer = "sonarqube",

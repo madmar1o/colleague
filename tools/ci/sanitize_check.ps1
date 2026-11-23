@@ -1,5 +1,7 @@
 # sanitize_check.ps1 - fails when tracked files mention third-party AI products
-# (the repository is an independent implementation and must stay clean).
+# (the repository is an independent implementation and must stay clean) or
+# machine-specific absolute paths (the repository is published and portable;
+# the runner machine is described by environment variables, never by paths).
 #
 # Only product/brand names of other AI tools are banned. The plugin's own
 # "agent" feature (skills, tool bridge, agent UX docs) is legitimate and
@@ -10,11 +12,12 @@
 #
 # Exit 0 = clean, 1 = findings, 2 = cannot evaluate.
 param(
-  [string]$AllowFile
+  [string]$AllowFile,
+  [string]$RepoRoot
 )
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repo = Split-Path -Parent (Split-Path -Parent $here)
+$repo = if ($RepoRoot) { $RepoRoot } else { Split-Path -Parent (Split-Path -Parent $here) }
 if (-not $AllowFile) { $AllowFile = Join-Path $repo "ci/sanitize-allow.txt" }
 
 $patterns = @(
@@ -24,7 +27,14 @@ $patterns = @(
   '(?i)\bclaude\b',
   '(?i)\bcopilot\b',
   '(?i)\bchatgpt\b',
-  '(?i)\banthropic\b'
+  '(?i)\banthropic\b',
+  # machine-specific absolute paths: the build machine is configured through
+  # environment variables (JAVA_HOME_17), the repository must not know them
+  'C:\\Program Files\\Zulu',
+  'C:\\actions-runner',
+  'C:\\Users\\',
+  'C:\\WS\\',
+  'C:\\open-project'
 )
 $allow = @()
 if (Test-Path $AllowFile) {

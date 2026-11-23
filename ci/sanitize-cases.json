@@ -1,0 +1,49 @@
+{
+  "comment": "Canon cases for sanitize_check.ps1 machine-path patterns. The runner builds a throwaway git repo from before/after contents and runs the real check with -RepoRoot; expected pass = exit 0, fail = exit 1.",
+  "cases": [
+    {
+      "name": "hardcoded-jdk-path-in-workflow-fails",
+      "expected": "fail",
+      "files": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "before": "name: ci\njobs:\n  build:\n    steps: []\n",
+          "after": "name: ci\njobs:\n  build:\n    steps:\n      - run: if (Test-Path 'C:\\Program Files\\Zulu\\zulu-17') { 'ok' }\n"
+        }
+      ]
+    },
+    {
+      "name": "env-variable-jdk-reference-passes",
+      "expected": "pass",
+      "files": [
+        {
+          "path": "README.md",
+          "before": "build notes\n",
+          "after": "build notes\n\nThe runner points at its JDK through JAVA_HOME_17; the repository never names a machine path.\n"
+        }
+      ]
+    },
+    {
+      "name": "user-profile-path-in-doc-fails",
+      "expected": "fail",
+      "files": [
+        {
+          "path": "docs/NOTES.md",
+          "before": "# notes\n",
+          "after": "# notes\n\nopen C:\\Users\\someone\\settings.json and edit it\n"
+        }
+      ]
+    },
+    {
+      "name": "workspace-drive-path-in-java-fails",
+      "expected": "fail",
+      "files": [
+        {
+          "path": "bundles/x/src/a/B.java",
+          "before": "package a;\npublic class B { }\n",
+          "after": "package a;\npublic class B {\n    static final String P = \"C:\\WS\\DEMO\\.metadata\";\n}\n"
+        }
+      ]
+    }
+  ]
+}

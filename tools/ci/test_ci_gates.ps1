@@ -1,4 +1,5 @@
-# test_ci_gates.ps1 - canon runner for the convention gates (javadoc, version freeze).
+# test_ci_gates.ps1 - canon runner for the convention gates (javadoc, version
+# freeze, machine-path sanitize).
 #
 # Builds a throwaway git repository from the before/after file pairs stored in
 # ci/javadoc-cases.json and ci/version-freeze-cases.json, then runs the real
@@ -19,7 +20,7 @@ function Write-FileContent([string]$root, [string]$rel, [string]$content) {
   [IO.File]::WriteAllText($path, $content.Replace("`r", ''), (New-Object Text.UTF8Encoding($false)))
 }
 
-function Run-CaseSet([string]$setLabel, [string]$casesFile, [string]$checkScript) {
+function Run-CaseSet([string]$setLabel, [string]$casesFile, [string]$checkScript, [switch]$NoBaseRef) {
   if (-not (Test-Path $casesFile)) { Write-Host "MISSING canon file: $casesFile"; return 2 }
   $canon = Get-Content $casesFile -Raw | ConvertFrom-Json
   $failed = 0
@@ -40,7 +41,11 @@ function Run-CaseSet([string]$setLabel, [string]$casesFile, [string]$checkScript
       git add -A | Out-Null
       $subject = if ($case.subject) { $case.subject } else { 'test: case fixture' }
       git commit -q -m $subject | Out-Null
-      & $checkScript -RepoRoot $work -BaseRef 'HEAD~1' | Out-Host
+      if ($NoBaseRef) {
+        & $checkScript -RepoRoot $work | Out-Host
+      } else {
+        & $checkScript -RepoRoot $work -BaseRef 'HEAD~1' | Out-Host
+      }
       $exit = $LASTEXITCODE
       $got = if ($exit -eq 0) { 'pass' } elseif ($exit -eq 1) { 'fail' } else { 'error' }
       if ($got -ne $case.expected) {
@@ -63,6 +68,8 @@ Write-Host '== javadoc gate cases =='
 $total += [int](Run-CaseSet 'javadoc' (Join-Path $repo 'ci/javadoc-cases.json') (Join-Path $repo 'tools/ci/javadoc_check.ps1'))
 Write-Host '== version freeze gate cases =='
 $total += [int](Run-CaseSet 'freeze' (Join-Path $repo 'ci/version-freeze-cases.json') (Join-Path $repo 'tools/ci/version_freeze_check.ps1'))
+Write-Host '== machine-path sanitize cases =='
+$total += [int](Run-CaseSet 'sanitize' (Join-Path $repo 'ci/sanitize-cases.json') (Join-Path $repo 'tools/ci/sanitize_check.ps1') -NoBaseRef)
 if ($total -gt 0) { Write-Host "ci gate tests: $total diverged"; exit 1 }
 Write-Host 'ci gate tests: all cases OK'
 exit 0
