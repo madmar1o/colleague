@@ -68,8 +68,9 @@ function Invoke-Hygiene {
 }
 
 function Invoke-Build {
-  $zulu = 'C:\Program Files\Zulu\zulu-17'
-  if (Test-Path $zulu) { $env:JAVA_HOME = $zulu }
+  # JAVA_HOME_17 is the runner-machine pointer to the JDK 17 installation;
+  # an already exported JAVA_HOME wins, nothing in this repo hardcodes a path
+  if ($env:JAVA_HOME_17) { $env:JAVA_HOME = $env:JAVA_HOME_17 }
   Push-Location $repo
   try {
     & .\mvnw.cmd -B clean verify

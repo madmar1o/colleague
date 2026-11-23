@@ -7,14 +7,16 @@
 #
 # The CI flow analyses each branch into a dedicated project key
 # (colleague-edt-ci by default) because SonarQube Community has no branch
-# analysis; the key is deleted by the workflow afterwards.
+# analysis; the key stays on the server as the CI analysis history.
 #
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/sonar_scan.ps1 [-ProjectKey colleague-edt-ci]
-#        [-SonarHost http://127.0.0.1:9000] [-CollectOnly] [-TimeoutSec 900]
+#        [-SonarHost <url>] [-CollectOnly] [-TimeoutSec 900]
+# Without -SonarHost the SONAR_HOST_URL environment variable wins, then the
+# local loopback instance.
 param(
   [string]$ProjectKey = "colleague-edt-ci",
-  [string]$SonarHost = "http://127.0.0.1:9000",
+  [string]$SonarHost = $(if ($env:SONAR_HOST_URL) { $env:SONAR_HOST_URL } else { 'http://127.0.0.1:9000' }),
   # the scanner runs inside a container and cannot reach the host's loopback;
   # by default its URL is resolved from the SonarQube container's bridge IP
   [string]$ScannerContainer = "sonarqube",
@@ -85,12 +87,17 @@ if (-not $CollectOnly) {
     throw "docker is required for the scanner step"
   }
   $scannerUrl = $SonarHost
-  if ($ScannerContainer) {
+  $u = [Uri]$SonarHost
+  if ($u.IsLoopback -or $u.Host -eq 'localhost') {
+    # a loopback URL is unreachable from the scanner container: resolve the
+    # SonarQube container's bridge IP instead (local development default)
+    if (-not $ScannerContainer) { throw "cannot reach $SonarHost from the scanner container: pass -ScannerContainer or use a non-loopback SONAR_HOST_URL" }
     $sip = (& docker inspect -f "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" $ScannerContainer).Trim()
     if (-not $sip) { throw "container $ScannerContainer not found for the scanner URL" }
-    $port = ([Uri]$SonarHost).Port
-    $scannerUrl = "http://${sip}:$port"
+    $scannerUrl = "http://${sip}:$($u.Port)"
   }
+  # a non-loopback SONAR_HOST_URL (the published https address) is reachable
+  # from the scanner container directly; no rewrite is applied
   $scanArgs = @(
     "run", "--rm",
     "-e", "SONAR_HOST_URL=$scannerUrl",

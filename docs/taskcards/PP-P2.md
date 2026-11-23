@@ -35,7 +35,7 @@ StreamBatcherTest зелёный; стрим в живом EDT визуальн�
 ## Принципы проекта (нарушение = задача не засчитана)
 1. TDD red-first: сначала красный тест, потом реализация, потом зелёный. Тестовые фрагменты:
    com.mad.edt.colleague.tests / com.mad.edt.colleague.context.tests (JUnit 5).
-2. Сборка: cd "colleague"; $env:JAVA_HOME="C:\Program Files\Zulu\zulu-17"; .\mvnw.cmd -B clean verify.
+2. Сборка: cd "colleague"; $env:JAVA_HOME=$env:JAVA_HOME_17; .\mvnw.cmd -B clean verify.
    Каждый коммит — с зелёным clean verify.
 3. SOLID: отдельный пакет и свои интерфейсы на подсистему; слои UI -> agent -> llm/skills/...;
    core-пакеты не импортируют org.eclipse.* кроме Platform/Preferences/IProject/Job.

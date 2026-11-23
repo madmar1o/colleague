@@ -11,7 +11,9 @@
 # Exit code 0 = PASS, 1 = FAIL, 2 = cannot evaluate (fail-closed).
 param(
   [string]$ProjectKey = "colleague-edt-ci",
-  [string]$SonarHost = "http://127.0.0.1:9000",
+  # SONAR_HOST_URL points at the instance (the public address in CI); the
+  # loopback default is the local development setup
+  [string]$SonarHost = $(if ($env:SONAR_HOST_URL) { $env:SONAR_HOST_URL } else { 'http://127.0.0.1:9000' }),
   [string]$Token = $env:SONAR_TOKEN,
   [string]$TokenFile = "$env:USERPROFILE\.sonar\scan-token.txt",
   [string]$BaselineFile,
