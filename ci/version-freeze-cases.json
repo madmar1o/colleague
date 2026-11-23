@@ -1,0 +1,83 @@
+{
+  "help": "Canon cases for tools/ci/version_freeze_check.ps1. Each case lists files with full 'before' and 'after' content; the runner commits 'before' as the base, 'after' as HEAD. The check freezes: Bundle-Version lines in META-INF/MANIFEST.MF, everything under targets/ (target platform definitions), and the tycho.version property in bom/pom.xml. A commit subject in the range carrying '[allow-version-change]' releases the freeze. expected: pass|fail.",
+  "cases": [
+    {
+      "name": "bundle-version-bump-fails",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague/META-INF/MANIFEST.MF",
+          "before": "Manifest-Version: 1.0\nBundle-ManifestVersion: 2\nBundle-Name: %pluginName\nBundle-Vendor: %providerName\nBundle-Version: 1.0.0.qualifier\nBundle-SymbolicName: com.mad.edt.colleague;singleton:=true\n",
+          "after": "Manifest-Version: 1.0\nBundle-ManifestVersion: 2\nBundle-Name: %pluginName\nBundle-Vendor: %providerName\nBundle-Version: 1.1.0.qualifier\nBundle-SymbolicName: com.mad.edt.colleague;singleton:=true\n"
+        }
+      ],
+      "expected": "fail"
+    },
+    {
+      "name": "target-file-change-fails",
+      "files": [
+        {
+          "path": "targets/colleague-2026.1/colleague-2026.1.target",
+          "before": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<target>\n  <location includeAllPlatforms=\"false\" type=\"InstallableUnit\">\n    <unit id=\"com._1c.g5.v8.dt.feature.feature.group\" version=\"2026.1.0\"/>\n  </location>\n</target>\n",
+          "after": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<target>\n  <location includeAllPlatforms=\"false\" type=\"InstallableUnit\">\n    <unit id=\"com._1c.g5.v8.dt.feature.feature.group\" version=\"2026.2.0\"/>\n  </location>\n</target>\n"
+        }
+      ],
+      "expected": "fail"
+    },
+    {
+      "name": "tycho-property-change-fails",
+      "files": [
+        {
+          "path": "bom/pom.xml",
+          "before": "<project>\n  <properties>\n    <tycho.version>4.0.13</tycho.version>\n    <jacoco.version>0.8.12</jacoco.version>\n  </properties>\n</project>\n",
+          "after": "<project>\n  <properties>\n    <tycho.version>4.0.14</tycho.version>\n    <jacoco.version>0.8.12</jacoco.version>\n  </properties>\n</project>\n"
+        }
+      ],
+      "expected": "fail"
+    },
+    {
+      "name": "jacoco-property-change-passes",
+      "files": [
+        {
+          "path": "bom/pom.xml",
+          "before": "<project>\n  <properties>\n    <tycho.version>4.0.13</tycho.version>\n    <jacoco.version>0.8.12</jacoco.version>\n  </properties>\n</project>\n",
+          "after": "<project>\n  <properties>\n    <tycho.version>4.0.13</tycho.version>\n    <jacoco.version>0.8.13</jacoco.version>\n  </properties>\n</project>\n"
+        }
+      ],
+      "expected": "pass"
+    },
+    {
+      "name": "explicit-allow-marker-passes",
+      "subject": "build: move to the 2026.2 target platform [allow-version-change]",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague/META-INF/MANIFEST.MF",
+          "before": "Manifest-Version: 1.0\nBundle-Version: 1.0.0.qualifier\n",
+          "after": "Manifest-Version: 1.0\nBundle-Version: 1.1.0.qualifier\n"
+        }
+      ],
+      "expected": "pass"
+    },
+    {
+      "name": "ordinary-code-change-passes",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague/src/com/mad/edt/colleague/chat/Chat.java",
+          "before": "package com.mad.edt.colleague.chat;\n\npublic class Chat {\n    void send() {\n    }\n}\n",
+          "after": "package com.mad.edt.colleague.chat;\n\npublic class Chat {\n    private final int limit = 10;\n\n    void send() {\n    }\n}\n"
+        }
+      ],
+      "expected": "pass"
+    },
+    {
+      "name": "manifest-touch-without-version-change-passes",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague/META-INF/MANIFEST.MF",
+          "before": "Manifest-Version: 1.0\nBundle-ActivationPolicy: lazy\nBundle-Localization: plugin\n",
+          "after": "Manifest-Version: 1.0\nBundle-ActivationPolicy: lazy\nBundle-RequiredExecutionEnvironment: JavaSE-17\nBundle-Localization: plugin\n"
+        }
+      ],
+      "expected": "pass"
+    }
+  ]
+}

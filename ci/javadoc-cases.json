@@ -1,0 +1,104 @@
+{
+  "help": "Canon cases for tools/ci/javadoc_check.ps1. Each case lists files with full 'before' and 'after' content; the runner commits 'before' as the base, 'after' as HEAD, and the check inspects git diff BaseRef..HEAD. The check must flag every added public/protected type or method declaration under bundles/*/src (non-tests) that has no Javadoc block directly above it (annotation lines may sit between the doc and the declaration). expected: pass|fail.",
+  "cases": [
+    {
+      "name": "undocumented-new-public-method-fails",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague.chat/src/com/mad/edt/colleague/chat/Foo.java",
+          "before": "package com.mad.edt.colleague.chat;\n\npublic class Foo {\n    int kept = 1;\n}\n",
+          "after": "package com.mad.edt.colleague.chat;\n\npublic class Foo {\n    int kept = 1;\n    public String greet(String who) {\n        return \"hi \" + who;\n    }\n}\n"
+        }
+      ],
+      "expected": "fail"
+    },
+    {
+      "name": "documented-new-public-method-passes",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague.chat/src/com/mad/edt/colleague/chat/Foo.java",
+          "before": "package com.mad.edt.colleague.chat;\n\npublic class Foo {\n    int kept = 1;\n}\n",
+          "after": "package com.mad.edt.colleague.chat;\n\npublic class Foo {\n    int kept = 1;\n    /**\n     * Greets somebody by name.\n     */\n    public String greet(String who) {\n        return \"hi \" + who;\n    }\n}\n"
+        }
+      ],
+      "expected": "pass"
+    },
+    {
+      "name": "doc-then-annotation-then-declaration-passes",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague.chat/src/com/mad/edt/colleague/chat/Foo.java",
+          "before": "package com.mad.edt.colleague.chat;\n\npublic class Foo {\n    int kept = 1;\n}\n",
+          "after": "package com.mad.edt.colleague.chat;\n\npublic class Foo {\n    int kept = 1;\n    /**\n     * Counts things.\n     */\n    @Deprecated\n    public int count() {\n        return 0;\n    }\n}\n"
+        }
+      ],
+      "expected": "pass"
+    },
+    {
+      "name": "private-new-method-not-required",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague.chat/src/com/mad/edt/colleague/chat/Foo.java",
+          "before": "package com.mad.edt.colleague.chat;\n\npublic class Foo {\n    int kept = 1;\n}\n",
+          "after": "package com.mad.edt.colleague.chat;\n\npublic class Foo {\n    int kept = 1;\n    private int helper() {\n        return 0;\n    }\n}\n"
+        }
+      ],
+      "expected": "pass"
+    },
+    {
+      "name": "test-sources-exempt",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague.tests/src/com/mad/edt/colleague/chat/FooTest.java",
+          "before": "package com.mad.edt.colleague.chat;\n\npublic class FooTest {\n    int kept = 1;\n}\n",
+          "after": "package com.mad.edt.colleague.chat;\n\npublic class FooTest {\n    int kept = 1;\n    public void shouldGreet() {\n        Assertions.assertNotNull(new Foo());\n    }\n}\n"
+        }
+      ],
+      "expected": "pass"
+    },
+    {
+      "name": "undocumented-new-public-class-fails",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague.chat/src/com/mad/edt/colleague/chat/Bar.java",
+          "before": "",
+          "after": "package com.mad.edt.colleague.chat;\n\npublic class Bar {\n}\n"
+        }
+      ],
+      "expected": "fail"
+    },
+    {
+      "name": "documented-new-public-class-passes",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague.chat/src/com/mad/edt/colleague/chat/Bar.java",
+          "before": "",
+          "after": "package com.mad.edt.colleague.chat;\n\n/**\n * A documented thing.\n */\npublic class Bar {\n}\n"
+        }
+      ],
+      "expected": "pass"
+    },
+    {
+      "name": "interface-method-needs-doc",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague.chat/src/com/mad/edt/colleague/chat/Api.java",
+          "before": "package com.mad.edt.colleague.chat;\n\npublic interface Api {\n    void kept();\n}\n",
+          "after": "package com.mad.edt.colleague.chat;\n\npublic interface Api {\n    void kept();\n    void run(String mode);\n}\n"
+        }
+      ],
+      "expected": "fail"
+    },
+    {
+      "name": "override-method-inherits-doc-exempt",
+      "files": [
+        {
+          "path": "bundles/com.mad.edt.colleague.chat/src/com/mad/edt/colleague/chat/Foo.java",
+          "before": "package com.mad.edt.colleague.chat;\n\npublic class Foo extends Base {\n    int kept = 1;\n}\n",
+          "after": "package com.mad.edt.colleague.chat;\n\npublic class Foo extends Base {\n    int kept = 1;\n    @Override\n    public String toString() {\n        return \"foo\";\n    }\n}\n"
+        }
+      ],
+      "expected": "pass"
+    }
+  ]
+}
