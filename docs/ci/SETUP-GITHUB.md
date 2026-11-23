@@ -48,14 +48,21 @@ Expand-Archive actions-runner-win-x64-*.zip -DestinationPath .
    `JAVA_HOME` also works), `node`, and `docker` (the Sonar scanner image
    `sonarsource/sonar-scanner-cli:5`). No repository file hardcodes a machine path.
 
-## 3. Branch protection for `main`
+## 3. Branch protection for `main` (live since 2026-11-23)
 
-Branch protection on GitHub Free requires a **public** repository. Required:
-pull request before merging, the `hygiene`, `build-test` and `sonar-gate`
-checks green, no force pushes, no deletions, linear history. No approving
-review is required: the repository owner merges once CI is green.
+The repository is public (GitHub Free only offers branch protection for
+public repositories), and the lock is already applied. Verified: a direct
+`git push` to `main` is rejected even for the owner (`protected branch hook
+declined`). The rule:
 
-Via `gh` (after `gh auth login`):
+- pull request required, merge via PR once CI is green
+  (`required_approving_review_count=0`, the owner is the only collaborator);
+- required checks, strict (branch must be up to date before merge):
+  `hygiene`, `build-test`, `sonar-gate`;
+- `enforce_admins=true` - the owner is bound by the same rule;
+- force pushes and deletions of `main` are disabled.
+
+Re-apply after accidental removal with:
 
 ```powershell
 gh api -X PUT repos/madmar1o/colleague/branches/main/protection `
@@ -65,7 +72,6 @@ gh api -X PUT repos/madmar1o/colleague/branches/main/protection `
   -f required_status_checks.contexts[]=sonar-gate `
   -f enforce_admins=true `
   -f required_pull_request_reviews.required_approving_review_count=0 `
-  -f required_pull_request_reviews.dismiss_stale_reviews=true `
   -f restrictions= `
   -f allow_force_pushes=false `
   -f allow_deletions=false
@@ -73,18 +79,17 @@ gh api -X PUT repos/madmar1o/colleague/branches/main/protection `
 
 Or in the UI: Settings -> Branches -> Add branch protection rule -> pattern `main`.
 
-The repository is private: GitHub-hosted runner minutes come from a monthly
-quota, while self-hosted jobs are unlimited. That is a further reason every
-job runs on the single self-hosted runner. Also set Settings -> Actions ->
+All jobs run on the single self-hosted runner (public repos get only a small
+monthly quota of GitHub-hosted minutes, and the Tycho target platform plus the
+Docker SonarQube live on this machine anyway). Settings -> Actions ->
 **Fork pull request workflows from outside collaborators: Require approval for
-all outside collaborators**. All jobs are guarded by `if:` and skip fork pull
-requests entirely: untrusted code never runs on the self-hosted machine. A fork
-PR with changes to accept is cherry-picked by a maintainer onto a branch of
-this repo.
+all outside collaborators** must stay on. All jobs are guarded by `if:` and
+skip fork pull requests entirely: untrusted code never runs on the
+self-hosted machine. A fork PR with changes to accept is cherry-picked by a
+maintainer onto a branch of this repo.
 
-Note: GitHub Pages (used by the release workflow to serve the p2 update site)
-requires Pages to be enabled for the private repository, or the tag publish
-step must be switched to a release asset download instead.
+Note: the release workflow publishes the p2 update site through GitHub Pages;
+Pages is available for public repositories, so no extra setup is needed.
 
 ## 4. Local hooks (optional, defense in depth)
 
