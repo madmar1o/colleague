@@ -87,12 +87,17 @@ if (-not $CollectOnly) {
     throw "docker is required for the scanner step"
   }
   $scannerUrl = $SonarHost
-  if ($ScannerContainer) {
+  $u = [Uri]$SonarHost
+  if ($u.IsLoopback -or $u.Host -eq 'localhost') {
+    # a loopback URL is unreachable from the scanner container: resolve the
+    # SonarQube container's bridge IP instead (local development default)
+    if (-not $ScannerContainer) { throw "cannot reach $SonarHost from the scanner container: pass -ScannerContainer or use a non-loopback SONAR_HOST_URL" }
     $sip = (& docker inspect -f "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" $ScannerContainer).Trim()
     if (-not $sip) { throw "container $ScannerContainer not found for the scanner URL" }
-    $port = ([Uri]$SonarHost).Port
-    $scannerUrl = "http://${sip}:$port"
+    $scannerUrl = "http://${sip}:$($u.Port)"
   }
+  # a non-loopback SONAR_HOST_URL (the published https address) is reachable
+  # from the scanner container directly; no rewrite is applied
   $scanArgs = @(
     "run", "--rm",
     "-e", "SONAR_HOST_URL=$scannerUrl",
