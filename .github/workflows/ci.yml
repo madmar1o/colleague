@@ -29,6 +29,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # never wipe the workspace: the hygiene job runs before build-test
+          # in the same workspace, and git clean would delete the previous
+          # build output that later steps (jacoco, sonar) rely on
+          clean: false
 
       - name: Conventional commit subjects
         shell: powershell

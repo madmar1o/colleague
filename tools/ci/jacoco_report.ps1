@@ -17,12 +17,36 @@ $repo = Split-Path -Parent (Split-Path -Parent $here)
 if (-not $OutFile) { $OutFile = Join-Path $repo "out/ci/jacoco.xml" }
 $outDir = Split-Path -Parent $OutFile
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-if (-not $CliJar) { $CliJar = Join-Path $outDir "tools/jacococli.jar" }
+if (-not $CliJar) {
+  # cache outside the workspace: checkouts and `mvnw clean` must not force a
+  # re-download of the CLI on every run
+  $CliJar = Join-Path $env:USERPROFILE ".ci-cache\jacoco-cli-$Version.jar"
+}
 if (-not (Test-Path $CliJar)) {
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $CliJar) | Out-Null
-  $url = "https://repo1.maven.org/maven2/org/jacoco/org.jacoco.cli/$Version/org.jacoco.cli-$Version-nodeps.jar"
-  Write-Output "jacoco: downloading $url"
-  Invoke-WebRequest -Uri $url -OutFile $CliJar -UseBasicParsing
+  $tmp = "$CliJar.download"
+  $urls = @(
+    "https://repo1.maven.org/maven2/org/jacoco/org.jacoco.cli/$Version/org.jacoco.cli-$Version-nodeps.jar",
+    "https://maven-central.storage-download.googleapis.com/maven2/org/jacoco/org.jacoco.cli/$Version/org.jacoco.cli-$Version-nodeps.jar"
+  )
+  # Windows PowerShell 5.1 does not select TLS 1.2 by default
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  $ok = $false
+  foreach ($url in $urls) {
+    for ($try = 1; $try -le 3 -and -not $ok; $try++) {
+      try {
+        Write-Output "jacoco: downloading $url (try $try)"
+        Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
+        $ok = $true
+      } catch {
+        Write-Output "jacoco: download failed: $($_.Exception.Message)"
+        Start-Sleep -Seconds 5
+      }
+    }
+    if ($ok) { break }
+  }
+  if (-not $ok) { throw "jacoco: cannot download org.jacoco.cli $Version from any mirror" }
+  Move-Item -Force $tmp $CliJar
 }
 
 $execFiles = @(Get-ChildItem -Path (Join-Path $repo 'bundles') -Recurse -Filter 'jacoco.exec' -ErrorAction SilentlyContinue |
