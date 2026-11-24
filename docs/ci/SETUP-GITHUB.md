@@ -47,6 +47,24 @@ Expand-Archive actions-runner-win-x64-*.zip -DestinationPath .
    runner with `JAVA_HOME_17=<jdk17 home>` in the runner `.env` file, plain
    `JAVA_HOME` also works), `node`, and `docker` (the Sonar scanner image
    `sonarsource/sonar-scanner-cli:5`). No repository file hardcodes a machine path.
+5. The runtime acceptance jobs (`install-check`, `live-acceptance`) need a
+   dedicated EDT instance on the runner machine, outside any repository and
+   at the same folder depth from the user profile as the developer's own EDT
+   install (the copied `bundles.info` reaches the shared `.p2` pool through
+   relative paths). Point the jobs at it from the same runner `.env`:
+
+```ini
+EDT_CI_HOME=<CI EDT installation root, e.g. a CI_EDT folder under the user profile>
+EDT_CI_DEV_HOME=<developer EDT installation root, re-stamped together in one deploy>
+EDT_CI_PROFILE=<workspace folder for the CI instance>
+EDT_CI_PORT=8791
+EDT_CI_POOL=<shared p2 pool plugins folder, default %USERPROFILE%\.p2\pool\plugins>
+```
+
+   The acceptance scripts (`tools/acceptance/`) read only these variables;
+   `edt_deploy_feature.ps1` refuses to run while an instance of a target
+   installation is live, and its pool cleanup is reference-checked, so it
+   never removes a jar another installation still points to.
 
 ## 3. Branch protection for `main` (live since 2026-11-23)
 
@@ -58,7 +76,9 @@ declined`). The rule:
 - pull request required, merge via PR once CI is green
   (`required_approving_review_count=0`, the owner is the only collaborator);
 - required checks, strict (branch must be up to date before merge):
-  `hygiene`, `build-test`, `sonar-gate`;
+  `hygiene`, `build-test`, `sonar-gate`, `install-check` (add the last one
+  to the rule when the branch that introduces the job is merged, otherwise
+  no PR can ever become mergeable);
 - `enforce_admins=true` - the owner is bound by the same rule;
 - force pushes and deletions of `main` are disabled.
 
@@ -70,6 +90,7 @@ gh api -X PUT repos/madmar1o/colleague/branches/main/protection `
   -f required_status_checks.contexts[]=hygiene `
   -f required_status_checks.contexts[]=build-test `
   -f required_status_checks.contexts[]=sonar-gate `
+  -f required_status_checks.contexts[]=install-check `
   -f enforce_admins=true `
   -f required_pull_request_reviews.required_approving_review_count=0 `
   -f restrictions= `
