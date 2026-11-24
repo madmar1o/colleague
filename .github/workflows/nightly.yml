@@ -35,6 +35,46 @@ jobs:
         shell: powershell
         run: .\mvnw.cmd -B clean verify
 
+      # Nightly live acceptance: the merged build is deployed into the
+      # dedicated CI EDT instance and smoke-tested over the web bridge —
+      # the same cycle a developer does manually before a release.
+      - name: Live acceptance (deploy, launch, activate, smoke)
+        id: accept
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Run-Tool($file, [string[]]$toolArgs) {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $file @toolArgs | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "$file failed with exit $LASTEXITCODE" }
+          }
+          Run-Tool 'tools/acceptance/edt_deploy_feature.ps1' @()
+          Run-Tool 'tools/acceptance/edt_launch_ci.ps1' @()
+          try {
+            Run-Tool 'tools/acceptance/edt_wait_activated.ps1' @('-TimeoutSec', '300')
+            Run-Tool 'tools/acceptance/bridge_smoke.ps1' @('-OutDir', 'out')
+          } finally {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File tools/acceptance/edt_stop_ci.ps1 | Out-Host
+          }
+
+      - name: Keep acceptance evidence
+        if: always()
+        shell: powershell
+        run: |
+          if (Test-Path "$env:EDT_CI_PROFILE\.metadata\.log") {
+            New-Item -ItemType Directory -Force out | Out-Null
+            Get-Content "$env:EDT_CI_PROFILE\.metadata\.log" -Tail 200 | Set-Content out/ci_edt_metadata_log_tail.txt -Encoding utf8
+          }
+
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-acceptance-${{ github.run_number }}
+          if-no-files-found: warn
+          path: |
+            out/bridge_smoke_*.md
+            out/ci_edt_metadata_log_tail.txt
+
       - name: Scan main into the main project
         shell: powershell
         env:
@@ -83,11 +123,15 @@ jobs:
           exit 0
 
       - name: Open an issue when main is not green
-        if: steps.drift.outputs.drift == 'true' || steps.gate.outputs.result != '0'
+        if: steps.drift.outputs.drift == 'true' || steps.gate.outputs.result != '0' || failure()
         shell: powershell
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $body = (Get-Content 'out/sonar/drift.md' -Raw) + "`n`nGate exit code: ${{ steps.gate.outputs.result }}"
+          if (Test-Path 'out/sonar/drift.md') {
+            $body = (Get-Content 'out/sonar/drift.md' -Raw) + "`n`nGate exit code: ${{ steps.gate.outputs.result }}"
+          } else {
+            $body = "The nightly run failed before or during the acceptance/build stages (run ${{ github.run_id }}). See the uploaded acceptance evidence artifact."
+          }
           $body | Out-File -FilePath drift-body.md -Encoding utf8
-          gh issue create --title "Sonar drift on main ($(Get-Date -Format yyyy-MM-dd))" --body-file drift-body.md --repo $env:GITHUB_REPOSITORY
+          gh issue create --title "Nightly failure on main ($(Get-Date -Format yyyy-MM-dd))" --body-file drift-body.md --repo $env:GITHUB_REPOSITORY
