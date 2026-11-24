@@ -41,6 +41,11 @@ if ($mine) {
   throw ("CI EDT already running: PID " + (($mine | ForEach-Object { $_.ProcessId }) -join ', '))
 }
 
+# the activation wait must not match a marker left by a previous run: rotate
+# the workspace log before launching (the previous copy stays as .log-previous)
+$wsLog = Join-Path $Profile '.metadata\.log'
+if (Test-Path $wsLog) { Move-Item -Force $wsLog "$wsLog-previous" -ErrorAction SilentlyContinue }
+
 $java = Join-Path $env:JAVA_HOME 'bin\javaw.exe'
 if (-not (Test-Path $java)) { throw "JAVA_HOME has no bin\javaw.exe ($java)" }
 

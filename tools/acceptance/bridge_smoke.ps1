@@ -4,7 +4,8 @@
 # Только чтение: никаких send; setMode доходит до plan и обратно.
 param(
   [int]$Port = 8791,
-  [string]$OutDir = 'out'
+  [string]$OutDir = 'out',
+  [int]$WaitPortSec = 180
 )
 $ErrorActionPreference = "Stop"
 $UTF8 = New-Object System.Text.UTF8Encoding($false)
@@ -16,8 +17,16 @@ function Add-Result([string]$name, [bool]$ok, [string]$detail) {
   if (-not $ok) { $script:failed++ }
 }
 
+# 0) порт моста открывается позже активации бандла (вьюшка поднимается при
+#    реставрации перспективы) — ждём слушателя, иначе гонка даёт ложный провал
+$deadline = (Get-Date).AddSeconds($WaitPortSec)
+while ($true) {
+  $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($listener -or (Get-Date) -ge $deadline) { break }
+  Start-Sleep -Seconds 5
+}
+
 # 1) слушатель порта принадлежит нашему EDT (javaw), а не чужому процессу
-$listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 $okPort = $false
 $detail = "порт $Port не слушается"
 if ($listener) {
