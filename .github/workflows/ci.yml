@@ -127,6 +127,10 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci/test_path_guard.ps1
 
+      - name: Blank-answer note canon (page)
+        shell: powershell
+        run: node tools/ci/test_empty_answer_note.mjs bundles/com.mad.edt.colleague.ui/web/chat.html tools/ci/empty-answer-cases.json
+
       - name: Aggregate JaCoCo coverage
         shell: powershell
         continue-on-error: true

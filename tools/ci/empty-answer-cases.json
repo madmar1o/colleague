@@ -1,0 +1,10 @@
+{
+  "comment": "Canonical cases for emptyAnswerNote in chat.html: a finished answer whose text is blank must render a visible note instead of an empty bubble. Fields: text, hadThinking, note ('' means no note expected).",
+  "cases": [
+    { "text": "Привет! Чем могу помочь?", "hadThinking": false, "note": "" },
+    { "text": "  ", "hadThinking": false, "note": "модель вернула пустой ответ" },
+    { "text": "\n\t ", "hadThinking": true, "note": "модель ничего не ответила — только размышления (свернутый блок выше)" },
+    { "text": "", "hadThinking": true, "note": "модель ничего не ответила — только размышления (свернутый блок выше)" },
+    { "text": "", "hadThinking": false, "note": "модель вернула пустой ответ" }
+  ]
+}

@@ -109,6 +109,7 @@ main {
    width also keeps the streaming bubble from jumping wider at the end. */
 .row.in .bubble { border-bottom-left-radius: 4px; min-width: 96px; }
 .bubble.error { background: var(--error); }
+.bubble.emptyanswer { color: var(--muted); font-style: italic; }
 .meta {
   position: absolute; right: 10px; bottom: 3px; font-size: 10px;
   color: var(--muted); display: flex; gap: 4px; align-items: center;
@@ -653,16 +654,32 @@ function hideTyping() {
   if (t) { t.remove(); }
 }
 
+/* Pure canon of the blank-answer note, mirrored by tools/ci/empty-answer-cases.json:
+   a finished answer with no visible text must not render as an empty bubble
+   (that reads as invisible text); the page names what happened instead and,
+   when the model only thought, points at the collapsed reasoning block. */
+function emptyAnswerNote(text, hadThinking) {
+  if (String(text || "").trim() !== "") { return ""; }
+  return hadThinking
+    ? "модель ничего не ответила — только размышления (свернутый блок выше)"
+    : "модель вернула пустой ответ";
+}
 function addIncoming(kind, text, time) {
   var stick = nearBottom();
   hideTyping();
   var row = document.createElement("div"); row.className = "row in";
   var av = document.createElement("div"); av.className = "smallavatar"; av.textContent = "C";
   var b = document.createElement("div");
-  b.className = "bubble" + (kind === "error" ? " error" : " md");
-  b.innerHTML = (kind === "error" ? esc(text) : mdToHtml(text)) +
-    '<span class="meta">' + esc(time || now()) +
-    ' <span class="copylink" onclick="copyBubble(this)">копир.</span></span>';
+  var note = kind === "answer" ? emptyAnswerNote(text, turnHadThinking) : "";
+  if (note !== "") {
+    b.className = "bubble emptyanswer";
+    b.innerHTML = esc(note) + '<span class="meta">' + esc(time || now()) + '</span>';
+  } else {
+    b.className = "bubble" + (kind === "error" ? " error" : " md");
+    b.innerHTML = (kind === "error" ? esc(text) : mdToHtml(text)) +
+      '<span class="meta">' + esc(time || now()) +
+      ' <span class="copylink" onclick="copyBubble(this)">копир.</span></span>';
+  }
   row.appendChild(av); row.appendChild(b); msgs.appendChild(row); followScroll(stick);
   return b;
 }
@@ -706,6 +723,9 @@ var pageBusy = false;
    parts" of terminal chat UIs: the user sees the header and can expand it,
    while only the final answer renders as a normal bubble. */
 var thoughtEl = null, thoughtBody = null, thoughtCount = 0;
+/* Whether the current turn streamed any reasoning: the blank-answer note
+   uses it to tell "thought only" from "answered nothing at all". */
+var turnHadThinking = false;
 function thinkingDelta(text) {
   if (!thoughtBody) {
     hideWelcome();
@@ -725,6 +745,7 @@ function thinkingDelta(text) {
   var stick = nearBottom();
   thoughtBody.textContent += text;
   thoughtCount += text.length;
+  turnHadThinking = true;
   followScroll(stick);
 }
 function endThinking() {
@@ -1127,6 +1148,7 @@ window.colleaguePush = function (kind, payload) {
       endThinking();
       endTrace();
       keptStream = null;
+      turnHadThinking = false;
       msgs.textContent = "";
       if (!(data.items || []).length) { restoreWelcome(); }
       (data.items || []).forEach(function (m) {
@@ -1141,6 +1163,7 @@ window.colleaguePush = function (kind, payload) {
       if (keptStream) { keptStream.remove(); keptStream = null; }
       setTools(data.tools || []);
       var bubble = addIncoming("answer", data.text || "", data.time);
+      turnHadThinking = false;
       if (data.resumable && bubble) { addResumeOffer(bubble); scrollDown(); }
       /* Order census for the first few answers: the transcript order is the
          one thing the page can lie about while every event looked right in
@@ -1164,7 +1187,7 @@ window.colleaguePush = function (kind, payload) {
       sendEl.classList.toggle("stop", pageBusy);
       if (!pageBusy) { paintSendLabel(); }
       setStatus(data.text || "");
-      if (data.busy) { keptStream = null; endTrace(); showTyping(); } else { hideTyping(); endStream(true); endThinking(); }
+      if (data.busy) { keptStream = null; endTrace(); showTyping(); turnHadThinking = false; } else { hideTyping(); endStream(true); endThinking(); }
       break;
     case "input": qEl.value = data.text || ""; qEl.focus(); renderSlashHints(); break;
     case "catalog":
