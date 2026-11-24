@@ -143,6 +143,125 @@ jobs:
             bundles/*/target/site/jacoco/**
             out/ci/jacoco.xml
 
+  # Packaging proof for every PR: the built Tycho site must install through the
+  # plain p2 director into a throwaway profile — the same transport an end user
+  # gets from the update site. Needs no secrets, so it is safe by construction
+  # even if a fork PR were ever allowed to run here.
+  install-check:
+    needs: build-test
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, windows, x64, colleague]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false   # the built site from build-test stays in the workspace
+
+      - name: Deploy into a scratch copy of the CI instance
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scratch = Join-Path $env:USERPROFILE 'CI_EDT\install-check'
+          if (Test-Path $scratch) { Remove-Item -Recurse -Force $scratch }
+          $log = powershell -NoProfile -ExecutionPolicy Bypass -File tools/acceptance/edt_deploy_feature.ps1 `
+            -EdtHomes $env:EDT_CI_HOME -ScratchCopy $scratch 2>&1 | Out-String
+          $log | Out-Host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($log -notmatch 'DEPLOY QUALIFIER=v(\d{12})') { throw 'deploy reported no qualifier stamp' }
+          $stamp = 'v' + $Matches[1]
+          # the patched bundles.info of the scratch copy and the pool jars are
+          # the proof the built site installs: every referenced jar must exist
+          $pool = $env:EDT_CI_POOL
+          if (-not $pool) { $pool = Join-Path $env:USERPROFILE '.p2\pool\plugins' }
+          $missing = 0
+          $info = Join-Path $scratch 'configuration\org.eclipse.equinox.simpleconfigurator\bundles.info'
+          $hits = @(Select-String -Path $info -Pattern 'com\.mad\.edt\.colleague' | ForEach-Object { $_.Line })
+          if ($hits.Count -ne 3) { Write-Host "bundles.info carries $($hits.Count) colleague lines, expected 3"; $missing = 1 }
+          foreach ($line in $hits) {
+            if ($line -notmatch ('1\.0\.0\.' + $stamp)) { Write-Host "line not stamped: $line"; $missing = 1 }
+          }
+          foreach ($m in @('com.mad.edt.colleague', 'com.mad.edt.colleague.context', 'com.mad.edt.colleague.ui')) {
+            $jar = @(Get-ChildItem $pool -Filter ($m + '_1.0.0.' + $stamp + '.jar'))
+            if ($jar.Count -ne 1) { Write-Host "pool jar for $m ($stamp) is missing"; $missing = 1 }
+          }
+          exit $missing
+
+  # Live acceptance of the merged build: deploy into the dedicated CI EDT
+  # instance (EDT_CI_HOME/EDT_CI_PROFILE from the runner .env — never the
+  # developer's own EDT), launch it with the web bridge, wait for the plugin
+  # activation marker, run bridge_smoke (8 checks), stop the instance.
+  # Runs only on trusted triggers (push to main, manual dispatch) and is
+  # serialized: the CI instance is single-tenant.
+  live-acceptance:
+    needs: [build-test, sonar-gate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, windows, x64, colleague]
+    timeout-minutes: 45
+    concurrency: live-acceptance
+    outputs:
+      smoke: ${{ steps.smoke.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Deploy the built feature into the CI EDT
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/acceptance/edt_deploy_feature.ps1   # homes and pool from EDT_CI_HOME / EDT_CI_DEV_HOME / EDT_CI_POOL
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Launch the CI EDT with the web bridge
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:JAVA_HOME_17 -and (Test-Path "$env:JAVA_HOME_17\bin\javaw.exe")) {
+            $env:JAVA_HOME = $env:JAVA_HOME_17
+          }
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/acceptance/edt_launch_ci.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Wait for plugin activation
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/acceptance/edt_wait_activated.ps1 -TimeoutSec 300
+          exit $LASTEXITCODE
+
+      - name: Bridge smoke
+        id: smoke
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/acceptance/bridge_smoke.ps1 -OutDir out
+          $code = $LASTEXITCODE
+          "outcome=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          exit $code
+
+      - name: Stop the CI EDT and keep evidence
+        if: always()
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/acceptance/edt_stop_ci.ps1
+          if (Test-Path "$env:EDT_CI_PROFILE\.metadata\.log") {
+            New-Item -ItemType Directory -Force out | Out-Null
+            Get-Content "$env:EDT_CI_PROFILE\.metadata\.log" -Tail 200 | Set-Content out/ci_edt_metadata_log_tail.txt -Encoding utf8
+          }
+
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-acceptance-${{ github.run_number }}
+          if-no-files-found: warn
+          path: |
+            out/bridge_smoke_*.md
+            out/ci_edt_metadata_log_tail.txt
+
+      - name: Fail the job when the smoke did not pass
+        if: steps.smoke.outcome != '0'
+        shell: bash
+        run: exit 1
+
   # SonarQube gate. Runs after the build so the analysis uses fresh classes.
   # Community Edition has no branch analysis, so the branch is analysed into a
   # dedicated project key that stays on the server as the CI history; the gate
