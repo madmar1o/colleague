@@ -24,7 +24,7 @@ $deadline = (Get-Date).AddSeconds($TimeoutSec)
 while ((Get-Date) -lt $deadline) {
   if (Test-Path $log) {
     $tail = Get-Content $log -Tail 400 -ErrorAction SilentlyContinue | Out-String
-    if ($tail -match 'Colleague') {
+    if ($tail -match 'Colleague [0-9\.v]+ activated') {
       Write-Host 'activation marker seen in .metadata\.log'
       exit 0
     }
