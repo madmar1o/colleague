@@ -31,6 +31,20 @@ public final class ProviderConfig {
      */
     public static final int MAX_LOCAL_CONTEXT_TOKENS = 16_384;
 
+    /**
+     * Smallest window a user may type in the settings form: below this a
+     * normal question with attached workspace context no longer fits, so the
+     * value is far more likely a typo than an intention.
+     */
+    public static final int MIN_USER_CONTEXT_TOKENS = 1_024;
+
+    /**
+     * Largest window a user may type in the settings form: asking a model to
+     * hold more than this is paid with memory the endpoint may not have, so
+     * the form refuses the likely typo instead of degrading every call.
+     */
+    public static final int MAX_USER_CONTEXT_TOKENS = 131_072;
+
     private final String id;
     private final LLMProviderType type;
     private final String baseUrl;
@@ -182,6 +196,58 @@ public final class ProviderConfig {
     }
 
     /**
+     * The window a provider type starts with when the user never typed one:
+     * a local runtime gets the ready-window default because it silently
+     * trims to its own tiny one otherwise, a gateway takes the whole message
+     * list as sent and needs no window until the user names its real one.
+     *
+     * @param theType endpoint protocol
+     * @return window in tokens, {@code 0} when the option is never sent
+     */
+    public static int defaultContextWindowTokens(final LLMProviderType theType) {
+        return theType == LLMProviderType.OLLAMA ? DEFAULT_LOCAL_CONTEXT_TOKENS : 0;
+    }
+
+    /**
+     * Turns the free-text window field of the settings form into a token
+     * count: the only place the user's number is understood, so the form and
+     * the store cannot drift into disagreeing ranges. An empty or blank
+     * field, and an explicit zero, mean "keep the default of the type".
+     *
+     * @param theText raw field text, {@code null} when the field is absent
+     * @return tokens to configure, {@code 0} for "type default"
+     * @throws IllegalArgumentException when the text is not a whole number
+     *         inside {@link #MIN_USER_CONTEXT_TOKENS}..
+     *         {@link #MAX_USER_CONTEXT_TOKENS}
+     */
+    public static int parseUserContextWindowTokens(final String theText) {
+        if(theText == null || theText.isBlank()) {
+            return 0;
+        }
+        final int tokens;
+        try {
+            tokens = Integer.parseInt(theText.trim());
+        } catch(final NumberFormatException ex) {
+            throw new IllegalArgumentException(userWindowRangeText(), ex);
+        }
+        if(tokens == 0) {
+            return 0;
+        }
+        if(tokens < MIN_USER_CONTEXT_TOKENS || tokens > MAX_USER_CONTEXT_TOKENS) {
+            throw new IllegalArgumentException(userWindowRangeText());
+        }
+        return tokens;
+    }
+
+    /**
+     * @return the range text shown when the typed window is refused
+     */
+    private static String userWindowRangeText() {
+        return "context window must be a whole number from " + MIN_USER_CONTEXT_TOKENS
+            + " to " + MAX_USER_CONTEXT_TOKENS + " tokens (0 keeps the type default)";
+    }
+
+    /**
      * @param theId provider identifier
      * @return a new builder
      */
@@ -216,8 +282,7 @@ public final class ProviderConfig {
                 ? DEFAULT_LOCAL_KEEP_ALIVE : null;
             // only a local runtime silently trims the prompt to its own tiny
             // default window; gateways take the whole message list as sent
-            contextWindowTokens = theType == LLMProviderType.OLLAMA
-                ? DEFAULT_LOCAL_CONTEXT_TOKENS : 0;
+            contextWindowTokens = defaultContextWindowTokens(theType);
         }
 
         /**

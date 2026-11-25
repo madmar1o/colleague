@@ -39,11 +39,20 @@ class ConversationCompactByTokensTest {
     /** records the request that actually leaves for the endpoint */
     private static final class RecordingProvider implements ILLMProvider {
 
-        private final ProviderConfig myConfig = ProviderConfig.builder("test", LLMProviderType.OLLAMA)
-            .baseUrl("http://runtime.test")
-            .defaultModel(MODEL)
-            .build();
+        private final ProviderConfig myConfig;
         private final List<ChatRequest> myRequests = new ArrayList<>();
+
+        RecordingProvider(final int theWindowTokens) {
+            myConfig = ProviderConfig.builder("test", LLMProviderType.OLLAMA)
+                .baseUrl("http://runtime.test")
+                .defaultModel(MODEL)
+                .contextWindowTokens(theWindowTokens)
+                .build();
+        }
+
+        RecordingProvider() {
+            this(ProviderConfig.DEFAULT_LOCAL_CONTEXT_TOKENS);
+        }
 
         List<ChatRequest> requests() {
             return myRequests;
@@ -157,6 +166,25 @@ class ConversationCompactByTokensTest {
         assertFalse(hasDigest(sent));
         assertTrue(containsVerbatim(sent, "question 0"));
         assertTrue(containsVerbatim(sent, "answer 4"));
+    }
+
+    @Test
+    void widerConfiguredWindowRaisesTheThresholdAndKeepsHistoryVerbatim() throws LLMException {
+        final RecordingProvider provider = new RecordingProvider(32_768);
+        final Conversation conversation = new Conversation(provider, "role instructions");
+        for(int index = 0; index < 19; index++) {
+            conversation.noteExchange(longText("question " + index), longText("answer " + index));
+        }
+
+        conversation.ask(MODEL, null, "final question");
+
+        final List<ChatMessage> sent = provider.requests().get(0).getMessages();
+        assertFalse(hasDigest(sent),
+            "the history a default window folds must survive a window the user widened");
+        assertTrue(containsVerbatim(sent, longText("question 0")),
+            "the oldest question stays verbatim under the wider threshold");
+        assertTrue(containsVerbatim(sent, longText("answer 18")),
+            "the newest answer stays verbatim as always");
     }
 
     /**

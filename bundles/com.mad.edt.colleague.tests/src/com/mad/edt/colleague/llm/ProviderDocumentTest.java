@@ -84,4 +84,64 @@ class ProviderDocumentTest {
         Assertions.assertTrue(ProviderDocument.fromJson(null).isEmpty());
         Assertions.assertTrue(ProviderDocument.fromJson(new JsonArray()).isEmpty());
     }
+
+    @Test
+    @DisplayName("the context window the user chose survives the round trip")
+    void contextWindowRoundTrips() {
+        final JsonArray document = ProviderDocument.toJson(List.of(
+            ProviderConfig.builder("gw", LLMProviderType.OPENAI_COMPATIBLE)
+                .baseUrl("https://gw.test")
+                .contextWindowTokens(32_768)
+                .build(),
+            ProviderConfig.builder("loc", LLMProviderType.OLLAMA)
+                .baseUrl("http://runtime.test")
+                .contextWindowTokens(4_096)
+                .build()));
+
+        final Map<String, ProviderConfig> parsed = ProviderDocument.fromJson(document);
+
+        Assertions.assertEquals(32_768, parsed.get("gw").getContextWindowTokens(),
+            "a gateway window the user raised must not be lost on save");
+        Assertions.assertEquals(4_096, parsed.get("loc").getContextWindowTokens(),
+            "a local window the user shrank must not be lost on save");
+    }
+
+    @Test
+    @DisplayName("an entry without the window field keeps the defaults of its type")
+    void absentWindowFieldKeepsTypeDefaults() {
+        final JsonArray document = new JsonArray();
+        final com.google.gson.JsonObject gateway = new com.google.gson.JsonObject();
+        gateway.addProperty("id", "gw");
+        gateway.addProperty("type", LLMProviderType.OPENAI_COMPATIBLE.name());
+        gateway.addProperty("baseUrl", "https://gw.test");
+        document.add(gateway);
+        final com.google.gson.JsonObject local = new com.google.gson.JsonObject();
+        local.addProperty("id", LLMSettings.LOCAL_PROVIDER_ID);
+        local.addProperty("type", LLMProviderType.OLLAMA.name());
+        local.addProperty("baseUrl", "http://runtime.test");
+        document.add(local);
+
+        final Map<String, ProviderConfig> parsed = ProviderDocument.fromJson(document);
+
+        Assertions.assertEquals(0, parsed.get("gw").getContextWindowTokens(),
+            "a stored gateway entry from before the field existed stays opt-out");
+        Assertions.assertEquals(ProviderConfig.DEFAULT_LOCAL_CONTEXT_TOKENS,
+            parsed.get(LLMSettings.LOCAL_PROVIDER_ID).getContextWindowTokens(),
+            "a stored local entry from before the field existed keeps the local default");
+    }
+
+    @Test
+    @DisplayName("a window left at the type default is not written out")
+    void typeDefaultsAreNotSpilledIntoTheDocument() {
+        final JsonArray document = ProviderDocument.toJson(List.of(
+            ProviderConfig.builder("gw", LLMProviderType.OPENAI_COMPATIBLE)
+                .baseUrl("https://gw.test")
+                .build(),
+            builtIn()));
+
+        Assertions.assertFalse(document.get(0).getAsJsonObject().has("contextWindowTokens"),
+            "a gateway at its implicit opt-out stores no window");
+        Assertions.assertFalse(document.get(1).getAsJsonObject().has("contextWindowTokens"),
+            "a local provider at its default stores no window");
+    }
 }
