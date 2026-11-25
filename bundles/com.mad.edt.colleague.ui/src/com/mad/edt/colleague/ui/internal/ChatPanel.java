@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -55,6 +56,7 @@ import com.mad.edt.colleague.agent.subagent.SubagentTool;
 import com.mad.edt.colleague.agents.AgentProfile;
 import com.mad.edt.colleague.agents.ToolPolicy;
 import com.mad.edt.colleague.chat.ContextBudget;
+import com.mad.edt.colleague.chat.ContextSnapshot;
 import com.mad.edt.colleague.chat.ConversationStore;
 import com.mad.edt.colleague.chat.EscapeSequence;
 import com.mad.edt.colleague.chat.PageCatalogEvents;
@@ -1679,7 +1681,13 @@ public final class ChatPanel {
         // window runs out: only the stop reason says so, and without
         // this note the user reads a shortened answer as a full one
         String stats = baseStats;
-        if(ourSession.wasLastTurnTruncated()) {
+        final String context = contextSummary(ourSession.lastContextSnapshot());
+        if(!context.isEmpty()) {
+            // the snapshot carries the runtime-truncation mark among its
+            // numbers, so the plain note below is only the fallback for
+            // turns that produced no measurement
+            stats = baseStats.isEmpty() ? context : baseStats + ", " + context;
+        } else if(ourSession.wasLastTurnTruncated()) {
             stats = baseStats.isEmpty()
                 ? "Контекст обрезан рантаймом, ответ неполный"
                 : baseStats + " — контекст обрезан рантаймом, ответ неполный";
@@ -1714,6 +1722,55 @@ public final class ChatPanel {
             }
         }
         return stats;
+    }
+
+    /**
+     * Formats one context snapshot for the status line: how full the prompt
+     * was against the compaction threshold, which window the provider
+     * declares, how much history is replayed, and whether a digest, a
+     * compaction or a runtime truncation is involved. Pure and static on
+     * purpose: the wording is pinned by tests without an SWT display, and
+     * the page renders the status line as-is.
+     *
+     * @param theSnapshot measurement of the finished turn, may be {@code null}
+     *        for turns that never measured (the agent loop)
+     * @return the summary text, empty when there is nothing to report
+     */
+    static String contextSummary(final ContextSnapshot theSnapshot) {
+        if(theSnapshot == null) {
+            return "";
+        }
+        final StringBuilder text = new StringBuilder("ctx ~")
+            .append(approxTokens(theSnapshot.estimatedPromptTokens()))
+            .append('/')
+            .append(approxTokens(theSnapshot.tokenLimit()))
+            .append(" tok, окно ")
+            .append(theSnapshot.providerWindowTokens())
+            .append(", история ")
+            .append(theSnapshot.historyMessages())
+            .append(", дайджест ")
+            .append(theSnapshot.hasDigest() ? "да" : "нет");
+        if(theSnapshot.compactedThisTurn()) {
+            text.append(", компакция да");
+        }
+        if(theSnapshot.runtimeTruncated()) {
+            text.append(", обрезан рантаймом");
+        }
+        return text.toString();
+    }
+
+    /**
+     * @param theTokens token count to render
+     * @return the count as-is below one thousand, otherwise rounded to one
+     *         decimal in thousands with a {@code k} suffix, trailing {@code .0}
+     *         dropped
+     */
+    private static String approxTokens(final int theTokens) {
+        if(theTokens < 1_000) {
+            return Integer.toString(theTokens);
+        }
+        final String kilo = String.format(Locale.ROOT, "%.1f", theTokens / 1_000.0);
+        return (kilo.endsWith(".0") ? kilo.substring(0, kilo.length() - 2) : kilo) + "k";
     }
 
     /**

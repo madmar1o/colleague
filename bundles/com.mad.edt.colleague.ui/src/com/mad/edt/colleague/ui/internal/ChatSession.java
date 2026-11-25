@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import com.mad.edt.colleague.chat.Conversation;
+import com.mad.edt.colleague.chat.ContextSnapshot;
 import com.mad.edt.colleague.llm.CancellationFlag;
 import com.mad.edt.colleague.llm.ChatMessage;
 import com.mad.edt.colleague.llm.ILLMProvider;
@@ -103,6 +104,15 @@ public final class ChatSession {
      */
     public boolean wasLastTurnTruncated() {
         return conversation.wasLastTurnTruncated();
+    }
+
+    /**
+     * @return the context measurement of the last finished turn, {@code null}
+     *         while no turn has completed; the panel shows it in the status
+     *         line so the user can see how full the prompt was
+     */
+    public ContextSnapshot lastContextSnapshot() {
+        return conversation.lastContextSnapshot();
     }
 
     /**

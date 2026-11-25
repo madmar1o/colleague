@@ -76,6 +76,8 @@ public final class Conversation {
      */
     private boolean lastTurnTruncated;
 
+    private ContextSnapshot lastContextSnapshot;
+
     /**
      * @param theProvider endpoint to talk to
      * @param theSystemPrompt assistant role instructions, may be {@code null}
@@ -162,7 +164,7 @@ public final class Conversation {
                 + provider.getConfig().getId()
                 + "': pick one in the settings and save the provider");
         }
-        compactForPrompt(theContext, theQuestion);
+        final boolean compacted = compactForPrompt(theContext, theQuestion);
         final ChatRequest.Builder request = ChatRequest.builder(model);
         if(systemPrompt != null && !systemPrompt.isEmpty()) {
             request.addMessage(ChatMessage.system(systemPrompt));
@@ -205,6 +207,8 @@ public final class Conversation {
 
         rememberExchange(contextMessage, theQuestion, result.getContent());
         lastTurnTruncated = result.truncated();
+        lastContextSnapshot = measurePrompt(theContext, theQuestion, compacted,
+            result.truncated());
 
         return result.getContent()
             + String.format("%n--- %d/%d tokens, %d ms", Integer.valueOf(result.getPromptTokens()),
@@ -219,6 +223,16 @@ public final class Conversation {
      */
     public boolean wasLastTurnTruncated() {
         return lastTurnTruncated;
+    }
+
+    /**
+     * @return the context measurement of the last finished turn - prompt
+     *         estimate, threshold, window, history size, digest and
+     *         compaction/truncation marks - {@code null} while no turn has
+     *         completed in this conversation
+     */
+    public ContextSnapshot lastContextSnapshot() {
+        return lastContextSnapshot;
     }
 
     /**
@@ -343,9 +357,12 @@ public final class Conversation {
      * @param theContext project/resource description attached to this turn,
      *        may be {@code null}
      * @param theQuestion question text, may be {@code null}
+     * @return {@code true} when this call folded at least one oldest
+     *         exchange into the digest before sending
      */
-    private void compactForPrompt(final String theContext, final String theQuestion) {
+    private boolean compactForPrompt(final String theContext, final String theQuestion) {
         final int limit = promptTokenLimit();
+        boolean folded = false;
         while(estimatedPromptTokens(theContext, theQuestion) > limit) {
             final int from = !history.isEmpty() && isDigest(history.get(0)) ? 1 : 0;
             final int foldUntil = Math.min(history.size() - 2, from + 2);
@@ -353,10 +370,12 @@ public final class Conversation {
                 // only the last exchange is left: the question or the
                 // attached context alone exceeds the threshold, folding
                 // cannot make this request any smaller
-                return;
+                return folded;
             }
             foldOldest(foldUntil);
+            folded = true;
         }
+        return folded;
     }
 
     /**
@@ -366,10 +385,18 @@ public final class Conversation {
      *         a window
      */
     private int promptTokenLimit() {
+        return effectiveWindowTokens() * COMPACT_AT_PERCENT / 100;
+    }
+
+    /**
+     * @return the context window the prompt is budgeted against: the one the
+     *         provider declares, or the conservative local default when it
+     *         declares none
+     */
+    private int effectiveWindowTokens() {
         final int window = provider != null && provider.getConfig() != null
             ? provider.getConfig().getContextWindowTokens() : 0;
-        final int effectiveWindow = window > 0 ? window : ProviderConfig.DEFAULT_LOCAL_CONTEXT_TOKENS;
-        return effectiveWindow * COMPACT_AT_PERCENT / 100;
+        return window > 0 ? window : ProviderConfig.DEFAULT_LOCAL_CONTEXT_TOKENS;
     }
 
     /**
@@ -390,6 +417,24 @@ public final class Conversation {
             characters += message.getContent().length();
         }
         return PromptTokens.estimateForCharacters(characters);
+    }
+
+    /**
+     * Measures what the finished turn actually sent after all the shaping,
+     * compaction included, so the panel can show the user the numbers behind
+     * a possible "the chat forgot".
+     *
+     * @param theContext turn's workspace context, may be {@code null}
+     * @param theQuestion question text
+     * @param theCompacted whether this turn folded older exchanges
+     * @param theRuntimeTruncated whether the runtime cut the prompt on its own
+     * @return the snapshot describing this turn
+     */
+    private ContextSnapshot measurePrompt(final String theContext, final String theQuestion,
+        final boolean theCompacted, final boolean theRuntimeTruncated) {
+        return new ContextSnapshot(estimatedPromptTokens(theContext, theQuestion),
+            promptTokenLimit(), effectiveWindowTokens(), history.size(),
+            !history.isEmpty() && isDigest(history.get(0)), theCompacted, theRuntimeTruncated);
     }
 
     /**
