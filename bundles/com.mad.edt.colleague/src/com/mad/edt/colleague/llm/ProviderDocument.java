@@ -72,6 +72,12 @@ public final class ProviderDocument {
         if(theConfig.getDefaultModel() != null) {
             json.addProperty("defaultModel", theConfig.getDefaultModel());
         }
+        // a window equal to the type default is implied by the type itself;
+        // writing it out would freeze old defaults against future ones
+        final int storedWindow = theConfig.getContextWindowTokens();
+        if(storedWindow != ProviderConfig.defaultContextWindowTokens(theConfig.getType())) {
+            json.addProperty("contextWindowTokens", Integer.valueOf(storedWindow));
+        }
         return json;
     }
 
@@ -83,11 +89,16 @@ public final class ProviderDocument {
             return null;
         }
         try {
-            return ProviderConfig.builder(id, LLMProviderType.valueOf(type))
+            final ProviderConfig.Builder builder = ProviderConfig
+                .builder(id, LLMProviderType.valueOf(type))
                 .baseUrl(baseUrl)
                 .apiKey(optString(theJson, "apiKey"))
-                .defaultModel(optString(theJson, "defaultModel"))
-                .build();
+                .defaultModel(optString(theJson, "defaultModel"));
+            final JsonElement window = theJson.get("contextWindowTokens");
+            if(window != null && window.isJsonPrimitive() && window.getAsJsonPrimitive().isNumber()) {
+                builder.contextWindowTokens(window.getAsInt());
+            }
+            return builder.build();
         } catch (final IllegalArgumentException ex) {
             return null;
         }

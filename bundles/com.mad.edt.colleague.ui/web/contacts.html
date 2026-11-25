@@ -114,6 +114,8 @@ input[type=text]:focus, input[type=password]:focus, select:focus { border-color:
         <input type="text" id="f_url" placeholder="http://хост:порт"></div>
       <div class="fieldrow"><label>ключ API (если нужен)</label>
         <input type="password" id="f_key" placeholder="пусто — без ключа"></div>
+      <div class="fieldrow"><label>окно контекста, токены</label>
+        <input type="text" id="f_window" placeholder="пусто — по умолчанию типа"></div>
       <div class="btnrow">
         <button id="btnTest">Проверить</button>
         <button class="primary" id="btnSave">Сохранить</button>
@@ -355,6 +357,7 @@ function fillForm(p) {
   document.getElementById("f_url").value = p.baseUrl || "";
   document.getElementById("f_key").value = "";
   document.getElementById("f_key").placeholder = p.hasKey ? "ключ задан — пусто, чтобы оставить" : "пусто — без ключа";
+  document.getElementById("f_window").value = p.contextWindowTokens > 0 ? p.contextWindowTokens : "";
   document.getElementById("f_default").checked = !!p["default"];
   modelSel.textContent = "";
   addModelOption(p.defaultModel || "", p.defaultModel || "");
@@ -369,6 +372,7 @@ function clearForm() {
   document.getElementById("f_url").value = "";
   document.getElementById("f_key").value = "";
   document.getElementById("f_key").placeholder = "пусто — без ключа";
+  document.getElementById("f_window").value = "";
   document.getElementById("f_default").checked = false;
   modelSel.textContent = "";
   addModelOption("", "— не выбрана —");
@@ -415,6 +419,7 @@ document.getElementById("btnSave").onclick = function () {
     type: document.getElementById("f_type").value,
     url: document.getElementById("f_url").value.trim(),
     key: document.getElementById("f_key").value,
+    window: document.getElementById("f_window").value.trim(),
     model: modelSel.value,
     isDefault: document.getElementById("f_default").checked
   });

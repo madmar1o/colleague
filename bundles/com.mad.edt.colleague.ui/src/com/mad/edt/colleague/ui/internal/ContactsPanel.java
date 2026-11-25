@@ -426,12 +426,24 @@ public final class ContactsPanel {
             key = previous.getApiKey();
         }
         final String model = BridgeBrowser.optString(theArguments, "model");
-        LLMSettings.register(ProviderConfig
+        final int window;
+        try {
+            window = windowFromArgs(theArguments);
+        } catch (final IllegalArgumentException ex) {
+            pushSaved(false, "окно контекста — целое число токенов от "
+                + ProviderConfig.MIN_USER_CONTEXT_TOKENS + " до "
+                + ProviderConfig.MAX_USER_CONTEXT_TOKENS + " (пусто — по умолчанию)");
+            return;
+        }
+        final ProviderConfig.Builder builder = ProviderConfig
             .builder(id, toType(BridgeBrowser.optString(theArguments, "type")))
             .baseUrl(url)
             .apiKey(key)
-            .defaultModel(model.isEmpty() ? null : model)
-            .build());
+            .defaultModel(model.isEmpty() ? null : model);
+        if(window > 0) {
+            builder.contextWindowTokens(window);
+        }
+        LLMSettings.register(builder.build());
         if(theArguments.has("isDefault") && theArguments.get("isDefault").getAsBoolean()) {
             LLMSettings.setDefaultProviderId(id);
         }
@@ -439,6 +451,21 @@ public final class ContactsPanel {
         ourOnProvidersChanged.run();
         pushSaved(true, "");
         reload();
+    }
+
+    /**
+     * Reads the context-window field of the provider form. The page keeps
+     * the field as free text so an invalid number can be shown back to the
+     * user instead of silently vanishing into a zero.
+     *
+     * @param theArguments form fields; {@code window} may be absent or blank
+     * @return tokens to configure, {@code 0} for "keep the type default"
+     * @throws IllegalArgumentException when the text is not a whole number
+     *             inside the range the core accepts
+     */
+    static int windowFromArgs(final JsonObject theArguments) {
+        return ProviderConfig.parseUserContextWindowTokens(
+            BridgeBrowser.optString(theArguments, "window"));
     }
 
     /**
@@ -625,6 +652,7 @@ public final class ContactsPanel {
                 && !config.getApiKey().isEmpty()));
             item.addProperty("defaultModel", config.getDefaultModel() == null
                 ? "" : config.getDefaultModel());
+            item.addProperty("contextWindowTokens", Integer.valueOf(config.getContextWindowTokens()));
             item.addProperty("default", Boolean.valueOf(
                 id.equals(LLMSettings.getDefaultProviderId())));
             providers.add(item);
